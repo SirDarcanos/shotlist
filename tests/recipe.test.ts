@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  expandSteps,
-  interpolate,
-  nearestVerb,
-  parseRecipe,
-  withNumbering,
-} from '../src/recipe.js'
+import { expandSteps, interpolate, nearestVerb, parseRecipe, withNumbering } from '../src/recipe.js'
 import type { Macro, StepInput } from '../src/recipe.js'
 
 /** The macro set the expansion tests share. */
@@ -129,10 +123,7 @@ describe('expandSteps', () => {
   })
 
   it('expands the steps nested in a loop, keeping the loop itself', () => {
-    const expanded = expandSteps(
-      [{ repeat: 2, steps: [{ use: 'openModal' }] }],
-      macros(),
-    )
+    const expanded = expandSteps([{ repeat: 2, steps: [{ use: 'openModal' }] }], macros())
     expect(expanded).toHaveLength(1)
     expect(expanded[0]?.nested).toHaveLength(1)
     expect(expanded[0]?.nested?.[0]?.vars).toEqual({ row: 'Acme Corp' })

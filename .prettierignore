@@ -1,0 +1,9 @@
+node_modules
+dist
+package-lock.json
+
+# The geometry in data-rect is aligned with the CSS by hand; reflowing it hides drift.
+tests/fixture
+
+# Lockstep license text
+LICENSE

@@ -69,23 +69,23 @@ The image is written to `screenshots/out/order-row.png`, and `--install` copies 
 
 ## Configuration
 
-| Key                 | Default              | What it sets                                       |
-| ------------------- | -------------------- | -------------------------------------------------- |
-| `site.url`          | required             | Where the site is running                          |
-| `site.viewport`     | `1280 × 800`         | Browser size                                       |
-| `site.scale`        | `2`                  | Device pixel ratio; `2` gives Retina images        |
-| `site.theme`        | `light`              | `light`, `dark` or `no-preference`                 |
-| `site.reducedMotion`| `true`               | Disables animation before capture                  |
-| `site.ready`        | —                    | Selector waited for after each navigation          |
-| `site.settle`       | `0`                  | Extra milliseconds to wait after `ready`           |
-| `site.timeout`      | `15000`              | Per-step timeout in milliseconds                   |
-| `paths.recipes`     | `screenshots/recipes`| Where recipes live                                 |
-| `paths.macros`      | `screenshots/macros` | Where macros live                                  |
-| `paths.data`        | `screenshots/data`   | Where data files live                              |
-| `paths.out`         | `screenshots/out`    | Where images are written                           |
-| `install`           | `{}`                 | Named destinations you refer to by name in a recipe |
-| `finders`           | `{}`                 | Named query aliases (see [Finders](#finders))      |
-| `check.threshold`   | `0.002`              | Pixel difference `--check` tolerates               |
+| Key                  | Default               | What it sets                                        |
+| -------------------- | --------------------- | --------------------------------------------------- |
+| `site.url`           | required              | Where the site is running                           |
+| `site.viewport`      | `1280 × 800`          | Browser size                                        |
+| `site.scale`         | `2`                   | Device pixel ratio; `2` gives Retina images         |
+| `site.theme`         | `light`               | `light`, `dark` or `no-preference`                  |
+| `site.reducedMotion` | `true`                | Disables animation before capture                   |
+| `site.ready`         | —                     | Selector waited for after each navigation           |
+| `site.settle`        | `0`                   | Extra milliseconds to wait after `ready`            |
+| `site.timeout`       | `15000`               | Per-step timeout in milliseconds                    |
+| `paths.recipes`      | `screenshots/recipes` | Where recipes live                                  |
+| `paths.macros`       | `screenshots/macros`  | Where macros live                                   |
+| `paths.data`         | `screenshots/data`    | Where data files live                               |
+| `paths.out`          | `screenshots/out`     | Where images are written                            |
+| `install`            | `{}`                  | Named destinations you refer to by name in a recipe |
+| `finders`            | `{}`                  | Named query aliases (see [Finders](#finders))       |
+| `check.threshold`    | `0.002`               | Pixel difference `--check` tolerates                |
 
 ### Style
 
@@ -114,48 +114,48 @@ A recipe may override any of these under its own `style:` key.
 
 ## Recipes
 
-| Field       | Default    | What it does                                                |
-| ----------- | ---------- | ----------------------------------------------------------- |
-| `name`      | filename   | Output filename, without the extension                      |
-| `source`    | `app`      | `app` drives the site; `file` annotates an existing PNG      |
-| `file`      | —          | The PNG to annotate, with `source: file`                     |
-| `install`   | —          | Which named destination to copy to                           |
-| `url`       | `site.url` | Page to open for this recipe                                 |
-| `viewport`  | site's     | Viewport for this recipe                                     |
-| `scale`     | site's     | Device pixel ratio for this recipe                           |
-| `theme`     | site's     | Colour scheme for this recipe                                |
-| `style`     | —          | Style overrides for this recipe                              |
-| `setup`     | `[]`       | Steps that drive the site into the state to capture          |
-| `clip`      | `viewport` | The region to capture: `viewport`, `full`, or a query        |
-| `marks`     | `{}`       | Named regions, resolved after `setup` runs                   |
-| `callouts`  | `[]`       | What to draw on those marks                                  |
-| `numbered`  | —          | Marks to number 1…n with a disc, in the order given          |
+| Field      | Default    | What it does                                            |
+| ---------- | ---------- | ------------------------------------------------------- |
+| `name`     | filename   | Output filename, without the extension                  |
+| `source`   | `app`      | `app` drives the site; `file` annotates an existing PNG |
+| `file`     | —          | The PNG to annotate, with `source: file`                |
+| `install`  | —          | Which named destination to copy to                      |
+| `url`      | `site.url` | Page to open for this recipe                            |
+| `viewport` | site's     | Viewport for this recipe                                |
+| `scale`    | site's     | Device pixel ratio for this recipe                      |
+| `theme`    | site's     | Colour scheme for this recipe                           |
+| `style`    | —          | Style overrides for this recipe                         |
+| `setup`    | `[]`       | Steps that drive the site into the state to capture     |
+| `clip`     | `viewport` | The region to capture: `viewport`, `full`, or a query   |
+| `marks`    | `{}`       | Named regions, resolved after `setup` runs              |
+| `callouts` | `[]`       | What to draw on those marks                             |
+| `numbered` | —          | Marks to number 1…n with a disc, in the order given     |
 
 ## Steps
 
 Each step is a mapping led by one verb. Some verbs take extra keys.
 
-| Step                            | Does                                                     |
-| ------------------------------- | -------------------------------------------------------- |
-| `goto: <url>`                   | Navigate                                                 |
-| `click: <query>`                | Click an element                                         |
-| `dblclick: <query>`             | Double-click                                             |
-| `hover: <query>`                | Move the pointer onto an element                          |
-| `fill: <query>` + `value:`      | Set the value of an input                                |
-| `select: <query>` + `option:`   | Choose an option; `optionLabel:` matches visible text     |
-| `check:` / `uncheck: <query>`   | Set a checkbox                                           |
-| `press: <key>` + `on:`          | Press a key, optionally after focusing an element        |
-| `type: <text>` + `on:`          | Type text                                                |
-| `blur: <query>`                 | Remove focus                                             |
-| `scrollIntoView: <query>`       | Scroll an element into view                              |
-| `wait: <ms \| query>`           | Wait a fixed time, or until an element exists            |
-| `readValue: <query>` + `as:`    | Read an input's value into a variable                    |
-| `use: <macro>` + `with:`        | Run a macro                                              |
-| `repeat: <n>` + `steps:`        | Run steps n times                                        |
-| `each: <list>` + `as:`, `steps:`| Run steps once per item                                  |
-| `optional: [steps]`             | Run steps, ignoring failures                             |
-| `openPage: <url>` + `as:`       | Open a second page and name it                           |
-| `usePage: <name>`               | Switch which page later steps drive                      |
+| Step                             | Does                                                  |
+| -------------------------------- | ----------------------------------------------------- |
+| `goto: <url>`                    | Navigate                                              |
+| `click: <query>`                 | Click an element                                      |
+| `dblclick: <query>`              | Double-click                                          |
+| `hover: <query>`                 | Move the pointer onto an element                      |
+| `fill: <query>` + `value:`       | Set the value of an input                             |
+| `select: <query>` + `option:`    | Choose an option; `optionLabel:` matches visible text |
+| `check:` / `uncheck: <query>`    | Set a checkbox                                        |
+| `press: <key>` + `on:`           | Press a key, optionally after focusing an element     |
+| `type: <text>` + `on:`           | Type text                                             |
+| `blur: <query>`                  | Remove focus                                          |
+| `scrollIntoView: <query>`        | Scroll an element into view                           |
+| `wait: <ms \| query>`            | Wait a fixed time, or until an element exists         |
+| `readValue: <query>` + `as:`     | Read an input's value into a variable                 |
+| `use: <macro>` + `with:`         | Run a macro                                           |
+| `repeat: <n>` + `steps:`         | Run steps n times                                     |
+| `each: <list>` + `as:`, `steps:` | Run steps once per item                               |
+| `optional: [steps]`              | Run steps, ignoring failures                          |
+| `openPage: <url>` + `as:`        | Open a second page and name it                        |
+| `usePage: <name>`                | Switch which page later steps drive                   |
 
 There is no step that evaluates JavaScript. If a screenshot cannot be described with
 these, that is a missing verb — see
@@ -166,7 +166,7 @@ these, that is a missing verb — see
 A query says which element to act on or measure. Keys combine: sources choose the
 candidates, filters narrow them, traversal moves from them, and selection picks one.
 
-**Sources**
+### Sources
 
 | Key           | Matches                                     |
 | ------------- | ------------------------------------------- |
@@ -178,45 +178,45 @@ candidates, filters narrow them, traversal moves from them, and selection picks 
 | `text`        | Element whose trimmed text equals the value |
 | `heading`     | `h1`–`h6` with this exact text              |
 
-**Filters**
+### Filters
 
-| Key                                    | Keeps elements that…                       |
-| -------------------------------------- | ------------------------------------------ |
-| `contains`                             | contain this text                          |
-| `containingAll`                        | contain all of these strings               |
-| `matching`                             | have text matching this regular expression |
-| `maxChildren` / `minChildren`          | have at most / at least this many children |
-| `minWidth` `maxWidth`                  | are within these widths                    |
-| `minHeight` `maxHeight`                | are within these heights                   |
-| `narrowerThan` / `widerThan`           | are narrower / wider than this             |
-| `visible`                              | have a non-zero size                       |
-| `within`                               | sit inside an already-resolved mark        |
+| Key                           | Keeps elements that…                       |
+| ----------------------------- | ------------------------------------------ |
+| `contains`                    | contain this text                          |
+| `containingAll`               | contain all of these strings               |
+| `matching`                    | have text matching this regular expression |
+| `maxChildren` / `minChildren` | have at most / at least this many children |
+| `minWidth` `maxWidth`         | are within these widths                    |
+| `minHeight` `maxHeight`       | are within these heights                   |
+| `narrowerThan` / `widerThan`  | are narrower / wider than this             |
+| `visible`                     | have a non-zero size                       |
+| `within`                      | sit inside an already-resolved mark        |
 
 Sizes take pixels (`400`) or viewport units (`95vw`, `50vh`).
 
-**Traversal**
+### Traversal
 
-| Key         | Moves to                                                      |
-| ----------- | ------------------------------------------------------------- |
-| `ancestor`  | The first ancestor matching the filters given                 |
-| `parent`    | The parent element                                            |
-| `child: n`  | The nth child                                                 |
-| `children`  | All children                                                  |
+| Key        | Moves to                                      |
+| ---------- | --------------------------------------------- |
+| `ancestor` | The first ancestor matching the filters given |
+| `parent`   | The parent element                            |
+| `child: n` | The nth child                                 |
+| `children` | All children                                  |
 
 `ancestor` takes `pick: nearest` (default) or `pick: outermost`. `outermost` keeps
 climbing while the parent also matches — this is how you reach a modal's card rather
 than stopping at the heading inside it.
 
-**Selection and shape**
+### Selection and shape
 
-| Key                                    | Effect                                   |
-| -------------------------------------- | ---------------------------------------- |
-| `pick: first \| last \| smallest \| largest` | Which candidate to use             |
-| `nth: n`                               | The candidate at this position           |
-| `pad: n`                               | Grow the resulting box on all sides      |
-| `grow: { top, right, bottom, left }`   | Grow it on specific sides                |
-| `span: [query, query]`                 | The bounding box of several queries      |
-| `rect: [x, y, width, height]`          | A literal box, for recipes with no page  |
+| Key                                          | Effect                                  |
+| -------------------------------------------- | --------------------------------------- |
+| `pick: first \| last \| smallest \| largest` | Which candidate to use                  |
+| `nth: n`                                     | The candidate at this position          |
+| `pad: n`                                     | Grow the resulting box on all sides     |
+| `grow: { top, right, bottom, left }`         | Grow it on specific sides               |
+| `span: [query, query]`                       | The bounding box of several queries     |
+| `rect: [x, y, width, height]`                | A literal box, for recipes with no page |
 
 ## Finders
 
@@ -251,16 +251,16 @@ A callout marks one region. `place` says which side of it the label goes on; sho
 works out the position, extends the canvas if the label needs room outside the image, and
 moves a label further out if it would overlap one already drawn.
 
-| Field   | Default | What it does                                                       |
-| ------- | ------- | ------------------------------------------------------------------ |
-| `mark`  | required| Which mark to draw on                                              |
-| `text`  | —       | Label text                                                          |
-| `n`     | —       | Number shown in a disc, for matching a numbered list in the prose   |
-| `place` | `right` | `left`, `right`, `top`, `bottom`, or `corner` for a disc inside     |
-| `badge` | `tl`    | Which corner, with `place: corner`                                  |
-| `box`   | `true`  | Whether to draw the outline                                        |
-| `pad`   | style's | Distance between the outline and the element                        |
-| `gap`   | style's | Distance between the label and the outline                          |
+| Field   | Default  | What it does                                                      |
+| ------- | -------- | ----------------------------------------------------------------- |
+| `mark`  | required | Which mark to draw on                                             |
+| `text`  | —        | Label text                                                        |
+| `n`     | —        | Number shown in a disc, for matching a numbered list in the prose |
+| `place` | `right`  | `left`, `right`, `top`, `bottom`, or `corner` for a disc inside   |
+| `badge` | `tl`     | Which corner, with `place: corner`                                |
+| `box`   | `true`   | Whether to draw the outline                                       |
+| `pad`   | style's  | Distance between the outline and the element                      |
+| `gap`   | style's  | Distance between the label and the outline                        |
 
 `numbered: [a, b, c]` is shorthand for one numbered disc per mark, in order.
 
@@ -344,4 +344,4 @@ validation:
 
 ## License
 
-MIT © Nicola Mustone
+MIT © Nicola Mustone - See [LICENSE].

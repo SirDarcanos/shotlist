@@ -29,8 +29,9 @@ If that is used often, the query language is too small — fix it here.
 2. **One definition per shape.** The zod schemas in `config.ts` and `recipe.ts` are the
    source: TypeScript types are inferred from them, and the JSON Schemas are generated
    from them at build time. Do not hand-write either.
-3. **Errors name the file, the path inside it, and the fix.** `unknown step "clik" — did
-   you mean "click"?`, not a zod dump. The person reading it is editing YAML, not TypeScript.
+3. **Errors name the file, the path inside it, and the fix.** The person reading them is
+   editing YAML, not TypeScript. `unknown step "clik" — did you mean "click"?` is the
+   standard; a zod dump is not.
 4. **`evaluateQuery` is pure.** No imports, no closure over anything. It is serialized
    into the page to run, and tested in jsdom.
 5. **Playwright is an optional peer dependency.** Its postinstall downloads browsers, so
@@ -59,25 +60,26 @@ If that is used often, the query language is too small — fix it here.
 
 All of these, not most of them.
 
-**Green**
+### Green
 
+- [ ] `npm run format` has been run, and `npm run format:check` passes.
 - [ ] `npm run typecheck` passes.
 - [ ] `npm test` passes, including the tests you added.
 - [ ] `npm run build` passes and the JSON Schemas regenerate.
 
-**Covered**
+### Covered
 
 - [ ] New or changed behaviour has a test. A bug fix has a test that failed before it.
 - [ ] A new query primitive has a shape in `tests/fixture/` and a test against it.
 - [ ] A new step verb is in `VERBS`, which is what gives a typo of it a suggestion.
 
-**Consistent**
+### Consistent
 
 - [ ] No second definition of any shape. Types are inferred, JSON Schemas are generated.
 - [ ] Nothing site-specific entered the package (rule 1).
 - [ ] The fixture's `data-rect` attributes still match its CSS.
 
-**Documented**
+### Documented
 
 - [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`, in the right section.
 - [ ] A change to the recipe format, the step vocabulary or the query language is in the
@@ -85,7 +87,7 @@ All of these, not most of them.
       language, and nothing else.
 - [ ] Every named function has its one-line JSDoc.
 
-**Honest**
+### Honest
 
 - [ ] Errors a recipe author can hit name the file, the path inside it, and the fix.
 - [ ] Nothing is documented that does not work yet, unless it is marked as not built.

@@ -28,12 +28,18 @@ Node and jsdom.
 
 ## Commands
 
-| Command              | What it does                                     |
-| -------------------- | ------------------------------------------------ |
-| `npm test`           | Run the suite once                               |
-| `npm run test:watch` | Run the suite on every save                      |
-| `npm run typecheck`  | `tsc --noEmit` over `src`, `tests` and `scripts` |
-| `npm run build`      | Compile to `dist/` and generate the JSON Schemas |
+| Command                | What it does                                     |
+| ---------------------- | ------------------------------------------------ |
+| `npm test`             | Run the suite once                               |
+| `npm run test:watch`   | Run the suite on every save                      |
+| `npm run typecheck`    | `tsc --noEmit` over `src`, `tests` and `scripts` |
+| `npm run format`       | Format everything with Prettier                  |
+| `npm run format:check` | Fail if anything is unformatted                  |
+| `npm run build`        | Compile to `dist/` and generate the JSON Schemas |
+
+Prettier decides formatting. Do not hand-align code or fight it. `tests/fixture/` is
+excluded: its `data-rect` attributes are aligned with the CSS by hand, and reflowing them
+hides drift between the two.
 
 Run `npm run build` after changing any schema. The JSON Schemas that drive editor
 autocomplete are generated from the zod schemas, so a new field only reaches editors once
@@ -56,7 +62,7 @@ Two constraints:
 ## Before opening a pull request
 
 ```bash
-npm run typecheck && npm test && npm run build
+npm run format:check && npm run typecheck && npm test && npm run build
 ```
 
 The full list of what "finished" means is in
@@ -83,7 +89,7 @@ mean" suggestion on a typo.
 
 ## Releasing
 
-1. `npm run typecheck && npm test && npm run build` — all green.
+1. `npm run format:check && npm run typecheck && npm test && npm run build` — all green.
 2. In [`CHANGELOG.md`](./CHANGELOG.md), move the `## [Unreleased]` entries under a new
    version heading with today's date, and leave an empty `Unreleased` above it.
 3. Bump and tag. npm's default commit message is a bare version number, so override it:
@@ -92,7 +98,8 @@ mean" suggestion on a typo.
    npm version minor -m "Release: %s"
    ```
 
-4. `npm publish` — `prepublishOnly` re-runs typecheck, tests and the build. Add
+4. `npm publish` — `prepublishOnly` re-runs the format check, typecheck, tests and the
+   build. Add
    `--otp=<code>` if the account has 2FA.
 5. `git push --follow-tags`.
 

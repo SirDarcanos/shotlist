@@ -14,51 +14,55 @@ const StepBase = { comment: z.string().optional() }
 function makeStep(aliases: Readonly<Record<string, unknown>>): z.ZodType<StepInput> {
   const Query = makeQuery(aliases)
   const Step: z.ZodType<StepInput> = z.lazy(() =>
-  z.union([
-    z.object({ goto: z.string(), ...StepBase }).strict(),
-    z.object({ click: Query, ...StepBase }).strict(),
-    z.object({ dblclick: Query, ...StepBase }).strict(),
-    z.object({ hover: Query, ...StepBase }).strict(),
-    z.object({ fill: Query, value: Ref, ...StepBase }).strict(),
-    z
-      .object({
-        select: Query,
-        option: Ref.optional(),
-        optionLabel: z.string().optional(),
-        ...StepBase,
-      })
-      .strict(),
-    z.object({ check: Query, ...StepBase }).strict(),
-    z.object({ uncheck: Query, ...StepBase }).strict(),
-    z.object({ press: z.string(), on: Query.optional(), ...StepBase }).strict(),
-    z.object({ type: z.string(), on: Query.optional(), ...StepBase }).strict(),
-    z.object({ blur: Query, ...StepBase }).strict(),
-    z.object({ scrollIntoView: Query, ...StepBase }).strict(),
-    z.object({ wait: z.union([z.number(), Query]), ...StepBase }).strict(),
-    z.object({ readValue: Query, as: z.string(), ...StepBase }).strict(),
-    z
-      .object({ use: z.string(), with: z.record(z.string(), z.unknown()).optional(), ...StepBase })
-      .strict(),
-    z.object({ repeat: z.number().int().positive(), steps: z.array(Step), ...StepBase }).strict(),
-    z
-      .object({
-        each: z.union([z.string(), z.array(z.unknown())]),
-        as: z.string().default('item'),
-        steps: z.array(Step),
-        ...StepBase,
-      })
-      .strict(),
-    z.object({ optional: z.array(Step), ...StepBase }).strict(),
-    z
-      .object({
-        openPage: z.string(),
-        as: z.string(),
-        viewport: z.object({ width: z.number(), height: z.number() }).optional(),
-        ...StepBase,
-      })
-      .strict(),
-    z.object({ usePage: z.string(), ...StepBase }).strict(),
-  ]),
+    z.union([
+      z.object({ goto: z.string(), ...StepBase }).strict(),
+      z.object({ click: Query, ...StepBase }).strict(),
+      z.object({ dblclick: Query, ...StepBase }).strict(),
+      z.object({ hover: Query, ...StepBase }).strict(),
+      z.object({ fill: Query, value: Ref, ...StepBase }).strict(),
+      z
+        .object({
+          select: Query,
+          option: Ref.optional(),
+          optionLabel: z.string().optional(),
+          ...StepBase,
+        })
+        .strict(),
+      z.object({ check: Query, ...StepBase }).strict(),
+      z.object({ uncheck: Query, ...StepBase }).strict(),
+      z.object({ press: z.string(), on: Query.optional(), ...StepBase }).strict(),
+      z.object({ type: z.string(), on: Query.optional(), ...StepBase }).strict(),
+      z.object({ blur: Query, ...StepBase }).strict(),
+      z.object({ scrollIntoView: Query, ...StepBase }).strict(),
+      z.object({ wait: z.union([z.number(), Query]), ...StepBase }).strict(),
+      z.object({ readValue: Query, as: z.string(), ...StepBase }).strict(),
+      z
+        .object({
+          use: z.string(),
+          with: z.record(z.string(), z.unknown()).optional(),
+          ...StepBase,
+        })
+        .strict(),
+      z.object({ repeat: z.number().int().positive(), steps: z.array(Step), ...StepBase }).strict(),
+      z
+        .object({
+          each: z.union([z.string(), z.array(z.unknown())]),
+          as: z.string().default('item'),
+          steps: z.array(Step),
+          ...StepBase,
+        })
+        .strict(),
+      z.object({ optional: z.array(Step), ...StepBase }).strict(),
+      z
+        .object({
+          openPage: z.string(),
+          as: z.string(),
+          viewport: z.object({ width: z.number(), height: z.number() }).optional(),
+          ...StepBase,
+        })
+        .strict(),
+      z.object({ usePage: z.string(), ...StepBase }).strict(),
+    ]),
   )
   return Step
 }
@@ -243,7 +247,11 @@ export function parseRecipe(
   }
   const recipe = validate(makeRecipe(options.finders ?? {}), raw, 'recipe', options.file)
   const name = recipe.name ?? options.name
-  if (!name) throw new ShotlistError('recipe has no name, and none could be taken from the filename', options.file)
+  if (!name)
+    throw new ShotlistError(
+      'recipe has no name, and none could be taken from the filename',
+      options.file,
+    )
 
   for (const callout of recipe.callouts) {
     if (!(callout.mark in recipe.marks)) {
@@ -354,7 +362,8 @@ export function expandSteps(
       if (!macro) {
         const known = [...macros.keys()].sort()
         throw new ShotlistError(
-          `unknown macro "${name}"` + (known.length ? ` — this project defines ${known.join(', ')}` : ''),
+          `unknown macro "${name}"` +
+            (known.length ? ` — this project defines ${known.join(', ')}` : ''),
         )
       }
       if (seen.includes(name)) {

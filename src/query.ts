@@ -109,7 +109,9 @@ export const QUERY_KEYS: ReadonlySet<string> = new Set(Object.keys(ElementQuery.
 export function isAliasCall(node: unknown): node is Record<string, unknown> {
   if (typeof node !== 'object' || node === null || Array.isArray(node)) return false
   const keys = Object.keys(node as object)
-  return keys.length === 1 && keys[0] !== undefined && !QUERY_KEYS.has(keys[0]) && keys[0] !== 'span'
+  return (
+    keys.length === 1 && keys[0] !== undefined && !QUERY_KEYS.has(keys[0]) && keys[0] !== 'span'
+  )
 }
 
 /** Replace `$1`, `$2`… in every string of a template with the alias call's arguments. */
@@ -174,7 +176,10 @@ export function makeQuery(aliases: Readonly<Record<string, unknown>>): z.ZodType
 }
 
 /** Resolve aliases, then validate — so an author sees errors about their query, not the template. */
-export function parseQuery(node: unknown, aliases: Readonly<Record<string, unknown>> = {}): QueryInput {
+export function parseQuery(
+  node: unknown,
+  aliases: Readonly<Record<string, unknown>> = {},
+): QueryInput {
   return Query.parse(resolveAliases(node, aliases)) as QueryInput
 }
 
@@ -187,7 +192,11 @@ export function parseQuery(node: unknown, aliases: Readonly<Record<string, unkno
  */
 export function evaluateQuery(
   spec: QueryInput,
-  ctx: { rects?: Record<string, Rect>; viewport: { width: number; height: number }; seeds?: Element[] },
+  ctx: {
+    rects?: Record<string, Rect>
+    viewport: { width: number; height: number }
+    seeds?: Element[]
+  },
 ): Rect {
   const rectOf = (el: Element): Rect => {
     const r = el.getBoundingClientRect()
@@ -285,7 +294,8 @@ export function evaluateQuery(
   const insideScope = (el: Element): boolean => {
     if (query.within === undefined) return true
     const scope = ctx.rects?.[query.within]
-    if (!scope) throw new Error(`query names within: "${query.within}", which is not a resolved rect`)
+    if (!scope)
+      throw new Error(`query names within: "${query.within}", which is not a resolved rect`)
     const r = rectOf(el)
     const slack = 2
     return (
@@ -334,8 +344,7 @@ export function evaluateQuery(
   let chosen: Element | undefined
   if (query.nth !== undefined) chosen = candidates[query.nth]
   else if (query.pick === 'last') chosen = candidates[candidates.length - 1]
-  else if (query.pick === 'smallest')
-    chosen = [...candidates].sort((a, b) => area(a) - area(b))[0]
+  else if (query.pick === 'smallest') chosen = [...candidates].sort((a, b) => area(a) - area(b))[0]
   else if (query.pick === 'largest') chosen = [...candidates].sort((a, b) => area(b) - area(a))[0]
   else chosen = candidates[0]
 
