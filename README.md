@@ -6,9 +6,11 @@ shotlist opens your running site, drives it to the state you describe, clips a r
 draws callouts on it, and writes the image where you want it. Each screenshot is a YAML
 file. There is no per-screenshot code.
 
-> **Status:** 0.1.0 is not published yet. The config, recipe and query layers are done;
-> the capture, drawing and CLI layers are in progress. See
-> [CHANGELOG.md](./CHANGELOG.md).
+> **Status: 0.0.1, early.** The config, recipe and query layers are done and tested. The
+> parts that turn a recipe into an image — running the steps, drawing the callouts,
+> capturing, installing, `--check` — are not built yet, and neither is the `shotlist`
+> command. Everything below describes the finished shape; only the recipe format itself
+> works today. See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Install
 

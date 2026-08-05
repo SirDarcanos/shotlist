@@ -13,10 +13,8 @@
       "import": "./dist/index.js"
     },
     "./schema.json": "./dist/schema.json",
-    "./recipe.schema.json": "./dist/recipe.schema.json"
-  },
-  "bin": {
-    "shotlist": "./dist/cli.js"
+    "./recipe.schema.json": "./dist/recipe.schema.json",
+    "./macro.schema.json": "./dist/macro.schema.json"
   },
   "files": [
     "dist",

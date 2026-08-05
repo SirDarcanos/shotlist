@@ -10,7 +10,10 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
-Nothing is published yet: everything below ships as 0.1.0.
+## [0.0.1] — 2026-08-05
+
+An early release, published to claim the name. The layers below work and are tested;
+there is no CLI yet, so the package is usable through its API and not from a terminal.
 
 ### Added
 
@@ -52,4 +55,4 @@ Nothing is published yet: everything below ships as 0.1.0.
 
 The layers that turn a validated recipe into a PNG — running steps against Playwright,
 drawing the callouts, capturing and installing, and `--check` for staleness — plus the
-`shotlist` CLI itself.
+`shotlist` CLI itself. The README documents them; nothing in 0.0.1 runs them.
