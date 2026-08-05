@@ -1,99 +1,89 @@
-Guidance for AI agents (and humans) working on shotlist. Read this before writing code.
+Read this before writing code. It is how shotlist is built, and it is the source of
+truth for the rules. Setup, commands and releases are in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## What shotlist is
 
 It takes annotated UI screenshots. It drives a running site with Playwright, clips a
-region, draws callouts on it, and writes the result where the project asks for it — all
-from **declarative recipes**, so re-shooting a stale screenshot is a command rather than
-an afternoon.
+region, draws callouts on it, and writes the image where the project asks.
 
-What those screenshots are *for* is none of the package's business: a handbook, a landing
-page, a release post, a store listing. Nothing here may assume one of them.
+Each screenshot is a YAML recipe. What the screenshots are for — a handbook, a landing
+page, a release post, a store listing — is not the package's concern. Nothing here may
+assume one of them.
 
-## The one principle
+## The rule everything else serves
 
-> **A recipe is data. If a shot needs code, the vocabulary is short — not the recipe.**
+A recipe is data. If a screenshot needs code, a step verb or a query primitive is
+missing. Add that.
 
-Every temptation to add an `eval:` step or an inline JavaScript escape hatch is a
-signal that a step verb or a query primitive is missing. Add the primitive. The whole
-value of this package is that a person editing a screenshot never opens a `.ts` file.
+Do not add an `eval:` step, or any other way to run JavaScript from a recipe.
 
-The one sanctioned exception lives in the **consumer's** repo, not here: a project may
-point `finders` at its own module for a DOM shape the query language genuinely cannot
-express. If that gets used often, the query language is short and that is a bug here.
+There is one exception, and it lives in the consuming project rather than here: a project
+may point `finders` at its own module for a DOM shape the query language cannot express.
+If that is used often, the query language is too small — fix it here.
 
 ## Rules
 
-1. **Nothing about any one site belongs in this package.** No default colors that only
-   suit a dark app, no selectors, no domain words. Every such value is config with a
-   neutral default.
-2. **One definition per concept.** The zod schemas in `config.ts` and `recipe.ts` are
-   the single source of truth: TypeScript types are inferred from them, and the JSON
-   Schema that gives editors autocomplete is generated from them at build time. Never
-   hand-maintain a second copy of a shape.
-3. **Errors name the file, the line, and the fix.** A recipe author is the user of this
-   package. `unknown step "clik" — did you mean "click"?` is the standard; a zod dump
-   is not.
-4. **The query language is pure.** `evaluateQuery` runs inside the page with no imports
-   and no closure over anything. That is what lets it be serialized to the browser and
-   unit-tested in jsdom in the same breath.
-5. **Playwright is an optional peer dependency.** Its postinstall downloads browsers;
-   a consuming project should not pay that on every CI install. Resolve it at run time and fail
-   with the command that fixes it.
-6. **Every named function, method and hook opens with a one-line header comment.** A
-   one-line JSDoc, so editors surface it on hover. No other comments unless the code
-   genuinely cannot say it: a non-obvious *why*, a gotcha, a workaround. Never narration
-   of the next line, never self-congratulation.
-7. **Everything testable ships with tests**, in `tests/` mirroring `src/`. The pure
-   layers (config, recipes, macros, queries) test in node; the drawing layer tests in
-   jsdom; the browser path tests against `tests/fixture/`, which is a real static site
-   built to exercise every query primitive.
+1. **Nothing site-specific ships in the package.** No colour that only suits a dark app,
+   no selector, no domain word, no assumption about what a screenshot is for. Values like
+   that are config, with a neutral default.
+2. **One definition per shape.** The zod schemas in `config.ts` and `recipe.ts` are the
+   source: TypeScript types are inferred from them, and the JSON Schemas are generated
+   from them at build time. Do not hand-write either.
+3. **Errors name the file, the path inside it, and the fix.** `unknown step "clik" — did
+   you mean "click"?`, not a zod dump. The person reading it is editing YAML, not TypeScript.
+4. **`evaluateQuery` is pure.** No imports, no closure over anything. It is serialized
+   into the page to run, and tested in jsdom.
+5. **Playwright is an optional peer dependency.** Its postinstall downloads browsers, so
+   consuming projects must not pay for it on every install. Resolve it at run time; when
+   it is missing, print the command that installs it.
+6. **Every named function opens with a one-line JSDoc**, so editors show it on hover. No
+   other comments unless the code cannot say it: a non-obvious why, a gotcha, a workaround.
+7. **Everything testable has tests**, in `tests/` mirroring `src/`. The pure layers run in
+   Node, the drawing layer in jsdom, the browser path against `tests/fixture/`.
 
 ## Layout
 
-| Path                | What it is                                                  |
-| ------------------- | ----------------------------------------------------------- |
-| `src/config.ts`     | config schema, defaults, loading, merge                     |
-| `src/recipe.ts`     | recipe schema, loading, macro expansion, interpolation      |
-| `src/query.ts`      | the element query language: schema, aliases, page evaluator |
-| `src/steps.ts`      | the step vocabulary, run against a Playwright page          |
-| `src/annotate.ts`   | the drawing layer, injected into the page                   |
-| `src/capture.ts`    | clip, scale, canvas growth, write                           |
-| `src/check.ts`      | perceptual diff against the committed image                 |
-| `src/cli.ts`        | the `shotlist` binary                                       |
-| `tests/fixture/`    | the static site the browser-driven tests shoot              |
+| Path              | What it is                                                  |
+| ----------------- | ----------------------------------------------------------- |
+| `src/config.ts`   | config schema, defaults, loading, merge                     |
+| `src/recipe.ts`   | recipe schema, loading, macro expansion, interpolation      |
+| `src/query.ts`    | the element query language: schema, aliases, page evaluator |
+| `src/steps.ts`    | the step vocabulary, run against a Playwright page          |
+| `src/annotate.ts` | the drawing layer, injected into the page                   |
+| `src/capture.ts`  | clip, scale, canvas growth, write                           |
+| `src/check.ts`    | perceptual diff against the committed image                 |
+| `src/cli.ts`      | the `shotlist` binary                                       |
+| `tests/fixture/`  | the static site the browser-driven tests shoot              |
 
 ## Definition of done
 
-A change is finished when all of these are true. Not "mostly" — all of them.
+All of these, not most of them.
 
 **Green**
 
 - [ ] `npm run typecheck` passes.
 - [ ] `npm test` passes, including the tests you added.
-- [ ] `npm run build` passes and the JSON Schemas regenerate without error.
+- [ ] `npm run build` passes and the JSON Schemas regenerate.
 
 **Covered**
 
 - [ ] New or changed behaviour has a test. A bug fix has a test that failed before it.
-- [ ] A new query primitive has a shape in `tests/fixture/` and a test that matches it.
-- [ ] A new step verb is in `VERBS`, so a typo of it gets a "did you mean".
+- [ ] A new query primitive has a shape in `tests/fixture/` and a test against it.
+- [ ] A new step verb is in `VERBS`, which is what gives a typo of it a suggestion.
 
 **Consistent**
 
-- [ ] No second definition of any shape: types are inferred from the zod schemas, and
-      the JSON Schemas are generated from them. If you hand-wrote either, undo it.
-- [ ] Nothing site-specific entered the package — no default that suits one product, no
-      selector, no domain word, and no assumption about what the screenshots are for.
+- [ ] No second definition of any shape. Types are inferred, JSON Schemas are generated.
+- [ ] Nothing site-specific entered the package (rule 1).
 - [ ] The fixture's `data-rect` attributes still match its CSS.
 
 **Documented**
 
 - [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`, in the right section.
 - [ ] A change to the recipe format, the step vocabulary or the query language is in the
-      README's reference tables. The README is reference, not narrative: state what a
-      thing does in plain language and move on.
-- [ ] Every named function has its one-line header comment.
+      README's reference tables. The README is reference: what a key does, in plain
+      language, and nothing else.
+- [ ] Every named function has its one-line JSDoc.
 
 **Honest**
 
@@ -102,5 +92,6 @@ A change is finished when all of these are true. Not "mostly" — all of them.
 
 ## Committing
 
-- **One concern per commit.** Subject `Area: what changed`, imperative, sentence case.
-- MIT, and no license headers in source files — the LICENSE file is the whole of it.
+- One concern per commit. Subject `Area: what changed`, imperative, sentence case after
+  the prefix. The body explains why.
+- MIT. No license headers in source files; the LICENSE file is the whole of it.

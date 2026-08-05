@@ -48,8 +48,8 @@ Two constraints:
 
 - **Every element carries `data-rect="x,y,width,height"`.** jsdom has no layout engine,
   so rects would all be zero. A real browser ignores the attribute and measures the page.
-  When you change the CSS, update the attributes to match — a jsdom test passing against
-  stale numbers is worse than one failing.
+  When you change the CSS, update the attributes to match, or the jsdom tests pass
+  against numbers the page no longer has.
 - **Nothing in it comes from a real product.** The fixture exercises query primitives. If
   you need a new shape to test against, add a neutral one.
 
