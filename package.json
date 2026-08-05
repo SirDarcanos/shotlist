@@ -1,6 +1,6 @@
 {
   "name": "shotlist",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Repeatable, annotated UI screenshots from declarative recipes. No code per shot.",
   "license": "MIT",
   "author": "Nicola Mustone",
