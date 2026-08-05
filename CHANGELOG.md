@@ -10,6 +10,30 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+### Added
+
+- **Shooting a recipe, end to end.** `shoot()` drives the site with Playwright, runs the
+  recipe's steps, clips the region, resolves every mark, draws the callouts and installs
+  the image. `source: file` annotates a PNG already on disk through the same drawing pass.
+- **The step runner.** All twenty verbs, with macros expanded and `$name` resolved against
+  the variables in scope where each step was written.
+- **The drawing layer.** Outlined labels, block arrows, boxes and numbered discs, every
+  constant taken from config. Labels are laid out in a margin outside the shot with an
+  arrow reaching in, and are pushed along that margin so two never overlap.
+- Playwright is resolved at run time from the project or the npx cache, so a project
+  consuming shotlist does not pay for a browser download on every install.
+
+### Fixed
+
+- The canvas grows for a box or a numbered disc that would be cut by the edge of the shot,
+  as it already did for a label. Marking an element that runs edge to edge used to lose
+  half its stroke, and a disc on that box's corner was sliced in two.
+- A call to a finder may carry its own query keys: `{ listRow: "Acme Corp", pad: 16 }` pads
+  what the finder found. A second key used to stop the node looking like a call at all, so
+  the finder's name was reported as an unknown query key.
+- Canvas and clip sizes are whole pixels. A fractional canvas was rounded by the
+  screenshot, and the image came back a pixel narrower than the layout said.
+
 ## [0.0.1] — 2026-08-05
 
 An early release, published to claim the name. The layers below work and are tested;

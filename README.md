@@ -6,11 +6,10 @@ shotlist opens your running site, drives it to the state you describe, clips a r
 draws callouts on it, and writes the image where you want it. Each screenshot is a YAML
 file. There is no per-screenshot code.
 
-> **Status: 0.0.1, early.** The config, recipe and query layers are done and tested. The
-> parts that turn a recipe into an image — running the steps, drawing the callouts,
-> capturing, installing, `--check` — are not built yet, and neither is the `shotlist`
-> command. Everything below describes the finished shape; only the recipe format itself
-> works today. See [CHANGELOG.md](./CHANGELOG.md).
+> **Status: early.** Shooting a recipe works end to end through the API — driving the
+> site, clipping, drawing the callouts, and installing. Not built yet: the `shotlist`
+> command line and `--check`. Published 0.0.1 predates all of this; see
+> [CHANGELOG.md](./CHANGELOG.md).
 
 ## Install
 
@@ -60,13 +59,19 @@ callouts:
   - { mark: status, text: Where it stands, place: right }
 ```
 
-**3. Shoot it:**
+**3. Shoot it.** The command line is not built yet, so today this is the API:
 
-```bash
-npx shotlist order-row --install
+```ts
+import { loadConfig, loadLibrary, shoot, withNumbering } from 'shotlist'
+
+const loaded = loadConfig()
+const library = loadLibrary({ ...loaded.config.paths, finders: loaded.config.finders })
+const recipe = withNumbering(library.recipes.get('order-row')!)
+
+await shoot(recipe, library, loaded, { install: true })
 ```
 
-The image is written to `screenshots/out/order-row.png`, and `--install` copies it to
+The image is written to `screenshots/out/order-row.png`, and `install: true` copies it to
 `content/guide/images/order-row.png`.
 
 ## Configuration
@@ -253,6 +258,15 @@ A callout marks one region. `place` says which side of it the label goes on; sho
 works out the position, extends the canvas if the label needs room outside the image, and
 moves a label further out if it would overlap one already drawn.
 
+Labels always sit outside the screenshot, never over it, with an arrow reaching in. The
+canvas also grows for a box or a numbered disc that would otherwise be cut by the edge of
+the shot.
+
+**Choose the side with clear space.** The arrow travels from the margin to the box, so a
+label placed on the far side of another element draws an arrow straight across it. That is
+the one part of the layout shotlist cannot decide for you: it knows where the box is, not
+which pixels matter.
+
 | Field   | Default  | What it does                                                      |
 | ------- | -------- | ----------------------------------------------------------------- |
 | `mark`  | required | Which mark to draw on                                             |
@@ -346,4 +360,4 @@ validation:
 
 ## License
 
-MIT © Nicola Mustone - See [LICENSE].
+MIT © Nicola Mustone — see [LICENSE](./LICENSE).

@@ -1,0 +1,32 @@
+site:
+  url: FIXTURE
+  viewport: { width: 1000, height: 700 }
+  scale: 2
+  theme: dark
+
+style:
+  color: '#E5484A'
+  canvas: '#101418'
+  label:
+    fill: '#FFFFFF'
+    stroke: '#E5484A'
+
+paths:
+  recipes: recipes
+  macros: macros
+  data: data
+  out: out
+
+install:
+  guide: installed
+
+finders:
+  listRow:
+    css: 'li, div'
+    contains: $1
+    matching: '\$\d'
+    maxChildren: 12
+    pick: smallest
+  panel:
+    heading: $1
+    ancestor: { narrowerThan: 95vw, pick: outermost }

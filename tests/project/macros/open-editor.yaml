@@ -1,0 +1,5 @@
+defaults:
+  row: Acme Corp
+steps:
+  - click: { css: 'button', text: Edit, within: target }
+  - wait: 120

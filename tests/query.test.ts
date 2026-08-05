@@ -7,7 +7,7 @@ import { VIEWPORT, loadFixture } from './fixture.js'
 
 /** Resolve a query against the fixture page. */
 function find(query: QueryInput, rects?: Record<string, Rect>): Rect {
-  return evaluateQuery(query, { viewport: VIEWPORT, ...(rects ? { rects } : {}) })
+  return evaluateQuery({ spec: query, viewport: VIEWPORT, ...(rects ? { rects } : {}) })
 }
 
 beforeEach(() => {
@@ -144,6 +144,14 @@ describe('aliases', () => {
   it('resolves an alias nested inside a span', () => {
     const resolved = parseQuery({ span: [{ panel: 'Edit order' }, { css: '.bar' }] }, finders)
     expect(find(resolved)).toEqual({ x: 0, y: 0, width: 1000, height: 500 })
+  })
+
+  it('lets a call add its own query keys to what the finder found', () => {
+    // `{ listRow: "Acme Corp", pad: 16 }` pads the row the finder located, rather than
+    // being refused for having two keys and so not looking like a call at all.
+    const padded = resolveAliases({ listRow: 'Acme Corp', pad: 16 }, finders)
+    expect(padded).toMatchObject({ contains: 'Acme Corp', pad: 16 })
+    expect(find(parseQuery(padded))).toEqual({ x: -4, y: 56, width: 408, height: 76 })
   })
 
   it('lists the finders a project defines when one is misspelled', () => {

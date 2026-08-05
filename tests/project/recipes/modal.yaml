@@ -1,0 +1,7 @@
+name: modal
+clip: viewport
+marks:
+  bar: { css: '.bar' }
+  detail: { css: '.grid', children: true, nth: 1 }
+  actions: { css: '.grid', children: true, nth: 2 }
+numbered: [bar, detail, actions]

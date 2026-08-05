@@ -94,7 +94,17 @@ export const RectQuery = z
   })
   .strict()
 
-export const Query: z.ZodType<QueryInput> = z.union([RectQuery, SpanQuery, ElementQuery])
+const SOURCES = ['css', 'role', 'label', 'placeholder', 'testid', 'heading'] as const
+
+/** A query names at most one source; filters then narrow whatever it found. */
+const OneSource = ElementQuery.refine(
+  (q) => SOURCES.filter((key) => (q as Record<string, unknown>)[key] !== undefined).length <= 1,
+  {
+    message: `a query names at most one of ${SOURCES.join(', ')} — filters narrow what it finds`,
+  },
+)
+
+export const Query: z.ZodType<QueryInput> = z.union([RectQuery, SpanQuery, OneSource])
 
 export type ElementQueryInput = z.input<typeof ElementQuery>
 export type QueryInput =
@@ -105,13 +115,18 @@ export type QueryInput =
 /** Every key `ElementQuery` understands — anything else in a one-key object is an alias call. */
 export const QUERY_KEYS: ReadonlySet<string> = new Set(Object.keys(ElementQuery.shape))
 
-/** Whether a node is an alias call like `{ trackerRow: "Zara" }` rather than a query. */
-export function isAliasCall(node: unknown): node is Record<string, unknown> {
-  if (typeof node !== 'object' || node === null || Array.isArray(node)) return false
-  const keys = Object.keys(node as object)
-  return (
-    keys.length === 1 && keys[0] !== undefined && !QUERY_KEYS.has(keys[0]) && keys[0] !== 'span'
+/** The key naming the finder in an alias call, or null if the node is a plain query. */
+export function aliasKeyOf(node: unknown): string | null {
+  if (typeof node !== 'object' || node === null || Array.isArray(node)) return null
+  const foreign = Object.keys(node as object).filter(
+    (key) => !QUERY_KEYS.has(key) && key !== 'span' && key !== 'rect',
   )
+  return foreign.length === 1 ? foreign[0]! : null
+}
+
+/** Whether a node calls a finder — `{ trackerRow: "Zara" }` — rather than being a query. */
+export function isAliasCall(node: unknown): node is Record<string, unknown> {
+  return aliasKeyOf(node) !== null
 }
 
 /** Replace `$1`, `$2`… in every string of a template with the alias call's arguments. */
@@ -141,8 +156,8 @@ export function resolveAliases(
   if (Array.isArray(node)) return node.map((item) => resolveAliases(item, aliases, seen))
   if (typeof node !== 'object' || node === null) return node
 
-  if (isAliasCall(node)) {
-    const [name] = Object.keys(node) as [string]
+  const name = aliasKeyOf(node)
+  if (name !== null) {
     const template = aliases[name]
     if (template === undefined) {
       const known = Object.keys(aliases).sort()
@@ -153,9 +168,14 @@ export function resolveAliases(
     if (seen.includes(name)) {
       throw new Error(`finder "${name}" refers to itself (${[...seen, name].join(' → ')})`)
     }
-    const raw = node[name]
+    const call = node as Record<string, unknown>
+    const raw = call[name]
     const args = (Array.isArray(raw) ? raw : [raw]).map(String)
-    return resolveAliases(substitute(template, args), aliases, [...seen, name])
+    // Keys written alongside the call are the caller's own — `{ listRow: "Acme", pad: 16 }`
+    // pads what the finder found, rather than being refused for not being a finder.
+    const extra = Object.fromEntries(Object.entries(call).filter(([key]) => key !== name))
+    const expanded = substitute(template, args) as Record<string, unknown>
+    return resolveAliases({ ...expanded, ...extra }, aliases, [...seen, name])
   }
 
   return Object.fromEntries(
@@ -175,6 +195,11 @@ export function makeQuery(aliases: Readonly<Record<string, unknown>>): z.ZodType
   return z.preprocess((node) => resolveAliases(node, aliases), Query) as z.ZodType<QueryInput>
 }
 
+/** The rect a query resolves to, for callers that do not need the element. */
+export function evaluateQuery(context: QueryContext): Rect {
+  return resolveQuery(context).rect
+}
+
 /** Resolve aliases, then validate — so an author sees errors about their query, not the template. */
 export function parseQuery(
   node: unknown,
@@ -183,21 +208,33 @@ export function parseQuery(
   return Query.parse(resolveAliases(node, aliases)) as QueryInput
 }
 
+/** Everything the page needs to answer one query. */
+export interface QueryContext {
+  spec: QueryInput
+  viewport: { width: number; height: number }
+  /** Rects already resolved in this recipe, for `within`. */
+  rects?: Record<string, Rect>
+  /** Elements Playwright's locator engine found for `role`/`label`/`placeholder`/`testid`. */
+  seeds?: Element[]
+}
+
+/** A query's answer: the box to draw on, and the element to act on if there is one. */
+export interface Resolved {
+  rect: Rect
+  element: Element | null
+}
+
 /**
- * Resolve a query to a rect, inside the page.
+ * Resolve a query, inside the page.
  *
- * Serialized into the browser, so it closes over nothing and imports nothing. `seeds`
- * carries elements already resolved by Playwright's locator engine (role, label,
- * placeholder, testid); everything else it sources itself.
+ * Serialized into the browser, so it closes over nothing and imports nothing — which is
+ * also what lets the same function be unit-tested in jsdom. It returns the element as
+ * well as the rect so that drawing a box and clicking a button never disagree about
+ * which element a query meant.
  */
-export function evaluateQuery(
-  spec: QueryInput,
-  ctx: {
-    rects?: Record<string, Rect>
-    viewport: { width: number; height: number }
-    seeds?: Element[]
-  },
-): Rect {
+export function resolveQuery(context: QueryContext): Resolved {
+  const spec = context.spec
+  const ctx = context
   const rectOf = (el: Element): Rect => {
     const r = el.getBoundingClientRect()
     return { x: r.x, y: r.y, width: r.width, height: r.height }
@@ -227,16 +264,19 @@ export function evaluateQuery(
 
   if ('rect' in spec) {
     const [x, y, width, height] = spec.rect
-    return padded({ x, y, width, height }, spec.pad, spec.grow)
+    return { rect: padded({ x, y, width, height }, spec.pad, spec.grow), element: null }
   }
 
   if ('span' in spec) {
-    const parts = spec.span.map((part) => evaluateQuery(part, ctx))
+    const parts = spec.span.map((part) => resolveQuery({ ...ctx, spec: part }).rect)
     const x0 = Math.min(...parts.map((r) => r.x))
     const y0 = Math.min(...parts.map((r) => r.y))
     const x1 = Math.max(...parts.map((r) => r.x + r.width))
     const y1 = Math.max(...parts.map((r) => r.y + r.height))
-    return padded({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, spec.pad, spec.grow)
+    return {
+      rect: padded({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, spec.pad, spec.grow),
+      element: null,
+    }
   }
 
   const query = spec
@@ -349,5 +389,5 @@ export function evaluateQuery(
   else chosen = candidates[0]
 
   if (!chosen) throw new Error(`no element at the requested position for ${describe}`)
-  return padded(rectOf(chosen), query.pad, query.grow)
+  return { rect: padded(rectOf(chosen), query.pad, query.grow), element: chosen }
 }

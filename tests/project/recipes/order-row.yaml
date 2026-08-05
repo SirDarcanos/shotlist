@@ -1,0 +1,14 @@
+name: order-row
+install: guide
+
+clip:
+  listRow: Acme Corp
+  pad: 16
+
+marks:
+  amount: { within: clip, text: $42.00 }
+  count: { within: clip, text: '3 items' }
+
+callouts:
+  - { mark: amount, text: What they owe, place: right }
+  - { mark: count, text: How many, place: left }
