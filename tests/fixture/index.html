@@ -1,0 +1,144 @@
+<!doctype html>
+<!--
+  The site the browser-driven tests shoot, and the jsdom tests query.
+
+  A deliberately dull three-column app: a list, a detail pane, a controls pane, and a
+  modal. It exists to exercise every query primitive — a row that is the smallest box
+  holding a name and an amount, a card that has to be climbed out of an overlay, a
+  grid whose columns are addressed by position — not to resemble any real product.
+
+  Every element carries data-rect="x,y,width,height" so the jsdom tests can resolve
+  geometry without a layout engine; a real browser ignores the attribute and lays the
+  page out for itself. Keep the two agreeing — the CSS below mirrors the numbers.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>shotlist fixture</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      body {
+        font: 16px/1.4 system-ui, sans-serif;
+        background: #101418;
+        color: #e6edf3;
+        width: 1000px;
+        height: 700px;
+      }
+      .bar {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1000px;
+        height: 60px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 0 16px;
+        background: #161b22;
+      }
+      .grid {
+        position: absolute;
+        left: 0;
+        top: 60px;
+        width: 1000px;
+        height: 640px;
+        display: grid;
+        grid-template-columns: 400px 300px 300px;
+      }
+      .column {
+        padding: 12px;
+        border-right: 1px solid #30363d;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        height: 44px;
+        padding: 0 10px;
+        background: #1c2128;
+        margin-bottom: 8px;
+      }
+      .overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        width: 520px;
+        padding: 20px;
+        background: #21262d;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar" data-rect="0,0,1000,60">
+      <button data-rect="16,14,90,32">New order</button>
+      <button data-rect="118,14,80,32">Import</button>
+      <button data-rect="210,14,120,32">Export</button>
+      <button data-rect="342,14,64,32" aria-label="Settings">⚙</button>
+    </div>
+
+    <div class="grid" data-rect="0,60,1000,640">
+      <div class="column" data-rect="0,60,400,640">
+        <div class="row" data-rect="12,72,376,44">
+          <span data-rect="22,84,60,20">Acme Corp</span>
+          <span data-rect="92,84,70,20">3 items</span>
+          <span data-rect="172,84,52,20">$42.00</span>
+          <button data-rect="300,80,76,28">Edit</button>
+        </div>
+        <div class="row" data-rect="12,124,376,44">
+          <span data-rect="22,136,60,20">Northwind Ltd</span>
+          <span data-rect="92,136,70,20">1 item</span>
+          <span data-rect="172,136,52,20">$18.50</span>
+          <button data-rect="300,132,76,28">Edit</button>
+        </div>
+      </div>
+      <div class="column" data-rect="400,60,300,640">
+        <h2 data-rect="412,72,180,28">Details</h2>
+        <p data-rect="412,110,276,40">Nothing selected.</p>
+      </div>
+      <div class="column" data-rect="700,60,300,640">
+        <h2 data-rect="712,72,180,28">Actions</h2>
+        <label data-rect="712,110,276,32">
+          Search
+          <input name="search" data-rect="712,110,276,32" />
+        </label>
+        <button data-rect="712,152,80,32">Run</button>
+      </div>
+    </div>
+
+    <div class="overlay" data-rect="0,0,1000,700" hidden id="modal">
+      <div class="card" data-rect="240,200,520,300">
+        <h2 data-rect="260,220,300,28">Edit order</h2>
+        <label data-rect="260,260,480,32">
+          Status
+          <select name="status" data-rect="260,260,480,32">
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
+        <button data-rect="260,320,100,36">Save</button>
+        <button data-rect="372,320,100,36">Cancel</button>
+      </div>
+    </div>
+
+    <script>
+      // Enough behaviour for the browser-driven tests to have something to drive.
+      const modal = document.getElementById('modal')
+      for (const button of document.querySelectorAll('.row button'))
+        button.addEventListener('click', () => modal.removeAttribute('hidden'))
+      document
+        .querySelector('.card button:last-of-type')
+        .addEventListener('click', () => modal.setAttribute('hidden', ''))
+    </script>
+  </body>
+</html>
