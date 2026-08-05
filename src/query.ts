@@ -117,7 +117,7 @@ export function isAliasCall(node: unknown): node is Record<string, unknown> {
 /** Replace `$1`, `$2`… in every string of a template with the alias call's arguments. */
 export function substitute(template: unknown, args: readonly string[]): unknown {
   if (typeof template === 'string') {
-    return template.replace(/\$(\d+)/g, (whole, index: string) => {
+    return template.replace(/\$(\d+)/g, (_whole, index: string) => {
       const value = args[Number(index) - 1]
       if (value === undefined) throw new Error(`no argument $${index} was given`)
       return value

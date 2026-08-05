@@ -31,9 +31,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run format:check && npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lint": "eslint ."
   },
   "keywords": [
     "screenshot",
@@ -59,9 +60,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "eslint": "^10.8.0",
     "jsdom": "^25.0.1",
     "prettier": "^3.9.6",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0",
     "vitest": "^3.2.6"
   },
   "publishConfig": {

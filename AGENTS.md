@@ -1,3 +1,5 @@
+# Contributing to shotlist
+
 Read this before writing code. It is how shotlist is built, and it is the source of
 truth for the rules. Setup, commands and releases are in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
@@ -37,9 +39,12 @@ If that is used often, the query language is too small — fix it here.
 5. **Playwright is an optional peer dependency.** Its postinstall downloads browsers, so
    consuming projects must not pay for it on every install. Resolve it at run time; when
    it is missing, print the command that installs it.
-6. **Every named function opens with a one-line JSDoc**, so editors show it on hover. No
+6. **Every Playwright call is awaited.** ESLint enforces it, because a missed await does
+   not throw: the step has not finished when the screenshot is taken, and a wrong image is
+   written and installed silently.
+7. **Every named function opens with a one-line JSDoc**, so editors show it on hover. No
    other comments unless the code cannot say it: a non-obvious why, a gotcha, a workaround.
-7. **Everything testable has tests**, in `tests/` mirroring `src/`. The pure layers run in
+8. **Everything testable has tests**, in `tests/` mirroring `src/`. The pure layers run in
    Node, the drawing layer in jsdom, the browser path against `tests/fixture/`.
 
 ## Layout
@@ -63,6 +68,7 @@ All of these, not most of them.
 ### Green
 
 - [ ] `npm run format` has been run, and `npm run format:check` passes.
+- [ ] `npm run lint` passes.
 - [ ] `npm run typecheck` passes.
 - [ ] `npm test` passes, including the tests you added.
 - [ ] `npm run build` passes and the JSON Schemas regenerate.
