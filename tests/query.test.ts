@@ -102,6 +102,15 @@ describe('composition', () => {
     })
   })
 
+  it('takes a literal box, for a recipe annotating an image with no page', () => {
+    expect(find({ rect: [866, 874, 150, 50], pad: 2 })).toEqual({
+      x: 864,
+      y: 872,
+      width: 154,
+      height: 54,
+    })
+  })
+
   it('names the query it could not match', () => {
     expect(() => find({ css: 'button', text: 'Nope' })).toThrow(/no element matched.*Nope/s)
   })

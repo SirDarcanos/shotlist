@@ -37,10 +37,11 @@
     "screenshot",
     "screenshots",
     "playwright",
-    "documentation",
+    "annotate",
     "annotation",
-    "visual-regression",
-    "docs"
+    "ui",
+    "automation",
+    "visual-regression"
   ],
   "peerDependencies": {
     "playwright": ">=1.40"

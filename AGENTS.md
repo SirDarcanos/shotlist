@@ -2,10 +2,13 @@ Guidance for AI agents (and humans) working on shotlist. Read this before writin
 
 ## What shotlist is
 
-A screenshot harness for documentation. It drives a running site with Playwright,
-clips a region, draws callouts on it, and installs the result where the docs expect
-it — all from **declarative recipes**, so re-shooting a stale screenshot is a command
-rather than an afternoon.
+It takes annotated UI screenshots. It drives a running site with Playwright, clips a
+region, draws callouts on it, and writes the result where the project asks for it — all
+from **declarative recipes**, so re-shooting a stale screenshot is a command rather than
+an afternoon.
+
+What those screenshots are *for* is none of the package's business: a handbook, a landing
+page, a release post, a store listing. Nothing here may assume one of them.
 
 ## The one principle
 
@@ -35,7 +38,7 @@ express. If that gets used often, the query language is short and that is a bug 
    and no closure over anything. That is what lets it be serialized to the browser and
    unit-tested in jsdom in the same breath.
 5. **Playwright is an optional peer dependency.** Its postinstall downloads browsers;
-   a docs site should not pay that on every CI install. Resolve it at run time and fail
+   a consuming project should not pay that on every CI install. Resolve it at run time and fail
    with the command that fixes it.
 6. **Every named function, method and hook opens with a one-line header comment.** A
    one-line JSDoc, so editors surface it on hover. No other comments unless the code
@@ -59,6 +62,43 @@ express. If that gets used often, the query language is short and that is a bug 
 | `src/check.ts`      | perceptual diff against the committed image                 |
 | `src/cli.ts`        | the `shotlist` binary                                       |
 | `tests/fixture/`    | the static site the browser-driven tests shoot              |
+
+## Definition of done
+
+A change is finished when all of these are true. Not "mostly" — all of them.
+
+**Green**
+
+- [ ] `npm run typecheck` passes.
+- [ ] `npm test` passes, including the tests you added.
+- [ ] `npm run build` passes and the JSON Schemas regenerate without error.
+
+**Covered**
+
+- [ ] New or changed behaviour has a test. A bug fix has a test that failed before it.
+- [ ] A new query primitive has a shape in `tests/fixture/` and a test that matches it.
+- [ ] A new step verb is in `VERBS`, so a typo of it gets a "did you mean".
+
+**Consistent**
+
+- [ ] No second definition of any shape: types are inferred from the zod schemas, and
+      the JSON Schemas are generated from them. If you hand-wrote either, undo it.
+- [ ] Nothing site-specific entered the package — no default that suits one product, no
+      selector, no domain word, and no assumption about what the screenshots are for.
+- [ ] The fixture's `data-rect` attributes still match its CSS.
+
+**Documented**
+
+- [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`, in the right section.
+- [ ] A change to the recipe format, the step vocabulary or the query language is in the
+      README's reference tables. The README is reference, not narrative: state what a
+      thing does in plain language and move on.
+- [ ] Every named function has its one-line header comment.
+
+**Honest**
+
+- [ ] Errors a recipe author can hit name the file, the path inside it, and the fix.
+- [ ] Nothing is documented that does not work yet, unless it is marked as not built.
 
 ## Committing
 

@@ -1,25 +1,52 @@
 # shotlist
 
-**Repeatable, annotated UI screenshots from declarative recipes.**
+Take annotated UI screenshots from YAML recipes, using Playwright.
 
-A screenshot in your documentation is a bug the moment the UI moves on — and re-taking
-one by hand is slow enough that it doesn't get done. shotlist drives your running site
-with Playwright, clips the region you name, draws the callouts on it, and drops the
-result where your docs expect it.
+shotlist opens your running site, drives it to the state you describe, clips a region,
+draws callouts on it, and writes the image where you want it. Each screenshot is a YAML
+file. There is no per-screenshot code.
 
-The part that matters: **a recipe is data.** No script per screenshot, no pixel
-arithmetic, no file of drawing code that has to be edited every time a button moves.
+> **Status:** 0.1.0 is not published yet. The config, recipe and query layers are done;
+> the capture, drawing and CLI layers are in progress. See
+> [CHANGELOG.md](./CHANGELOG.md).
+
+## Install
+
+```bash
+npm i -D shotlist playwright
+```
+
+Playwright is an optional peer dependency. shotlist does not install it, because its
+postinstall downloads browsers.
+
+## Quick start
+
+**1. Configure the project once** — `shotlist.config.yaml` in the project root:
 
 ```yaml
-# screenshots/recipes/order-row.yaml
+site:
+  url: http://localhost:3000
+  viewport: { width: 1440, height: 900 }
+  scale: 2
+  theme: dark
+
+install:
+  guide: content/guide/images
+  social: assets/social
+```
+
+**2. Write a recipe** — `screenshots/recipes/order-row.yaml`:
+
+```yaml
 name: order-row
-install: docs
+install: guide
 
 setup:
   - click: { role: button, name: Orders }
 
 clip:
-  find: { listRow: Acme Corp }
+  css: '.order-row'
+  contains: Acme Corp
   pad: 20
 
 marks:
@@ -27,76 +54,174 @@ marks:
   status: { within: clip, text: Open }
 
 callouts:
-  - { mark: amount, text: What they owe,   place: left }
+  - { mark: amount, text: What they owe, place: left }
   - { mark: status, text: Where it stands, place: right }
 ```
+
+**3. Shoot it:**
 
 ```bash
 npx shotlist order-row --install
 ```
 
-## Why the callouts aren't positioned by hand
+The image is written to `screenshots/out/order-row.png`, and `--install` copies it to
+`content/guide/images/order-row.png`.
 
-`place: left` is the whole idea. shotlist measures the label, grows the canvas if the
-label needs room outside the frame, routes the arrow to the nearest edge of the box, and
-steps a label further out when it would collide with one already placed. You say which
-side; it works out the geometry.
+## Configuration
 
-That is what makes a recipe survive a redesign. Move the button, re-run the recipe, and
-the box still lands on it — because the box was never a coordinate.
+| Key                 | Default              | What it sets                                       |
+| ------------------- | -------------------- | -------------------------------------------------- |
+| `site.url`          | required             | Where the site is running                          |
+| `site.viewport`     | `1280 × 800`         | Browser size                                       |
+| `site.scale`        | `2`                  | Device pixel ratio; `2` gives Retina images        |
+| `site.theme`        | `light`              | `light`, `dark` or `no-preference`                 |
+| `site.reducedMotion`| `true`               | Disables animation before capture                  |
+| `site.ready`        | —                    | Selector waited for after each navigation          |
+| `site.settle`       | `0`                  | Extra milliseconds to wait after `ready`           |
+| `site.timeout`      | `15000`              | Per-step timeout in milliseconds                   |
+| `paths.recipes`     | `screenshots/recipes`| Where recipes live                                 |
+| `paths.macros`      | `screenshots/macros` | Where macros live                                  |
+| `paths.data`        | `screenshots/data`   | Where data files live                              |
+| `paths.out`         | `screenshots/out`    | Where images are written                           |
+| `install`           | `{}`                 | Named destinations you refer to by name in a recipe |
+| `finders`           | `{}`                 | Named query aliases (see [Finders](#finders))      |
+| `check.threshold`   | `0.002`              | Pixel difference `--check` tolerates               |
 
-## Install
+### Style
 
-```bash
-npm i -D shotlist
-```
-
-Playwright is an **optional peer dependency**: its postinstall downloads browsers, and a
-docs site shouldn't pay that on every CI install. Install it yourself if you haven't
-already, and shotlist will drive the Chrome you have.
-
-```bash
-npm i -D playwright
-```
-
-## Config
-
-One `shotlist.config.yaml` at your project root holds everything that is true of your
-site rather than of one screenshot — where it runs, what the callouts look like, where
-images install to.
+Every drawing constant is configurable. These are the defaults:
 
 ```yaml
-site:
-  url: http://localhost:3000
-  viewport: { width: 1440, height: 900 }
-  scale: 2 # Retina
-  theme: dark
-  ready: 'text=Dashboard' # a selector proving the app booted
-
 style:
-  color: '#DC2626'
+  color: '#DC2626' # boxes, arrows, discs
+  canvas: '#FFFFFF' # fills space added around the image for labels
+  box: { width: 6, radius: 10, pad: 8 }
+  arrow: { shaft: 6, headHalf: 19, headLength: 38 }
   label:
-    fill: '#FFFFFF'
-    stroke: '#DC2626'
+    font: 'Arial, Helvetica, sans-serif'
+    weight: 700
     size: 44
-
-install:
-  docs: docs/assets/screens
-  marketing: site/src/assets/shots
+    fill: '#FFFFFF' # glyph fill
+    stroke: '#DC2626' # outline around the glyphs; defaults to `color`
+    strokeWidth: 6
+    gap: 40 # distance from the box
+  number: { radius: 26, size: 40, fill: '#DC2626', text: '#FFFFFF' }
 ```
 
-Nothing about any one site is baked into the package. Every colour, weight, font and
-size above has a neutral default and is yours to change.
+Sizes are in image pixels, so they do not change when `scale` does.
+
+A recipe may override any of these under its own `style:` key.
+
+## Recipes
+
+| Field       | Default    | What it does                                                |
+| ----------- | ---------- | ----------------------------------------------------------- |
+| `name`      | filename   | Output filename, without the extension                      |
+| `source`    | `app`      | `app` drives the site; `file` annotates an existing PNG      |
+| `file`      | —          | The PNG to annotate, with `source: file`                     |
+| `install`   | —          | Which named destination to copy to                           |
+| `url`       | `site.url` | Page to open for this recipe                                 |
+| `viewport`  | site's     | Viewport for this recipe                                     |
+| `scale`     | site's     | Device pixel ratio for this recipe                           |
+| `theme`     | site's     | Colour scheme for this recipe                                |
+| `style`     | —          | Style overrides for this recipe                              |
+| `setup`     | `[]`       | Steps that drive the site into the state to capture          |
+| `clip`      | `viewport` | The region to capture: `viewport`, `full`, or a query        |
+| `marks`     | `{}`       | Named regions, resolved after `setup` runs                   |
+| `callouts`  | `[]`       | What to draw on those marks                                  |
+| `numbered`  | —          | Marks to number 1…n with a disc, in the order given          |
+
+## Steps
+
+Each step is a mapping led by one verb. Some verbs take extra keys.
+
+| Step                            | Does                                                     |
+| ------------------------------- | -------------------------------------------------------- |
+| `goto: <url>`                   | Navigate                                                 |
+| `click: <query>`                | Click an element                                         |
+| `dblclick: <query>`             | Double-click                                             |
+| `hover: <query>`                | Move the pointer onto an element                          |
+| `fill: <query>` + `value:`      | Set the value of an input                                |
+| `select: <query>` + `option:`   | Choose an option; `optionLabel:` matches visible text     |
+| `check:` / `uncheck: <query>`   | Set a checkbox                                           |
+| `press: <key>` + `on:`          | Press a key, optionally after focusing an element        |
+| `type: <text>` + `on:`          | Type text                                                |
+| `blur: <query>`                 | Remove focus                                             |
+| `scrollIntoView: <query>`       | Scroll an element into view                              |
+| `wait: <ms \| query>`           | Wait a fixed time, or until an element exists            |
+| `readValue: <query>` + `as:`    | Read an input's value into a variable                    |
+| `use: <macro>` + `with:`        | Run a macro                                              |
+| `repeat: <n>` + `steps:`        | Run steps n times                                        |
+| `each: <list>` + `as:`, `steps:`| Run steps once per item                                  |
+| `optional: [steps]`             | Run steps, ignoring failures                             |
+| `openPage: <url>` + `as:`       | Open a second page and name it                           |
+| `usePage: <name>`               | Switch which page later steps drive                      |
+
+There is no step that evaluates JavaScript. If a screenshot cannot be described with
+these, that is a missing verb — see
+[CONTRIBUTING.md](./CONTRIBUTING.md#adding-a-step-verb-or-a-query-primitive).
+
+## Queries
+
+A query says which element to act on or measure. Keys combine: sources choose the
+candidates, filters narrow them, traversal moves from them, and selection picks one.
+
+**Sources**
+
+| Key           | Matches                                     |
+| ------------- | ------------------------------------------- |
+| `css`         | A CSS selector                              |
+| `role`+`name` | ARIA role and accessible name               |
+| `label`       | Form control by its label                   |
+| `placeholder` | Input by placeholder text                   |
+| `testid`      | `data-testid`                               |
+| `text`        | Element whose trimmed text equals the value |
+| `heading`     | `h1`–`h6` with this exact text              |
+
+**Filters**
+
+| Key                                    | Keeps elements that…                       |
+| -------------------------------------- | ------------------------------------------ |
+| `contains`                             | contain this text                          |
+| `containingAll`                        | contain all of these strings               |
+| `matching`                             | have text matching this regular expression |
+| `maxChildren` / `minChildren`          | have at most / at least this many children |
+| `minWidth` `maxWidth`                  | are within these widths                    |
+| `minHeight` `maxHeight`                | are within these heights                   |
+| `narrowerThan` / `widerThan`           | are narrower / wider than this             |
+| `visible`                              | have a non-zero size                       |
+| `within`                               | sit inside an already-resolved mark        |
+
+Sizes take pixels (`400`) or viewport units (`95vw`, `50vh`).
+
+**Traversal**
+
+| Key         | Moves to                                                      |
+| ----------- | ------------------------------------------------------------- |
+| `ancestor`  | The first ancestor matching the filters given                 |
+| `parent`    | The parent element                                            |
+| `child: n`  | The nth child                                                 |
+| `children`  | All children                                                  |
+
+`ancestor` takes `pick: nearest` (default) or `pick: outermost`. `outermost` keeps
+climbing while the parent also matches — this is how you reach a modal's card rather
+than stopping at the heading inside it.
+
+**Selection and shape**
+
+| Key                                    | Effect                                   |
+| -------------------------------------- | ---------------------------------------- |
+| `pick: first \| last \| smallest \| largest` | Which candidate to use             |
+| `nth: n`                               | The candidate at this position           |
+| `pad: n`                               | Grow the resulting box on all sides      |
+| `grow: { top, right, bottom, left }`   | Grow it on specific sides                |
+| `span: [query, query]`                 | The bounding box of several queries      |
+| `rect: [x, y, width, height]`          | A literal box, for recipes with no page  |
 
 ## Finders
 
-Most elements are reachable with the accessible queries you already know — `role`,
-`label`, `placeholder`, `text`, `css`. Some aren't: the card inside a full-screen
-overlay, the row that is the smallest box holding both a name and an amount, the third
-column of a grid.
-
-Rather than dropping into JavaScript for those, shotlist has a small query language, and
-you name the useful combinations once in your config:
+Name a query in `finders:` and recipes can call it by name. `$1`, `$2` are the
+arguments.
 
 ```yaml
 finders:
@@ -108,43 +233,114 @@ finders:
     maxChildren: 12
     pick: smallest
 
-  # The modal card owning a heading — climbed out of its overlay.
+  # The card owning a heading, climbed out of its full-screen overlay.
   panel:
     heading: $1
     ancestor: { narrowerThan: 95vw, pick: outermost }
 ```
 
-Recipes then just say `{ listRow: Acme Corp }` or `{ panel: Edit order }`.
-
-## Editor support
-
-Every schema ships with the package, so an editor with the YAML language server
-autocompletes verbs, query keys and your own finder names as you type:
-
 ```yaml
-# yaml-language-server: $schema=../../node_modules/shotlist/dist/recipe.schema.json
+clip: { listRow: Acme Corp }
+marks:
+  dialog: { panel: Edit order }
 ```
 
-## Checking for staleness
+## Callouts
+
+A callout marks one region. `place` says which side of it the label goes on; shotlist
+works out the position, extends the canvas if the label needs room outside the image, and
+moves a label further out if it would overlap one already drawn.
+
+| Field   | Default | What it does                                                       |
+| ------- | ------- | ------------------------------------------------------------------ |
+| `mark`  | required| Which mark to draw on                                              |
+| `text`  | —       | Label text                                                          |
+| `n`     | —       | Number shown in a disc, for matching a numbered list in the prose   |
+| `place` | `right` | `left`, `right`, `top`, `bottom`, or `corner` for a disc inside     |
+| `badge` | `tl`    | Which corner, with `place: corner`                                  |
+| `box`   | `true`  | Whether to draw the outline                                        |
+| `pad`   | style's | Distance between the outline and the element                        |
+| `gap`   | style's | Distance between the label and the outline                          |
+
+`numbered: [a, b, c]` is shorthand for one numbered disc per mark, in order.
+
+## Macros and data
+
+Setup shared between recipes goes in `paths.macros`, one file per macro. The filename is
+its name.
+
+```yaml
+# screenshots/macros/sign-in.yaml
+defaults:
+  who: sam@example.com
+steps:
+  - fill: { label: Email }
+    value: $who
+  - click: { role: button, name: Sign in }
+```
+
+```yaml
+setup:
+  - use: sign-in
+  - use: sign-in
+    with: { who: admin@example.com }
+```
+
+Files in `paths.data` are in scope by filename: `screenshots/data/orders.yaml` is
+`$orders`, and `each: $orders` iterates it.
+
+## Annotating an existing image
+
+For screens a script cannot reach — anything behind a sign-in you cannot automate, or a
+browser extension's UI — point a recipe at a PNG. Callouts, style and install work the
+same way.
+
+There is no page to query, so marks are literal rectangles measured off the image:
+`[x, y, width, height]` in image pixels.
+
+```yaml
+name: billing-settings
+source: file
+file: captures/billing-settings.png
+install: guide
+
+marks:
+  plan: { rect: [866, 874, 150, 50] }
+
+callouts:
+  - { mark: plan, text: The current plan, place: top }
+```
+
+## Checking for stale screenshots
 
 ```bash
 npx shotlist --check
 ```
 
-Re-shoots every recipe and compares it against the image you committed, so "which of our
-screenshots are out of date?" is a command rather than an afternoon of scrolling.
+Re-shoots every recipe and compares each against the committed image, reporting the ones
+that changed. Exits non-zero if any did, so it can run in CI.
 
-## Screens a script can't reach
+## CLI
 
-Anything behind a sign-in, or a browser extension's own UI, still gets captured by hand —
-but it doesn't need a second pipeline. Point a recipe at the PNG and it gets the same
-callouts, from the same config:
+```bash
+npx shotlist                      # list every recipe
+npx shotlist <name> [<name>…]     # shoot into paths.out
+npx shotlist <name> --install     # …and copy to its install destination
+npx shotlist --all --install      # shoot everything
+npx shotlist --check              # compare against committed images
+npx shotlist --config <file>      # use a specific config
+```
+
+## Editor support
+
+The JSON Schemas ship with the package. Point at them for autocomplete and inline
+validation:
 
 ```yaml
-name: billing-settings
-source: file
-file: docs/assets/incoming/billing-settings.png
+# yaml-language-server: $schema=../../node_modules/shotlist/dist/recipe.schema.json
 ```
+
+`dist/schema.json` is the config, `dist/macro.schema.json` is a macro.
 
 ## License
 

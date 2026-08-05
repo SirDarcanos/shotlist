@@ -85,10 +85,22 @@ export const SpanQuery = z
   })
   .strict()
 
-export const Query: z.ZodType<QueryInput> = z.union([SpanQuery, ElementQuery])
+/** A literal box in image pixels, for a recipe annotating a PNG with no DOM to query. */
+export const RectQuery = z
+  .object({
+    rect: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+    pad: z.number().optional(),
+    grow: Grow.optional(),
+  })
+  .strict()
+
+export const Query: z.ZodType<QueryInput> = z.union([RectQuery, SpanQuery, ElementQuery])
 
 export type ElementQueryInput = z.input<typeof ElementQuery>
-export type QueryInput = ElementQueryInput | { span: QueryInput[]; pad?: number; grow?: z.infer<typeof Grow> }
+export type QueryInput =
+  | ElementQueryInput
+  | { rect: [number, number, number, number]; pad?: number; grow?: z.infer<typeof Grow> }
+  | { span: QueryInput[]; pad?: number; grow?: z.infer<typeof Grow> }
 
 /** Every key `ElementQuery` understands — anything else in a one-key object is an alias call. */
 export const QUERY_KEYS: ReadonlySet<string> = new Set(Object.keys(ElementQuery.shape))
@@ -202,6 +214,11 @@ export function evaluateQuery(
       width: rect.width + left + right,
       height: rect.height + top + bottom,
     }
+  }
+
+  if ('rect' in spec) {
+    const [x, y, width, height] = spec.rect
+    return padded({ x, y, width, height }, spec.pad, spec.grow)
   }
 
   if ('span' in spec) {
