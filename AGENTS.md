@@ -19,9 +19,11 @@ missing. Add that.
 
 Do not add an `eval:` step, or any other way to run JavaScript from a recipe.
 
-There is one exception, and it lives in the consuming project rather than here: a project
-may point `finders` at its own module for a DOM shape the query language cannot express.
-If that is used often, the query language is too small — fix it here.
+There is no escape hatch. A config field for one was declared before anything used it and
+removed once five real captures were written without needing it — an extension point that
+exists but is never exercised is a place for the language to stop growing. If a DOM shape
+genuinely cannot be expressed, that is a gap in the query language and it gets fixed here,
+with the shot that needs it as the evidence.
 
 ## Rules
 

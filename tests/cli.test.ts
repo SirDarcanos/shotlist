@@ -1,4 +1,4 @@
-import { cpSync, existsSync } from 'node:fs'
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { run } from '../src/cli.js'
@@ -22,13 +22,13 @@ describe('shotlist', () => {
   it('lists the recipes when given nothing to do', async () => {
     const { code, out } = await cli(project(), [])
     expect(code).toBe(0)
-    expect(out.split('\n')).toEqual(['annotated', 'modal', 'order-row'])
+    expect(out.split('\n')).toEqual(['annotated', 'modal', 'order-row', 'volatile'])
   })
 
   it('names the recipes a project has when one is misspelled', async () => {
     const { code, err } = await cli(project(), ['order-rows'])
     expect(code).toBe(1)
-    expect(err).toMatch(/unknown recipe "order-rows".*annotated, modal, order-row/s)
+    expect(err).toMatch(/unknown recipe "order-rows".*annotated, modal, order-row, volatile/s)
   })
 
   it('shoots a named recipe and installs it', { timeout: 120_000 }, async () => {
@@ -90,6 +90,26 @@ describe('--check', () => {
     const { code, out } = await cli(root, ['--check', 'order-row'])
     expect(code).toBe(1)
     expect(out).toMatch(/CHANGED {2}order-row — size changed/)
+  })
+
+  it('skips a recipe that opts out, whatever is committed for it', async () => {
+    const root = project()
+    await cli(root, ['volatile', '--install'])
+    const { code, out } = await cli(root, ['--check', 'volatile'])
+    expect(code).toBe(0)
+    expect(out).toContain('skipped  volatile')
+    expect(out).toContain('opts out of checking')
+  })
+
+  it('honours a threshold the recipe sets for itself', { timeout: 120_000 }, async () => {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    // A threshold of 0 calls any difference at all a change; the shot is stable, so this
+    // proves the recipe's own number is the one being used rather than the project's.
+    const file = join(root, 'recipes/order-row.yaml')
+    writeFileSync(file, `${readFileSync(file, 'utf8')}\ncheck: { threshold: 0, tolerance: 0 }\n`)
+    const { out } = await cli(root, ['--check', 'order-row'])
+    expect(out).toMatch(/same|CHANGED/)
   })
 
   it('skips a recipe that installs nowhere, since there is nothing to compare', async () => {

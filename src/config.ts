@@ -82,8 +82,6 @@ export const Config = z.object({
   install: z.record(z.string(), z.string()).default({}),
   /** Project-defined query aliases: `trackerRow: { css: …, contains: $1 }`. */
   finders: z.record(z.string(), z.unknown()).default({}),
-  /** A module exporting extra finders, for DOM shapes the query language can't express. */
-  findersModule: z.string().optional(),
   check: z
     .object({
       /** The fraction of differing pixels a shot may have before it counts as changed. */

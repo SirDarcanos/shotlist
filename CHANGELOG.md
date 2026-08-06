@@ -34,12 +34,24 @@ Everything below came out of pointing shotlist at a real application for the fir
 - **A finder called with `null`** takes no arguments, rather than being handed the string
   "null".
 
+- **`check` on a recipe.** `false` skips it entirely, and a `threshold` or `tolerance`
+  there overrides the project's for that recipe alone. A frame containing live dice or a
+  clock differs on every re-shoot, and a staleness check that always reports a change is
+  one nobody reads.
 - **A warning when the font named is not available.** A family that is not installed
   falls back silently, so every label renders in another typeface with nothing to report
   it. `document.fonts.check()` is no help — it answers true for a family that does not
   exist — so the rendered text is measured instead.
 - **`style.label.fontUrl`**, a stylesheet fetched before drawing, so a font that is not
   installed on the machine can still be used. Needs network access at shoot time.
+
+### Removed
+
+- **`findersModule`**, a config field for an escape hatch, declared before anything used
+  it and never wired to anything. Five real captures were written without needing it, and
+  an extension point that exists but is never exercised is a place for the query language
+  to stop growing. A shape that cannot be expressed is a gap to fix in the language, with
+  the shot that needs it as the evidence.
 
 ### Fixed
 

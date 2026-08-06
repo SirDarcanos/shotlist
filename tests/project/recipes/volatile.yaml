@@ -1,0 +1,10 @@
+# A shot whose content the recipe does not decide — the sort that frames live dice or a
+# clock. Re-shooting it always differs, so diffing it would only ever cry wolf.
+name: volatile
+install: guide
+check: false
+clip: viewport
+marks:
+  bar: { css: .bar }
+callouts:
+  - { mark: bar, text: The top bar, place: bottom, inside: true }

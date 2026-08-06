@@ -147,22 +147,23 @@ number here to match.
 
 ## Recipes
 
-| Field      | Default    | What it does                                            |
-| ---------- | ---------- | ------------------------------------------------------- |
-| `name`     | filename   | Output filename, without the extension                  |
-| `source`   | `app`      | `app` drives the site; `file` annotates an existing PNG |
-| `file`     | —          | The PNG to annotate, with `source: file`                |
-| `install`  | —          | Which named destination to copy to                      |
-| `url`      | `site.url` | Page to open for this recipe                            |
-| `viewport` | site's     | Viewport for this recipe                                |
-| `scale`    | site's     | Device pixel ratio for this recipe                      |
-| `theme`    | site's     | Colour scheme for this recipe                           |
-| `style`    | —          | Style overrides for this recipe                         |
-| `setup`    | `[]`       | Steps that drive the site into the state to capture     |
-| `clip`     | `viewport` | The region to capture: `viewport`, `full`, or a query   |
-| `marks`    | `{}`       | Named regions, resolved after `setup` runs              |
-| `callouts` | `[]`       | What to draw on those marks                             |
-| `numbered` | —          | Marks to number 1…n with a disc, in the order given     |
+| Field      | Default    | What it does                                              |
+| ---------- | ---------- | --------------------------------------------------------- |
+| `name`     | filename   | Output filename, without the extension                    |
+| `source`   | `app`      | `app` drives the site; `file` annotates an existing PNG   |
+| `file`     | —          | The PNG to annotate, with `source: file`                  |
+| `install`  | —          | Which named destination to copy to                        |
+| `url`      | `site.url` | Page to open for this recipe                              |
+| `viewport` | site's     | Viewport for this recipe                                  |
+| `scale`    | site's     | Device pixel ratio for this recipe                        |
+| `theme`    | site's     | Colour scheme for this recipe                             |
+| `style`    | —          | Style overrides for this recipe                           |
+| `setup`    | `[]`       | Steps that drive the site into the state to capture       |
+| `clip`     | `viewport` | The region to capture: `viewport`, `full`, or a query     |
+| `marks`    | `{}`       | Named regions, resolved after `setup` runs                |
+| `callouts` | `[]`       | What to draw on those marks                               |
+| `numbered` | —          | Marks to number 1…n with a disc, in the order given       |
+| `check`    | project's  | This recipe's own `--check` limits, or `false` to skip it |
 
 ## Steps
 

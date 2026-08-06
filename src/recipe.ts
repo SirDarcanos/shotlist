@@ -159,6 +159,22 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
       callouts: z.array(Callout).default([]),
       /** Shorthand: number these marks 1..n, in order, with a disc on each box. */
       numbered: Numbered.optional(),
+      /**
+       * How `--check` treats this recipe. `false` never diffs it, for a shot whose
+       * content the recipe does not control — live dice, a clock, anything the
+       * application decides for itself.
+       */
+      check: z
+        .union([
+          z.literal(false),
+          z
+            .object({
+              threshold: z.number().min(0).max(1).optional(),
+              tolerance: z.number().min(0).max(255).optional(),
+            })
+            .strict(),
+        ])
+        .optional(),
     })
     .strict()
 }

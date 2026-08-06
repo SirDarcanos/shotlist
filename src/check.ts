@@ -88,6 +88,16 @@ export async function check(
     await page.setContent('<body></body>')
 
     for (const recipe of recipes) {
+      if (recipe.check === false) {
+        results.push({
+          name: recipe.name!,
+          status: 'skipped',
+          reason: 'the recipe opts out of checking',
+        })
+        continue
+      }
+      // The project's limits, with whatever this recipe says on top.
+      const limits = { ...loaded.config.check, ...(recipe.check || {}) }
       const against = committedFile(recipe, loaded)
       if (!against) {
         results.push({
@@ -106,7 +116,7 @@ export async function check(
       const compared = await page.evaluate(comparePixels, {
         before: uri(against),
         after: uri(shotResult.file),
-        tolerance: loaded.config.check.tolerance,
+        tolerance: limits.tolerance,
       })
       if (compared.differing < 0) {
         results.push({
@@ -121,7 +131,7 @@ export async function check(
       const ratio = compared.total ? compared.differing / compared.total : 0
       results.push({
         name: recipe.name!,
-        status: ratio > loaded.config.check.threshold ? 'changed' : 'same',
+        status: ratio > limits.threshold ? 'changed' : 'same',
         ratio,
         shot: shotResult.file,
         against,
