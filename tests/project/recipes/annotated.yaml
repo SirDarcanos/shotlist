@@ -1,0 +1,13 @@
+# A screen no script can reach — behind a sign-in, or a browser extension's own UI — is
+# captured by hand and annotated here. There is no page to query, so a mark is a literal
+# box measured off the image, in image pixels.
+name: annotated
+source: file
+file: incoming/invoice.png
+install: guide
+
+marks:
+  due: { rect: [68, 120, 200, 36] }
+
+callouts:
+  - { mark: due, text: When it is owed, place: right }

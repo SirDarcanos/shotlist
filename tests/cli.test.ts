@@ -22,13 +22,13 @@ describe('shotlist', () => {
   it('lists the recipes when given nothing to do', async () => {
     const { code, out } = await cli(project(), [])
     expect(code).toBe(0)
-    expect(out.split('\n')).toEqual(['modal', 'order-row'])
+    expect(out.split('\n')).toEqual(['annotated', 'modal', 'order-row'])
   })
 
   it('names the recipes a project has when one is misspelled', async () => {
     const { code, err } = await cli(project(), ['order-rows'])
     expect(code).toBe(1)
-    expect(err).toMatch(/unknown recipe "order-rows".*modal, order-row/s)
+    expect(err).toMatch(/unknown recipe "order-rows".*annotated, modal, order-row/s)
   })
 
   it('shoots a named recipe and installs it', { timeout: 120_000 }, async () => {

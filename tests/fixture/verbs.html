@@ -1,0 +1,67 @@
+<!doctype html>
+<!--
+  The page the step-verb tests drive. Every control records what happened into #log, so a
+  test can assert that a verb did what it says rather than that it merely ran.
+
+  Separate from index.html on purpose: that page's geometry is pinned by `data-rect`
+  attributes the jsdom tests read, and adding controls to it would move them.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>shotlist verbs fixture</title>
+    <style>
+      body {
+        font: 16px/1.4 system-ui, sans-serif;
+        margin: 16px;
+      }
+      #log {
+        min-height: 24px;
+        font-family: ui-monospace, monospace;
+      }
+      .spacer {
+        height: 1500px;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="log"></p>
+
+    <button id="btnDouble">Double</button>
+    <button id="btnHover">Hover</button>
+
+    <label for="inpPreset">Preset</label>
+    <input id="inpPreset" value="already here" />
+
+    <label for="inpTyped">Typed</label>
+    <input id="inpTyped" />
+
+    <label for="chkAgree">Agree</label>
+    <input type="checkbox" id="chkAgree" />
+
+    <label for="selStatus">Status</label>
+    <select id="selStatus">
+      <option value="open">Open</option>
+      <option value="closed">Closed</option>
+    </select>
+
+    <div class="spacer"></div>
+    <button id="btnDeep">Deep</button>
+
+    <script>
+      const log = document.getElementById('log')
+      const note = (what) => {
+        log.textContent = `${log.textContent} ${what}`.trim()
+      }
+      btnDouble.addEventListener('dblclick', () => note('doubled'))
+      btnHover.addEventListener('mouseenter', () => note('hovered'))
+      inpTyped.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') note('entered')
+      })
+      inpPreset.addEventListener('blur', () => note('blurred'))
+      chkAgree.addEventListener('change', () => note(chkAgree.checked ? 'checked' : 'unchecked'))
+      selStatus.addEventListener('change', () => note(`status=${selStatus.value}`))
+      btnDeep.addEventListener('click', () => note('deep'))
+    </script>
+  </body>
+</html>

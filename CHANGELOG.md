@@ -36,6 +36,11 @@ Everything below came out of pointing shotlist at a real application for the fir
 
 ### Fixed
 
+- **A label placed over the shot could land on another label, or on another mark's box.**
+  Collision avoidance only ran for labels in margins.
+- **A label placed over the shot could be clipped by the edge of the canvas.** The clamp
+  measured the text but not the outline painted around it, and a label with no room beside
+  its mark was pushed back over the mark instead of flipping to the other side.
 - A step's own keys were interpolated together with the steps nested inside it, so `each`
   looked up its children's variables before the loop had bound them.
 - A loop bound its variable onto its direct children only. A macro used inside a loop may

@@ -30,6 +30,7 @@ afterAll(removeProjects)
 describe('shoot', () => {
   it(
     'drives the page, clips a region, draws the callouts and installs the image',
+    { timeout: 120_000 },
     async () => {
       const { loaded, library } = project()
       const recipe = withNumbering(library.recipes.get('order-row')!)
@@ -45,35 +46,63 @@ describe('shoot', () => {
       const pixels = pngSize(result.file)
       expect(pixels.width).toBe(result.size.width * 2)
     },
-    { timeout: 120_000 },
   )
 
-  it(
-    'numbers marks in the order the recipe lists them',
-    async () => {
-      const { loaded, library } = project()
-      const recipe = withNumbering(library.recipes.get('modal')!)
-      expect(recipe.callouts.map((c) => [c.mark, c.n])).toEqual([
-        ['bar', 1],
-        ['detail', 2],
-        ['actions', 3],
-      ])
+  it('numbers marks in the order the recipe lists them', { timeout: 120_000 }, async () => {
+    const { loaded, library } = project()
+    const recipe = withNumbering(library.recipes.get('modal')!)
+    expect(recipe.callouts.map((c) => [c.mark, c.n])).toEqual([
+      ['bar', 1],
+      ['detail', 2],
+      ['actions', 3],
+    ])
 
-      const result = await shoot(recipe, library, loaded)
-      expect(existsSync(result.file)).toBe(true)
-      // The top bar runs edge to edge, so its box and its disc would both be sliced by
-      // the shot's own boundary — the canvas grows instead.
-      expect(result.size.width).toBeGreaterThan(1000)
-      expect(result.size.height).toBeGreaterThan(700)
-    },
-    { timeout: 120_000 },
-  )
+    const result = await shoot(recipe, library, loaded)
+    expect(existsSync(result.file)).toBe(true)
+    // The top bar runs edge to edge, so its box and its disc would both be sliced by
+    // the shot's own boundary — the canvas grows instead.
+    expect(result.size.width).toBeGreaterThan(1000)
+    expect(result.size.height).toBeGreaterThan(700)
+  })
 
   it('refuses an install destination the config never named', async () => {
     const { loaded, library } = project()
     const recipe = { ...library.recipes.get('modal')!, install: 'nowhere' }
     await expect(shoot(recipe, library, loaded, { install: true })).rejects.toThrow(
       /installs to "nowhere".*it defines guide/s,
+    )
+  })
+})
+
+describe('source: file', () => {
+  it(
+    'annotates an image already on disk, with no page to query',
+    { timeout: 120_000 },
+    async () => {
+      const { loaded, library } = project()
+      const recipe = withNumbering(library.recipes.get('annotated')!)
+      const result = await shoot(recipe, library, loaded, { install: true })
+
+      expect(existsSync(result.file)).toBe(true)
+      expect(existsSync(result.installed!)).toBe(true)
+
+      // The source is 600×280 image pixels, which is 300×140 at the project's 2× scale.
+      // The label sits in a margin the canvas grows to the right, so it is wider than
+      // the source and exactly as tall.
+      expect(result.size.height).toBe(140)
+      expect(result.size.width).toBeGreaterThan(300)
+      expect(pngSize(result.file).width).toBe(result.size.width * 2)
+    },
+  )
+
+  it('refuses a mark that queries the page, since there is no page', async () => {
+    const { loaded, library } = project()
+    const recipe = {
+      ...library.recipes.get('annotated')!,
+      marks: { due: { css: '.card' } },
+    }
+    await expect(shoot(recipe, library, loaded)).rejects.toThrow(
+      /has no page — give it a `rect: \[x, y, width, height\]`/,
     )
   })
 })

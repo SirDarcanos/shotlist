@@ -139,6 +139,84 @@ describe('placement', () => {
   })
 })
 
+/** Every label's box on the canvas, in the order they were drawn. */
+function labelBoxes() {
+  const seen = new Map<string, { x: number; y: number; w: number; h: number }>()
+  for (const node of document.querySelectorAll('#shotlist-layer text')) {
+    const text = node.textContent ?? ''
+    if (/^\d+$/.test(text)) continue // a disc's numeral, not a label
+    if (seen.has(text)) continue
+    seen.set(text, {
+      x: Number(node.getAttribute('x')),
+      y: Number(node.getAttribute('y')),
+      w: text.length * 10,
+      h: 20,
+    })
+  }
+  return [...seen.values()]
+}
+
+/** Whether two boxes overlap at all. */
+function overlap(
+  a: ReturnType<typeof labelBoxes>[number],
+  b: ReturnType<typeof labelBoxes>[number],
+) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+describe('appearance', () => {
+  // These assert what a reader sees rather than what the DOM contains. Both defects they
+  // pin shipped with sixteen passing structural tests behind them.
+  it('does not let two labels placed over the shot overlap', () => {
+    draw([
+      mark({ rect: { x: 40, y: 100, width: 60, height: 20 }, text: 'first one', inside: true }),
+      mark({ rect: { x: 40, y: 108, width: 60, height: 20 }, text: 'second one', inside: true }),
+    ])
+    const [a, b] = labelBoxes()
+    expect(a && b).toBeTruthy()
+    expect(overlap(a!, b!)).toBe(false)
+  })
+
+  it('keeps a label placed over the shot inside the canvas', () => {
+    // Against the right edge: clamping has to account for the outline, which is painted
+    // outside the measured text box.
+    const canvas = draw([
+      mark({ rect: { x: 360, y: 100, width: 30, height: 20 }, text: 'level', inside: true }),
+    ])
+    const [box] = labelBoxes()
+    expect(box!.x).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.w).toBeLessThanOrEqual(canvas.width)
+    expect(box!.y).toBeGreaterThanOrEqual(0)
+    expect(box!.y + box!.h).toBeLessThanOrEqual(canvas.height)
+  })
+
+  it('flips to the far side when the near one has no room', () => {
+    // The mark is hard against the right edge, so a label asked for the right has to go
+    // left rather than be clamped back over the mark it is naming.
+    draw([
+      mark({ rect: { x: 370, y: 100, width: 30, height: 20 }, text: 'over here', inside: true }),
+    ])
+    const [box] = labelBoxes()
+    expect(box!.x + box!.w).toBeLessThanOrEqual(370)
+  })
+
+  it('does not draw a label over another mark box', () => {
+    draw([
+      mark({ rect: { x: 200, y: 100, width: 60, height: 20 }, box: true }),
+      mark({ rect: { x: 60, y: 100, width: 60, height: 20 }, text: 'a label', inside: true }),
+    ])
+    const rect = document.querySelector('#shotlist-layer rect')!
+    const boxed = {
+      x: Number(rect.getAttribute('x')),
+      y: Number(rect.getAttribute('y')),
+      w: Number(rect.getAttribute('width')),
+      h: Number(rect.getAttribute('height')),
+    }
+    const [label] = labelBoxes()
+    expect(overlap(label!, boxed)).toBe(false)
+  })
+})
+
 describe('drawing', () => {
   it('draws one outlined box per mark, and none for box: false', () => {
     draw([mark(), mark({ rect: { x: 200, y: 40, width: 20, height: 20 }, box: false })])

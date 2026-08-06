@@ -127,7 +127,7 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     if (mark.inside) continue
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
-    const side = mark.place as Exclude<Place, 'corner'>
+    let side = mark.place as Exclude<Place, 'corner'>
     const need = side === 'left' || side === 'right' ? size.width + gap * 2 : size.height + gap * 2
     margin[side] = Math.max(margin[side], need)
   }
@@ -272,8 +272,29 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     disc(at.x, at.y, mark.n)
   }
 
-  // Labels are laid out per side, in the order they were written, and pushed along the
-  // margin so two never overlap.
+  // Everything already drawn that a label placed over the shot must not land on: the
+  // boxes, and each label as it is positioned.
+  const occupied: Array<{ x: number; y: number; w: number; h: number; owner?: Mark }> = marks
+    .filter((mark) => mark.box)
+    .map((mark) => {
+      const b = boxOf(mark)
+      return { x: b.left, y: b.top, w: b.right - b.left, h: b.bottom - b.top, owner: mark }
+    })
+
+  type Span = { x: number; y: number; w: number; h: number }
+  /** Whether two rects touch, counting anything within 8 image pixels as touching. */
+  const collides = (a: Span, b: Span) => {
+    const near = px(8)
+    return (
+      a.x < b.x + b.w + near &&
+      a.x + a.w + near > b.x &&
+      a.y < b.y + b.h + near &&
+      a.y + a.h + near > b.y
+    )
+  }
+
+  // Labels in a margin are laid out per side, in the order they were written, and pushed
+  // along the margin so two never overlap.
   const used: Record<string, Array<{ from: number; to: number }>> = {
     left: [],
     right: [],
@@ -328,15 +349,37 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
     const b = boxOf(mark)
-    const side = mark.place as Exclude<Place, 'corner'>
+    let side = mark.place as Exclude<Place, 'corner'>
 
     const dx = px(mark.dx ?? 0)
     const dy = px(mark.dy ?? 0)
     let x: number
     let y: number
     if (mark.inside) {
-      // Beside the box, over the shot, clamped so a label near an edge stays on canvas.
-      const hold = (value: number, max: number) => Math.min(Math.max(value, 0), Math.max(max, 0))
+      // The glyph outline is painted outside the measured box, so the edge a label must
+      // stay inside of is half a stroke in from the canvas.
+      const edge = px(style.label.strokeWidth) / 2
+      const hold = (value: number, max: number) =>
+        Math.min(Math.max(value, edge), Math.max(max - edge, edge))
+
+      // Flip to the far side when the near one has no room, rather than clamping the
+      // label back over the mark it is naming.
+      const room = {
+        left: b.left,
+        right: canvas.width - b.right,
+        top: b.top,
+        bottom: canvas.height - b.bottom,
+      }
+      const needs = side === 'left' || side === 'right' ? size.width + gap : size.height + gap
+      let use = side
+      if (room[use] < needs) {
+        const flip = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' }[
+          use
+        ] as typeof use
+        if (room[flip] >= needs) use = flip
+      }
+      side = use
+
       const wantX =
         side === 'left'
           ? b.left - gap - size.width
@@ -351,6 +394,18 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
             : (b.top + b.bottom) / 2 - size.height / 2
       x = hold(wantX + dx, canvas.width - size.width)
       y = hold(wantY + dy, canvas.height - size.height)
+
+      // Step clear of anything already drawn — along the axis the side does not fix, so
+      // the label stays beside its own mark.
+      const along = side === 'left' || side === 'right' ? 'y' : 'x'
+      const stride = (along === 'y' ? size.height : size.width) + px(12)
+      for (let tries = 0; tries < 24; tries++) {
+        const here: Span = { x, y, w: size.width, h: size.height }
+        const clash = occupied.find((other) => other.owner !== mark && collides(here, other))
+        if (!clash) break
+        if (along === 'y') y = hold(y + stride, canvas.height - size.height)
+        else x = hold(x + stride, canvas.width - size.width)
+      }
     } else if (side === 'left' || side === 'right') {
       const wanted = (b.top + b.bottom) / 2 - size.height / 2 + dy
       y = slot(side, wanted, size.height, canvas.height)
@@ -362,6 +417,8 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
       y =
         (side === 'top' ? margin.top - gap - size.height : canvas.height - margin.bottom + gap) + dy
     }
+
+    occupied.push({ x, y, w: size.width, h: size.height, owner: mark })
 
     linesOf(mark).forEach((line, index) => {
       const text = el<SVGTextElement>('text', {
