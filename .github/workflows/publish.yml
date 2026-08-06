@@ -61,6 +61,16 @@ jobs:
           fi
           echo "Publishing $pkg"
 
+      # Bumping the version and forgetting to move the entry out of Unreleased is a step
+      # a person does by hand, so it is a step a person forgets.
+      - name: Check the changelog records this version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' heading. Move the Unreleased entries under it."
+            exit 1
+          fi
+
       # `prepublishOnly` runs format:check, lint, typecheck, tests and build, so the gate
       # is not repeated here — it would run the browser suite twice. It also means a
       # manual `npm publish` from a laptop is held to the same standard as this job.

@@ -108,7 +108,9 @@ and provenance is attached automatically. Maintainers only:
 4. Push, including the tag: `git push --follow-tags`.
 5. Draft a GitHub release tagged `v<version>` and publish it.
 
-The workflow refuses to run if the tag and `package.json` disagree, then publishes.
+The workflow refuses to run if the tag and `package.json` disagree, or if `CHANGELOG.md`
+has no heading for the version being released — step 2 is easy to skip, and a release
+whose notes still say "unreleased" is the result. Then it publishes.
 `prepublishOnly` re-runs the whole gate inside that job, so a release cannot ship what a
 pull request could not merge — and a manual `npm publish` is held to the same standard.
 

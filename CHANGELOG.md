@@ -10,6 +10,8 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-06
+
 ### Fixed
 
 - **The font warning fired on a working font stack.** A stack is an ordered list of
@@ -170,3 +172,9 @@ there is no CLI yet, so the package is usable through its API and not from a ter
 The layers that turn a validated recipe into a PNG — running steps against Playwright,
 drawing the callouts, capturing and installing, and `--check` for staleness — plus the
 `shotlist` CLI itself. The README documents them; nothing in 0.0.1 runs them.
+
+[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/SirDarcanos/shotlist/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/SirDarcanos/shotlist/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/SirDarcanos/shotlist/compare/v0.0.1...v0.1.0
+[0.0.1]: https://github.com/SirDarcanos/shotlist/releases/tag/v0.0.1
