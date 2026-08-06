@@ -92,7 +92,11 @@ mean" suggestion on a typo.
 
 ## Releasing
 
-1. `npm run format:check && npm run lint && npm run typecheck && npm test && npm run build` — all green.
+Publishing runs from GitHub Actions through npm Trusted Publishing — there is no token,
+and provenance is attached automatically. Maintainers only:
+
+1. `npm run format:check && npm run lint && npm run typecheck && npm test && npm run build`
+   — all green.
 2. In [`CHANGELOG.md`](./CHANGELOG.md), move the `## [Unreleased]` entries under a new
    version heading with today's date, and leave an empty `Unreleased` above it.
 3. Bump and tag. npm's default commit message is a bare version number, so override it:
@@ -101,10 +105,12 @@ mean" suggestion on a typo.
    npm version minor -m "Release: %s"
    ```
 
-4. `npm publish` — `prepublishOnly` re-runs the format check, lint, typecheck, tests and
-   the build. Add
-   `--otp=<code>` if the account has 2FA.
-5. `git push --follow-tags`.
+4. Push, including the tag: `git push --follow-tags`.
+5. Draft a GitHub release tagged `v<version>` and publish it.
+
+The workflow refuses to run if the tag and `package.json` disagree, then publishes.
+`prepublishOnly` re-runs the whole gate inside that job, so a release cannot ship what a
+pull request could not merge — and a manual `npm publish` is held to the same standard.
 
 ### Breaking changes
 

@@ -1,0 +1,69 @@
+# Publishes to npm when a GitHub release is published.
+#
+# Releasing:
+#   1. Bump "version" in package.json and merge that to main.
+#   2. Draft a release on GitHub tagged v<version> and publish it.
+#
+# The job refuses to publish if the tag and package.json disagree, so a release tagged
+# v1.2.0 can never ship a tarball that says 1.1.0.
+#
+# There is no token. Publishing goes through npm Trusted Publishing: npm is told to trust
+# this repository and this workflow file by name, and the job proves who it is with a
+# short-lived OIDC credential issued per run. Nothing long-lived exists to leak or rotate,
+# and provenance is attached automatically.
+#
+# Configured at npmjs.com under the package's Settings → Trusted Publisher:
+#   repository  SirDarcanos/shotlist
+#   workflow    publish.yml
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # The OIDC credential npm exchanges for publish rights, and what lets it attach
+      # provenance: a signed public record of which commit and workflow built the
+      # tarball, so nobody has to take our word for what is inside it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Pinned, not `@latest`. This runs in the job holding the OIDC credential, so a
+      # compromised npm release would execute right beside it. The version below is what
+      # `@latest` resolved to when it was pinned, so this is no riskier than it was — it
+      # just stops resolving to whatever is newest at release time. Bump it deliberately.
+      - name: Use an npm new enough for trusted publishing
+        run: npm install -g npm@12.0.2
+
+      - run: npm ci
+
+      - name: Check the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Release is tagged $GITHUB_REF_NAME but package.json says $pkg."
+            exit 1
+          fi
+          echo "Publishing $pkg"
+
+      # `prepublishOnly` runs format:check, lint, typecheck, tests and build, so the gate
+      # is not repeated here — it would run the browser suite twice. It also means a
+      # manual `npm publish` from a laptop is held to the same standard as this job.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm publish --access public
