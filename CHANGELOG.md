@@ -10,6 +10,8 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-08-06
+
 ### Fixed
 
 - **A label above or below its mark was shaved by the edge of the canvas.** Only the side
@@ -210,7 +212,8 @@ The layers that turn a validated recipe into a PNG — running steps against Pla
 drawing the callouts, capturing and installing, and `--check` for staleness — plus the
 `shotlist` CLI itself. The README documents them; nothing in 0.0.1 runs them.
 
-[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.2.2...HEAD
+[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/SirDarcanos/shotlist/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/SirDarcanos/shotlist/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/SirDarcanos/shotlist/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/SirDarcanos/shotlist/compare/v0.1.0...v0.2.0
