@@ -52,7 +52,7 @@ beforeEach(() => {
     // that resolved from one that fell back. A stub that ignores the family would report
     // every font as missing.
     const family = this.getAttribute('font-family') ?? ''
-    const per = /no such family|Nowhere/.test(family) ? 9 : 10
+    const per = /no such family|Nowhere|Neither/.test(family) ? 9 : 10
     return { width: length * per, height: 20 } as DOMRect
   }
 })
@@ -277,17 +277,27 @@ describe('fonts', () => {
     expect(result.fontWarning).toBeUndefined()
   })
 
-  it('warns when the family named is not available and something else was used', () => {
-    // A font that is not installed falls back silently, so every label renders in another
-    // typeface with nothing to say so. `document.fonts.check()` cannot detect it — it
-    // answers true for a family that does not exist — so this measures instead.
+  it('says nothing when a later family in the stack resolves', () => {
+    // A stack is an ordered list of acceptable choices. A cross-platform one names Segoe
+    // UI and Roboto knowing most machines have neither, and that is it working.
     const result = drawAnnotations({
       image: IMAGE,
       scale: 2,
       style: { ...STYLE, label: { ...STYLE.label, font: 'Nowhere, Arial' } },
       marks: [mark({ text: 'a label', inside: true })],
     })
-    expect(result.fontWarning).toMatch(/Nowhere.*not available.*Arial was used/)
+    expect(result.fontWarning).toBeUndefined()
+  })
+
+  it('warns when none of the families named is available', () => {
+    // Then every label is set in whatever the browser defaults to, and nothing says so.
+    const result = drawAnnotations({
+      image: IMAGE,
+      scale: 2,
+      style: { ...STYLE, label: { ...STYLE.label, font: 'Nowhere, Neither, sans-serif' } },
+      marks: [mark({ text: 'a label', inside: true })],
+    })
+    expect(result.fontWarning).toMatch(/Nowhere, Neither.*none of them is available/)
   })
 
   it('ignores a generic family, which always resolves', () => {

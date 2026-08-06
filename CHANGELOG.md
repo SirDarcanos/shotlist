@@ -10,6 +10,16 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The font warning fired on a working font stack.** A stack is an ordered list of
+  acceptable choices, so a cross-platform one naming Segoe UI and Roboto has entries that
+  do not resolve on any given machine by design. It warned on the first entry that did not
+  resolve, which was every such stack, every run. It now warns only when _none_ of the
+  families named is available — the case where every label really is set in the browser's
+  default and nothing says so. `ui-sans-serif`, `ui-serif` and `-apple-system` also count
+  as generic keywords rather than faces to hunt for.
+
 ## [0.2.0] — 2026-08-06
 
 Everything below came out of pointing shotlist at a real application for the first time.

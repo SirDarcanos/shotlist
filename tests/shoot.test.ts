@@ -138,7 +138,7 @@ describe('style in a real browser', () => {
       const result = await withStyle({
         label: { font: '"Absolutely Not Installed", "Also Not Installed", serif' },
       })
-      expect(result.warnings?.[0]).toMatch(/Absolutely Not Installed.*not available/)
+      expect(result.warnings?.[0]).toMatch(/none of them is available/)
       // It still produced an image: a fallback is worth saying, not worth failing over.
       expect(existsSync(result.file)).toBe(true)
     },

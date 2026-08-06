@@ -67,7 +67,7 @@ export interface AnnotationSpec {
 export function drawAnnotations(spec: AnnotationSpec): {
   width: number
   height: number
-  /** Set when the first font named could not be resolved and something else was used. */
+  /** Set when no family named in `label.font` was available and the default was used. */
   fontWarning?: string
 } {
   const SVG = 'http://www.w3.org/2000/svg'
@@ -102,11 +102,14 @@ export function drawAnnotations(spec: AnnotationSpec): {
   }
 
   /**
-   * Which of the named families the browser actually used.
+   * Whether any family named was available.
    *
-   * A family that is not installed falls back silently — every label renders in another
-   * typeface and nothing reports it. `document.fonts.check()` is no help: it answers true
-   * for a family that does not exist. Measuring is the only reliable signal.
+   * A font stack is an ordered list of acceptable choices, so an entry that does not
+   * resolve is the stack working rather than a fault — a cross-platform one names Segoe
+   * UI and Roboto knowing most machines have neither. What is worth reporting is none of
+   * them resolving, because then every label is set in whatever the browser defaults to
+   * and nothing says so. `document.fonts.check()` cannot tell: it answers true for a
+   * family that does not exist. Measuring can.
    */
   const fontInUse = (): string | undefined => {
     const probe = (family: string) => {
@@ -118,18 +121,16 @@ export function drawAnnotations(spec: AnnotationSpec): {
       return width
     }
     const fallback = probe('"shotlist no such family"')
+    // The keywords meaning "whatever this platform has" are not faces to look for.
+    const generic =
+      /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|-apple-system|ui-[\w-]+)$/
     const named = style.label.font
       .split(',')
       .map((part) => part.trim())
-      .filter(
-        (part) => !/^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-\w+)$/.test(part),
-      )
+      .filter((part) => !generic.test(part))
     if (named.length === 0) return undefined
-    const resolved = named.find((family) => probe(family) !== fallback)
-    if (resolved === named[0]) return undefined
-    return resolved
-      ? `label.font asks for ${named[0]} first, which is not available here; ${resolved} was used instead`
-      : `label.font asks for ${named[0]}, which is not available here; the browser's default was used`
+    if (named.some((family) => probe(family) !== fallback)) return undefined
+    return `label.font names ${named.join(', ')}, and none of them is available here; the browser's default was used`
   }
   const fontWarning = fontInUse()
 
