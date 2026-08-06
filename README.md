@@ -341,6 +341,11 @@ setup:
 Files in `paths.data` are in scope by filename: `screenshots/data/orders.yaml` is
 `$orders`, and `each: $orders` iterates it.
 
+The filename becomes a `$name`, so keep it to letters, digits and underscores — a
+`$` reference stops at a hyphen, and `open-orders.yaml` cannot be reached. Group what
+would have been several hyphenated files into one and read them by path: `$orders.open`,
+`$orders.shipped`.
+
 ## Annotating an existing image
 
 For screens a script cannot reach — anything behind a sign-in you cannot automate, or a
