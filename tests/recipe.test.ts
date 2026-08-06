@@ -131,6 +131,15 @@ describe('expandSteps', () => {
 })
 
 describe('interpolate', () => {
+  it('leaves a loop body alone until the loop binds its variable', () => {
+    // The step's own keys resolve against the scope it was written in; the steps inside
+    // it cannot, because `each` binds `$row` only once it starts walking the list.
+    const step = { each: '$rows', as: 'row', steps: [{ click: { text: '$row.name' } }] }
+    const own = { ...step, steps: [] }
+    expect(() => interpolate(own, { rows: [{ name: 'Acme Corp' }] })).not.toThrow()
+    expect(() => interpolate(step, { rows: [{ name: 'Acme Corp' }] })).toThrow(/no value/)
+  })
+
   it('returns the value itself when the whole string is one reference', () => {
     expect(interpolate('$rows', { rows: [1, 2] })).toEqual([1, 2])
   })

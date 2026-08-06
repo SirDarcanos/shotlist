@@ -73,15 +73,38 @@ async function elementFor(
   return element
 }
 
-/** Run one recipe's steps against the page, in order. */
-export async function runSteps(steps: readonly ResolvedStep[], ctx: RunContext): Promise<void> {
-  for (const resolved of steps) await runStep(resolved, ctx)
+/**
+ * Run one recipe's steps against the page, in order.
+ *
+ * `scope` carries the variables a loop has bound. It flows down the whole subtree rather
+ * than being stamped onto each step: a macro used inside a loop may loop again, and the
+ * steps two levels down still need the outer loop's variable.
+ */
+export async function runSteps(
+  steps: readonly ResolvedStep[],
+  ctx: RunContext,
+  scope: Readonly<Record<string, unknown>> = {},
+): Promise<void> {
+  for (const resolved of steps) await runStep(resolved, ctx, scope)
 }
 
 /** Run one step, with `$name` resolved against the variables in scope where it was written. */
-async function runStep(resolved: ResolvedStep, ctx: RunContext): Promise<void> {
-  const scope = { ...ctx.vars, ...resolved.vars }
-  const step = interpolate(resolved.step, scope) as StepInput
+async function runStep(
+  resolved: ResolvedStep,
+  ctx: RunContext,
+  outer: Readonly<Record<string, unknown>>,
+): Promise<void> {
+  // A macro's own arguments beat a loop variable of the same name: `with:` is the more
+  // specific statement of the two.
+  const scope = { ...ctx.vars, ...outer, ...resolved.vars }
+  // A block's own keys resolve now; the steps inside it do not. `each` binds its loop
+  // variable when it runs, so interpolating its children here would look for a value
+  // that only exists one level down.
+  const own: StepInput = {}
+  for (const [key, value] of Object.entries(resolved.step)) {
+    own[key] = (key === 'steps' || key === 'optional') && Array.isArray(value) ? [] : value
+  }
+  const step = interpolate(own, scope) as StepInput
   const opts = { timeout: ctx.timeout }
   const page = ctx.page
 
@@ -164,7 +187,7 @@ async function runStep(resolved: ResolvedStep, ctx: RunContext): Promise<void> {
   }
   if ('repeat' in step) {
     const times = Number(step['repeat'])
-    for (let i = 0; i < times; i++) await runSteps(resolved.nested ?? [], ctx)
+    for (let i = 0; i < times; i++) await runSteps(resolved.nested ?? [], ctx, outer)
     return
   }
   if ('each' in step) {
@@ -174,17 +197,13 @@ async function runStep(resolved: ResolvedStep, ctx: RunContext): Promise<void> {
     }
     const name = text('as')
     for (const item of items) {
-      const nested = (resolved.nested ?? []).map((inner) => ({
-        ...inner,
-        vars: { ...inner.vars, [name]: item },
-      }))
-      await runSteps(nested, ctx)
+      await runSteps(resolved.nested ?? [], ctx, { ...outer, [name]: item })
     }
     return
   }
   if ('optional' in step) {
     try {
-      await runSteps(resolved.nested ?? [], ctx)
+      await runSteps(resolved.nested ?? [], ctx, outer)
     } catch {
       // `optional` exists for the dialog that is sometimes already closed.
     }
