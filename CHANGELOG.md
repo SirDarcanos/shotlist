@@ -10,6 +10,8 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-06
+
 Everything below came out of pointing shotlist at a real application for the first time.
 
 ### Added
