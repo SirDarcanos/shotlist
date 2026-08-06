@@ -249,6 +249,30 @@ describe('appearance', () => {
     expect(Math.min(...points)).toBeLessThanOrEqual(wanted + 1)
   })
 
+  it('points the arrow at the middle of the box, wherever the label sits', () => {
+    // The head lands on the box's edge midpoint. Following the label's height instead
+    // puts it wherever the label ended up, which reads as an arrow that missed.
+    draw([
+      mark({
+        rect: { x: 40, y: 100, width: 60, height: 60 },
+        text: 'a label',
+        place: 'right',
+        inside: true,
+        dy: 120,
+      }),
+    ])
+    const rect = document.querySelector('#shotlist-layer rect')!
+    const boxMiddle = Number(rect.getAttribute('y')) + Number(rect.getAttribute('height')) / 2
+    // The polygon's first point is the tip.
+    const tip = document
+      .querySelector('#shotlist-layer polygon')!
+      .getAttribute('points')!
+      .split(' ')[0]!
+      .split(',')
+      .map(Number)
+    expect(tip[1]).toBeCloseTo(boxMiddle, 1)
+  })
+
   it('does not draw a label over another mark box', () => {
     draw([
       mark({ rect: { x: 200, y: 100, width: 60, height: 20 }, box: true }),

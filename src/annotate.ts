@@ -138,14 +138,14 @@ export function drawAnnotations(spec: AnnotationSpec): {
   // side is the widest label placed there.
   const labelled = marks.filter((mark) => mark.text !== undefined && mark.place !== 'corner')
   const linesOf = (mark: Mark) => (Array.isArray(mark.text) ? mark.text : [mark.text!])
-  const sizes = new Map<Mark, { width: number; height: number; leading: number; inkTop: number }>()
+  const sizes = new Map<Mark, { width: number; height: number; leading: number; centre: number }>()
   for (const mark of labelled) {
     let width = 0
     let line = 0
-    // How far the glyphs sit from the y the text is positioned at. `hanging` is a
-    // baseline, not the top of the ink, so an arrow aimed at the middle of the block
-    // without this lands off-centre by that much.
-    let inkTop = 0
+    // The middle of the block, as the average of where each line sits. getBBox reports
+    // the font's metric box rather than the glyphs' own ink, so every line measures the
+    // same; averaging is still the right shape and does not depend on that staying true.
+    const middles: number[] = []
     for (const text of linesOf(mark)) {
       // The same baseline the label is drawn with. Measured against the default one, the
       // ink offset is off by most of a line, and the arrow with it.
@@ -160,15 +160,18 @@ export function drawAnnotations(spec: AnnotationSpec): {
       const box = probe.getBBox()
       width = Math.max(width, box.width)
       line = Math.max(line, box.height)
-      inkTop = box.y
+      middles.push(box.y + box.height / 2)
       probe.remove()
     }
     const leading = line * 1.25
+    // Each line's middle, offset by where that line sits in the block, averaged.
+    const centre =
+      middles.reduce((sum, mid, index) => sum + mid + index * leading, 0) / middles.length
     sizes.set(mark, {
       width,
       height: leading * (linesOf(mark).length - 1) + line,
       leading,
-      inkTop,
+      centre,
     })
   }
 
@@ -485,24 +488,26 @@ export function drawAnnotations(spec: AnnotationSpec): {
     // The outline is painted outside the box getBBox measures, so a tail starting at the
     // measured edge sits on top of it. Clear the stroke, then a little air.
     const clear = px(style.label.strokeWidth) / 2 + px(8)
-    const middle = y + size.inkTop + size.height / 2
+    const middle = y + size.centre
     const from =
       side === 'left'
         ? { x: x + size.width + clear, y: middle }
         : side === 'right'
           ? { x: x - clear, y: middle }
           : side === 'top'
-            ? { x: x + size.width / 2, y: y + size.inkTop + size.height + clear }
-            : { x: x + size.width / 2, y: y + size.inkTop - clear }
-    const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
+            ? { x: x + size.width / 2, y: y + size.centre + size.height / 2 + clear }
+            : { x: x + size.width / 2, y: y + size.centre - size.height / 2 - clear }
+    // The middle of the edge it approaches. Following the label's own height instead
+    // lands the head wherever the label happens to sit, which reads as an arrow that
+    // missed — the reader is looking at the box, not at the words.
     const to =
       side === 'left'
-        ? { x: b.left, y: clamp(from.y, b.top, b.bottom) }
+        ? { x: b.left, y: (b.top + b.bottom) / 2 }
         : side === 'right'
-          ? { x: b.right, y: clamp(from.y, b.top, b.bottom) }
+          ? { x: b.right, y: (b.top + b.bottom) / 2 }
           : side === 'top'
-            ? { x: clamp(from.x, b.left, b.right), y: b.top }
-            : { x: clamp(from.x, b.left, b.right), y: b.bottom }
+            ? { x: (b.left + b.right) / 2, y: b.top }
+            : { x: (b.left + b.right) / 2, y: b.bottom }
 
     const nudge = px(style.box.width)
     arrow(from, {

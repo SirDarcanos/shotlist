@@ -15,6 +15,10 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 - **An arrow started on the label's outline.** `getBBox()` measures the fill, and the
   outline is painted outside it, so a tail at the measured edge sat on the stroke it was
   meant to be clearing.
+- **An arrow entered its box wherever the label sat, not at the box's middle.** The head
+  followed the label's own height, clamped into the box's range, so a label that did not
+  line up with what it named produced an arrow that read as having missed. It aims at the
+  middle of the edge it approaches now, and runs at a slant when the two are not level.
 - **An arrow to a label of several lines pointed off-centre.** The text is positioned from
   a hanging baseline rather than from the top of the ink, and the gap between the two was
   never measured — so the arrow was aimed at the middle of the anchor box instead of the
