@@ -104,14 +104,46 @@ style:
     size: 44
     fill: '#FFFFFF' # glyph fill
     stroke: '#DC2626' # outline around the glyphs; defaults to `color`
-    strokeWidth: 6
+    strokeWidth: 6 # centred on the outline, so half of it is under the fill
     gap: 40 # distance from the box
+    fontUrl: # optional stylesheet to load before drawing — see Fonts
   number: { radius: 26, size: 40, fill: '#DC2626', text: '#FFFFFF' }
 ```
 
 Sizes are in image pixels, so they do not change when `scale` does.
 
 A recipe may override any of these under its own `style:` key.
+
+### Fonts
+
+**A font has to be resolvable by the browser doing the drawing.** By default that means
+installed on the machine, and a family that is not installed **falls back silently** —
+every label renders in another typeface with nothing to say so. shotlist measures the
+rendered text to catch that and warns:
+
+```
+  ✓ order-row → screenshots/out/order-row.png
+    ! label.font asks for Inter first, which is not available here; Arial was used instead
+```
+
+It is a warning, not an error: a fallback still produces an image, and which faces a
+machine has is not something a recipe can know.
+
+To use a font that isn't installed — a Google Font, or your own — give `fontUrl` a
+stylesheet. It is fetched when the callouts are drawn, so this needs network access at
+shoot time.
+
+```yaml
+style:
+  label:
+    fontUrl: https://fonts.googleapis.com/css2?family=Inter:wght@700&display=swap
+    font: 'Inter, Arial, sans-serif'
+```
+
+**`strokeWidth` is centred on the glyph outline**, so half of it is painted under the
+fill and half shows outside. A 6-pixel stroke reads as a 3-pixel outline. Tools that draw
+the stroke entirely outside — Pillow's `stroke_width`, for one — need roughly double the
+number here to match.
 
 ## Recipes
 

@@ -30,6 +30,12 @@ const Style = z
         stroke: z.string().optional(),
         strokeWidth: z.number().default(6),
         gap: z.number().default(40),
+        /**
+         * A stylesheet to load before drawing — a Google Fonts URL, or any @font-face
+         * sheet. Without it a family has to be installed on the machine that shoots.
+         * Needs network access at shoot time.
+         */
+        fontUrl: z.string().optional(),
       })
       .prefault({}),
     number: z

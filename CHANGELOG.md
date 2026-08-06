@@ -34,6 +34,13 @@ Everything below came out of pointing shotlist at a real application for the fir
 - **A finder called with `null`** takes no arguments, rather than being handed the string
   "null".
 
+- **A warning when the font named is not available.** A family that is not installed
+  falls back silently, so every label renders in another typeface with nothing to report
+  it. `document.fonts.check()` is no help — it answers true for a family that does not
+  exist — so the rendered text is measured instead.
+- **`style.label.fontUrl`**, a stylesheet fetched before drawing, so a font that is not
+  installed on the machine can still be used. Needs network access at shoot time.
+
 ### Fixed
 
 - **A label placed over the shot could land on another label, or on another mark's box.**

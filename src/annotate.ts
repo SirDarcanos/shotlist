@@ -64,7 +64,12 @@ export interface AnnotationSpec {
  * inside suits a mark with empty space beside it. Margins are measured from the labels
  * that need them, so the canvas grows only as far as it must.
  */
-export function drawAnnotations(spec: AnnotationSpec): { width: number; height: number } {
+export function drawAnnotations(spec: AnnotationSpec): {
+  width: number
+  height: number
+  /** Set when the first font named could not be resolved and something else was used. */
+  fontWarning?: string
+} {
   const SVG = 'http://www.w3.org/2000/svg'
   const { image, scale, style, marks } = spec
 
@@ -95,6 +100,38 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     'paint-order': 'stroke fill',
     'stroke-linejoin': 'round',
   }
+
+  /**
+   * Which of the named families the browser actually used.
+   *
+   * A family that is not installed falls back silently — every label renders in another
+   * typeface and nothing reports it. `document.fonts.check()` is no help: it answers true
+   * for a family that does not exist. Measuring is the only reliable signal.
+   */
+  const fontInUse = (): string | undefined => {
+    const probe = (family: string) => {
+      const node = el<SVGTextElement>('text', { 'font-family': family, 'font-size': 22 })
+      node.textContent = 'Handgloves 0123'
+      svg.append(node)
+      const width = node.getBBox().width
+      node.remove()
+      return width
+    }
+    const fallback = probe('"shotlist no such family"')
+    const named = style.label.font
+      .split(',')
+      .map((part) => part.trim())
+      .filter(
+        (part) => !/^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-\w+)$/.test(part),
+      )
+    if (named.length === 0) return undefined
+    const resolved = named.find((family) => probe(family) !== fallback)
+    if (resolved === named[0]) return undefined
+    return resolved
+      ? `label.font asks for ${named[0]} first, which is not available here; ${resolved} was used instead`
+      : `label.font asks for ${named[0]}, which is not available here; the browser's default was used`
+  }
+  const fontWarning = fontInUse()
 
   // Measure every label before deciding the margins: how far the canvas has to grow on a
   // side is the widest label placed there.
@@ -456,5 +493,5 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     })
   }
 
-  return canvas
+  return fontWarning ? { ...canvas, fontWarning } : canvas
 }

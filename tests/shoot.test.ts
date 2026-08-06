@@ -106,3 +106,51 @@ describe('source: file', () => {
     )
   })
 })
+
+describe('style in a real browser', () => {
+  /** Shoot `annotated` with a style override, and report the canvas and any warnings. */
+  async function withStyle(style: Record<string, unknown>) {
+    const { loaded, library } = project()
+    const recipe = { ...library.recipes.get('annotated')!, style }
+    return shoot(recipe, library, loaded)
+  }
+
+  it(
+    'lays a serif out differently from a sans, because it measures the real font',
+    { timeout: 120_000 },
+    async () => {
+      const sans = await withStyle({ label: { font: 'Arial' } })
+      const serif = await withStyle({ label: { font: 'Georgia' } })
+      // The label sits in a margin sized to its width, so a wider face makes a wider shot.
+      expect(serif.size.width).not.toBe(sans.size.width)
+      expect(sans.warnings).toBeUndefined()
+      expect(serif.warnings).toBeUndefined()
+    },
+  )
+
+  it(
+    'warns when the font named is not installed, rather than silently using another',
+    { timeout: 120_000 },
+    async () => {
+      const result = await withStyle({ label: { font: '"Absolutely Not Installed", Georgia' } })
+      expect(result.warnings?.[0]).toMatch(/Absolutely Not Installed.*not available.*Georgia/)
+      // It still produced an image: a fallback is worth saying, not worth failing over.
+      expect(existsSync(result.file)).toBe(true)
+    },
+  )
+
+  it('draws on a light canvas as readily as a dark one', { timeout: 120_000 }, async () => {
+    const light = await withStyle({ canvas: '#FFFFFF', color: '#B91C1C' })
+    expect(existsSync(light.file)).toBe(true)
+    expect(light.size.width).toBeGreaterThan(300)
+  })
+
+  it('shoots at a scale other than two', { timeout: 120_000 }, async () => {
+    const { loaded, library } = project()
+    const recipe = { ...library.recipes.get('annotated')!, scale: 1 }
+    const result = await shoot(recipe, library, loaded)
+    // The source is 600×280 image pixels, which at 1x is 600×280 CSS pixels.
+    expect(result.size.height).toBe(280)
+    expect(pngSize(result.file).width).toBe(result.size.width)
+  })
+})

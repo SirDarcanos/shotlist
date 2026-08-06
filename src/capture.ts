@@ -17,6 +17,8 @@ export interface ShotResult {
   file: string
   installed?: string
   size: { width: number; height: number }
+  /** Things worth saying that did not stop the shot — a font that fell back, so far. */
+  warnings?: string[]
 }
 
 /** The viewport, scale and theme this recipe runs at: the site's, with its own on top. */
@@ -71,17 +73,24 @@ async function annotate(
   scale: number,
   style: Style,
   marks: Mark[],
-): Promise<{ png: Buffer; size: { width: number; height: number } }> {
+): Promise<{ png: Buffer; size: { width: number; height: number }; warnings: string[] }> {
   const context = await browser.newContext({
     viewport: { width: Math.ceil(size.width), height: Math.ceil(size.height) },
     deviceScaleFactor: scale,
   })
   try {
     const page = await context.newPage()
+    const sheet = style.label.fontUrl ? `<link rel="stylesheet" href="${style.label.fontUrl}">` : ''
     await page.setContent(
-      `<style>html,body{margin:0}img{display:block}</style>` +
+      sheet +
+        `<style>html,body{margin:0}img{display:block}</style>` +
         `<img id="shotlist-image" src="data:image/png;base64,${image.toString('base64')}">`,
     )
+    // A webfont arrives after the document does; measuring before it lands would size
+    // every label against the fallback.
+    if (style.label.fontUrl) {
+      await page.evaluate(() => document.fonts.ready.then(() => undefined), undefined)
+    }
     await page.evaluate(
       () =>
         new Promise<void>((done) => {
@@ -106,7 +115,11 @@ async function annotate(
       clip: { x: 0, y: 0, width: canvas.width, height: canvas.height },
       animations: 'disabled',
     })
-    return { png, size: canvas }
+    return {
+      png,
+      size: { width: canvas.width, height: canvas.height },
+      warnings: canvas.fontWarning ? [canvas.fontWarning] : [],
+    }
   } finally {
     await context.close()
   }
@@ -212,7 +225,7 @@ export async function shoot(
 
     const drawn = marks.length
       ? await annotate(browser, image, size, settings.scale, style, marks)
-      : { png: image, size: { width: size.width, height: size.height } }
+      : { png: image, size: { width: size.width, height: size.height }, warnings: [] }
 
     writeFileSync(file, drawn.png)
     const destination = destinationFor(recipe, loaded)
@@ -225,6 +238,7 @@ export async function shoot(
       file,
       ...(options.install && destination ? { installed: destination } : {}),
       size: drawn.size,
+      ...(drawn.warnings.length ? { warnings: drawn.warnings } : {}),
     }
   } finally {
     if (ours) await browser.close()

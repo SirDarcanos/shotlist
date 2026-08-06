@@ -144,6 +144,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         })
         io.out(`  ✓ ${result.name} → ${result.file}`)
         if (result.installed) io.out(`    installed ${result.installed}`)
+        for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
       }
     } finally {
       await browser.close()

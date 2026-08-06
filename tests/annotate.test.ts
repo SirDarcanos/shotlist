@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { parseConfig } from '../src/config.js'
 import { drawAnnotations } from '../src/annotate.js'
 import type { DrawStyle, Mark } from '../src/annotate.js'
 
@@ -47,13 +48,18 @@ beforeEach(() => {
     this: SVGElement,
   ) {
     const length = (this.textContent ?? '').length
-    return { width: length * 10, height: 20 } as DOMRect
+    // Different families measure differently, which is how the font check tells a family
+    // that resolved from one that fell back. A stub that ignores the family would report
+    // every font as missing.
+    const family = this.getAttribute('font-family') ?? ''
+    const per = /no such family|Nowhere/.test(family) ? 9 : 10
+    return { width: length * per, height: 20 } as DOMRect
   }
 })
 
 describe('canvas', () => {
   it('is the image itself when nothing needs room outside it', () => {
-    expect(draw([mark({ place: 'corner', inside: true })])).toEqual(IMAGE)
+    expect(draw([mark({ place: 'corner', inside: true })])).toMatchObject(IMAGE)
   })
 
   it('grows on the side a label is placed', () => {
@@ -74,7 +80,7 @@ describe('canvas', () => {
     const disced = draw([
       mark({ rect: { x: 0, y: 0, width: 80, height: 20 }, place: 'corner', n: 1, inside: true }),
     ])
-    expect(plain).toEqual(IMAGE)
+    expect(plain).toMatchObject(IMAGE)
     expect(disced.width).toBeGreaterThan(IMAGE.width)
   })
 })
@@ -86,7 +92,7 @@ describe('placement', () => {
     const outside = draw([mark({ text: 'What they owe', place: 'right' })])
     const inside = draw([mark({ text: 'What they owe', place: 'right', inside: true })])
     expect(outside.width).toBeGreaterThan(IMAGE.width)
-    expect(inside).toEqual(IMAGE)
+    expect(inside).toMatchObject(IMAGE)
   })
 
   it('clamps an inside label so it cannot leave the canvas', () => {
@@ -214,6 +220,84 @@ describe('appearance', () => {
     }
     const [label] = labelBoxes()
     expect(overlap(label!, boxed)).toBe(false)
+  })
+})
+
+describe('style', () => {
+  // The package's own defaults are what a project gets before it configures anything,
+  // and no test had ever drawn with them.
+  const bare = parseConfig({ site: { url: 'http://localhost' } }).style
+
+  it('outlines a label in the callout colour when no stroke is named', () => {
+    expect(bare.label.stroke).toBeUndefined()
+    drawAnnotations({
+      image: IMAGE,
+      scale: 2,
+      style: bare as unknown as DrawStyle,
+      marks: [mark({ text: 'a label', inside: true })],
+    })
+    expect(document.querySelector('#shotlist-layer text')!.getAttribute('stroke')).toBe(bare.color)
+  })
+
+  it('fills a disc with the callout colour when no fill is named', () => {
+    expect(bare.number.fill).toBeUndefined()
+    drawAnnotations({
+      image: IMAGE,
+      scale: 2,
+      style: bare as unknown as DrawStyle,
+      marks: [mark({ place: 'corner', n: 1, inside: true })],
+    })
+    expect(document.querySelector('#shotlist-layer circle')!.getAttribute('fill')).toBe(bare.color)
+  })
+
+  it('draws every constant from the config it was given, not from a default', () => {
+    const loud: DrawStyle = {
+      ...STYLE,
+      color: '#0000FF',
+      box: { width: 2, radius: 0, pad: 20 },
+      number: { radius: 10, size: 12, fill: '#00FF00', text: '#000000' },
+    }
+    drawAnnotations({
+      image: IMAGE,
+      scale: 2,
+      style: loud,
+      marks: [mark({ place: 'corner', n: 1, inside: true }), mark({ box: true })],
+    })
+    const rect = document.querySelector('#shotlist-layer rect')!
+    expect(rect.getAttribute('stroke')).toBe('#0000FF')
+    expect(rect.getAttribute('stroke-width')).toBe('1')
+    expect(rect.getAttribute('rx')).toBe('0')
+    expect(document.querySelector('#shotlist-layer circle')!.getAttribute('fill')).toBe('#00FF00')
+  })
+})
+
+describe('fonts', () => {
+  it('says nothing when the first family named is the one used', () => {
+    const result = draw([mark({ text: 'a label', inside: true })])
+    expect(result.fontWarning).toBeUndefined()
+  })
+
+  it('warns when the family named is not available and something else was used', () => {
+    // A font that is not installed falls back silently, so every label renders in another
+    // typeface with nothing to say so. `document.fonts.check()` cannot detect it — it
+    // answers true for a family that does not exist — so this measures instead.
+    const result = drawAnnotations({
+      image: IMAGE,
+      scale: 2,
+      style: { ...STYLE, label: { ...STYLE.label, font: 'Nowhere, Arial' } },
+      marks: [mark({ text: 'a label', inside: true })],
+    })
+    expect(result.fontWarning).toMatch(/Nowhere.*not available.*Arial was used/)
+  })
+
+  it('ignores a generic family, which always resolves', () => {
+    const result = drawAnnotations({
+      image: IMAGE,
+      scale: 2,
+      style: { ...STYLE, label: { ...STYLE.label, font: 'sans-serif' } },
+      marks: [mark({ text: 'a label', inside: true })],
+    })
+    expect(result.fontWarning).toBeUndefined()
   })
 })
 
