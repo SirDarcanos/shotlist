@@ -119,8 +119,11 @@ describe('style in a real browser', () => {
     'lays a serif out differently from a sans, because it measures the real font',
     { timeout: 120_000 },
     async () => {
-      const sans = await withStyle({ label: { font: 'Arial' } })
-      const serif = await withStyle({ label: { font: 'Georgia' } })
+      // Generic families, not Arial and Georgia: those are Microsoft's, absent from a
+      // stock Linux runner, and the test would measure two fallbacks against each other
+      // and warn about both.
+      const sans = await withStyle({ label: { font: 'sans-serif' } })
+      const serif = await withStyle({ label: { font: 'serif' } })
       // The label sits in a margin sized to its width, so a wider face makes a wider shot.
       expect(serif.size.width).not.toBe(sans.size.width)
       expect(sans.warnings).toBeUndefined()
@@ -132,8 +135,10 @@ describe('style in a real browser', () => {
     'warns when the font named is not installed, rather than silently using another',
     { timeout: 120_000 },
     async () => {
-      const result = await withStyle({ label: { font: '"Absolutely Not Installed", Georgia' } })
-      expect(result.warnings?.[0]).toMatch(/Absolutely Not Installed.*not available.*Georgia/)
+      const result = await withStyle({
+        label: { font: '"Absolutely Not Installed", "Also Not Installed", serif' },
+      })
+      expect(result.warnings?.[0]).toMatch(/Absolutely Not Installed.*not available/)
       // It still produced an image: a fallback is worth saying, not worth failing over.
       expect(existsSync(result.file)).toBe(true)
     },
