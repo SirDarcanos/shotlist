@@ -19,6 +19,11 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
   followed the label's own height, clamped into the box's range, so a label that did not
   line up with what it named produced an arrow that read as having missed. It aims at the
   middle of the edge it approaches now, and runs at a slant when the two are not level.
+- **An arrow left a label of several lines from inside its first line.** The tail sat at
+  the middle of the font's metric box, and `getBBox` reports that box identically for
+  every line whatever its letters — so a line with a cap and a descender, which inks half
+  again as tall as one with neither, dragged the middle up into itself. A canvas can
+  measure the glyphs' real ink, and the tail now sits in the gap between the lines.
 - **An arrow to a label of several lines pointed off-centre.** The text is positioned from
   a hanging baseline rather than from the top of the ink, and the gap between the two was
   never measured — so the arrow was aimed at the middle of the anchor box instead of the

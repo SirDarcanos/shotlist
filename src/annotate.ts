@@ -134,6 +134,31 @@ export function drawAnnotations(spec: AnnotationSpec): {
   }
   const fontWarning = fontInUse()
 
+  /**
+   * How far the alphabetic baseline sits below the y a label is drawn at.
+   *
+   * Labels are positioned from a hanging baseline; canvas metrics are given against the
+   * alphabetic one. This is the distance between them, which is a property of the face
+   * and its size, so it is measured once.
+   */
+  const probeBaselineOffset = (() => {
+    let cached: number | undefined
+    return () => {
+      if (cached !== undefined) return cached
+      const shape = (baseline: string | null) => {
+        const node = el<SVGTextElement>('text', { ...labelAttrs, x: 0, y: 0 })
+        if (baseline) node.setAttribute('dominant-baseline', baseline)
+        node.textContent = 'Handgloves'
+        svg.append(node)
+        const y = node.getBBox().y
+        node.remove()
+        return y
+      }
+      cached = shape('hanging') - shape(null)
+      return cached
+    }
+  })()
+
   // Measure every label before deciding the margins: how far the canvas has to grow on a
   // side is the widest label placed there.
   const labelled = marks.filter((mark) => mark.text !== undefined && mark.place !== 'corner')
@@ -142,9 +167,11 @@ export function drawAnnotations(spec: AnnotationSpec): {
   for (const mark of labelled) {
     let width = 0
     let line = 0
-    // The middle of the block, as the average of where each line sits. getBBox reports
-    // the font's metric box rather than the glyphs' own ink, so every line measures the
-    // same; averaging is still the right shape and does not depend on that staying true.
+    // Where the glyphs actually sit, which getBBox cannot say: it reports the font's
+    // metric box, identical for every line whatever its letters. A canvas can, and the
+    // difference matters — a line with a cap and a descender inks half again as tall as
+    // one with neither, and centring on the metric box puts an arrow inside the first
+    // line rather than between them.
     const middles: number[] = []
     for (const text of linesOf(mark)) {
       // The same baseline the label is drawn with. Measured against the default one, the
@@ -164,9 +191,26 @@ export function drawAnnotations(spec: AnnotationSpec): {
       probe.remove()
     }
     const leading = line * 1.25
-    // Each line's middle, offset by where that line sits in the block, averaged.
+
+    // The first line's ink, measured on a canvas, positioned in the middle of the stack.
+    // Without a canvas — under jsdom — the metric box is all there is, and its middle is
+    // the same answer to within a pixel or two.
+    const inked = (() => {
+      const context = document.createElement('canvas').getContext('2d')
+      if (!context) return undefined
+      context.font = `${style.label.weight} ${px(style.label.size)}px ${style.label.font}`
+      const first = context.measureText(linesOf(mark)[0] ?? '')
+      if (typeof first.actualBoundingBoxAscent !== 'number') return undefined
+      // Relative to the alphabetic baseline, which sits this far below the anchor the
+      // label is drawn from.
+      const baseline = probeBaselineOffset()
+      return baseline + (first.actualBoundingBoxDescent - first.actualBoundingBoxAscent) / 2
+    })()
+
     const centre =
-      middles.reduce((sum, mid, index) => sum + mid + index * leading, 0) / middles.length
+      inked !== undefined
+        ? inked + ((middles.length - 1) * leading) / 2
+        : middles.reduce((sum, mid, index) => sum + mid + index * leading, 0) / middles.length
     sizes.set(mark, {
       width,
       height: leading * (linesOf(mark).length - 1) + line,

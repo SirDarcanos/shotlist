@@ -1,7 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { loadConfig, loadLibrary, shoot, withNumbering } from '../src/index.js'
+import {
+  drawAnnotations,
+  loadConfig,
+  loadLibrary,
+  loadPlaywright,
+  parseConfig,
+  shoot,
+  withNumbering,
+} from '../src/index.js'
 import type { LoadedConfig } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
@@ -157,5 +165,73 @@ describe('style in a real browser', () => {
     // The source is 600×280 image pixels, which at 1x is 600×280 CSS pixels.
     expect(result.size.height).toBe(280)
     expect(pngSize(result.file).width).toBe(result.size.width)
+  })
+})
+
+describe('arrow placement in a real browser', () => {
+  // jsdom has no canvas, so the metric-box fallback is all a unit test can reach. The
+  // path that measures real glyph ink only runs in a browser, and it is the one that has
+  // been wrong: a label's arrow left from inside its first line rather than between them.
+  it('leaves a two-line label from between its lines', { timeout: 120_000 }, async () => {
+    const browser = await loadPlaywright().chromium.launch()
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 460, height: 320 },
+        deviceScaleFactor: 2,
+      })
+      const page = await context.newPage()
+      await page.setContent('<style>html,body{margin:0}</style><img id="shotlist-image">')
+      const style = parseConfig({ site: { url: 'http://x' } }).style
+      await page.evaluate(drawAnnotations, {
+        image: { width: 460, height: 320 },
+        scale: 2,
+        style: { ...style, label: { ...style.label, stroke: style.color } } as never,
+        marks: [
+          {
+            rect: { x: 20, y: 140, width: 30, height: 30 },
+            text: ['Drag to move', 'a combatant'],
+            place: 'right' as const,
+            badge: 'tl' as const,
+            box: true,
+            inside: true,
+            gap: 260,
+          },
+        ],
+      })
+
+      const measured = await page.evaluate(() => {
+        const texts = [...document.querySelectorAll('#shotlist-layer text')]
+        const context = document.createElement('canvas').getContext('2d')!
+        const first = texts[0] as SVGTextElement
+        context.font = window.getComputedStyle(first).font
+        const inkOf = (node: Element) => {
+          const anchor = Number(node.getAttribute('y'))
+          const box = (node as SVGTextElement).getBBox()
+          return { top: box.y, bottom: box.y + box.height, anchor }
+        }
+        const points = document
+          .querySelector('#shotlist-layer polygon')!
+          .getAttribute('points')!
+          .split(' ')
+          .map((pair) => Number(pair.split(',')[1]))
+        return {
+          lineOne: inkOf(texts[0]!),
+          lineTwo: inkOf(texts[1]!),
+          // The tail is the widest part of the shaft, furthest from the tip.
+          tail: Math.max(...points) - (Math.max(...points) - Math.min(...points)) / 2,
+        }
+      }, undefined)
+
+      // In the gap between the two lines — a band a few pixels wide, not merely
+      // somewhere within the block. Measuring a label against a different baseline from
+      // the one it is drawn with put the tail most of a line above this.
+      // The metric boxes very nearly touch, so a couple of pixels of slack — still a
+      // far narrower band than the fault this pins, which was most of a line.
+      const slack = 2
+      expect(measured.tail).toBeGreaterThanOrEqual(measured.lineOne.bottom - slack)
+      expect(measured.tail).toBeLessThanOrEqual(measured.lineTwo.top + slack)
+    } finally {
+      await browser.close()
+    }
   })
 })
