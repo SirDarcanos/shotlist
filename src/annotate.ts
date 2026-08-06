@@ -1,16 +1,27 @@
 import type { Rect } from './query.js'
 
 export type Place = 'left' | 'right' | 'top' | 'bottom' | 'corner'
-export type Badge = 'tl' | 'tr' | 'bl' | 'br'
+/** Eight anchor points on a box: the corners, and the middle of each edge. */
+export type Badge = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br'
 
 /** One thing to draw: a box, and optionally a label or a numbered disc pointing at it. */
 export interface Mark {
   rect: Rect
-  text?: string
+  /** One line, or several. */
+  text?: string | string[]
   n?: number
   place: Place
   badge: Badge
   box: boolean
+  /**
+   * Whether the label or disc sits over the screenshot. Outside means in a margin the
+   * canvas grows to make, which never covers the interface but costs width; inside keeps
+   * the shot its own size and is what suits a mark with empty space beside it.
+   */
+  inside: boolean
+  /** Nudge, in image pixels, for what geometry alone cannot place. */
+  dx?: number
+  dy?: number
   pad?: number
   gap?: number
 }
@@ -48,9 +59,10 @@ export interface AnnotationSpec {
  * Serialized into the browser, so it closes over nothing and imports nothing — which is
  * what lets it be unit-tested in jsdom.
  *
- * Labels are placed in a margin outside the screenshot with an arrow reaching in, never
- * over the image: a label that covers the interface hides the thing it is naming. The
- * margins are measured from the labels, so the canvas grows only as far as it must.
+ * A label sits in a margin outside the screenshot with an arrow reaching in, or over the
+ * shot when the recipe asks for it. Outside never covers the interface but costs width;
+ * inside suits a mark with empty space beside it. Margins are measured from the labels
+ * that need them, so the canvas grows only as far as it must.
  */
 export function drawAnnotations(spec: AnnotationSpec): { width: number; height: number } {
   const SVG = 'http://www.w3.org/2000/svg'
@@ -87,18 +99,32 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
   // Measure every label before deciding the margins: how far the canvas has to grow on a
   // side is the widest label placed there.
   const labelled = marks.filter((mark) => mark.text !== undefined && mark.place !== 'corner')
-  const sizes = new Map<Mark, { width: number; height: number }>()
+  const linesOf = (mark: Mark) => (Array.isArray(mark.text) ? mark.text : [mark.text!])
+  const sizes = new Map<Mark, { width: number; height: number; leading: number }>()
   for (const mark of labelled) {
-    const probe = el<SVGTextElement>('text', { ...labelAttrs, x: 0, y: 0 })
-    probe.textContent = mark.text!
-    svg.append(probe)
-    const box = probe.getBBox()
-    sizes.set(mark, { width: box.width, height: box.height })
-    probe.remove()
+    let width = 0
+    let line = 0
+    for (const text of linesOf(mark)) {
+      const probe = el<SVGTextElement>('text', { ...labelAttrs, x: 0, y: 0 })
+      probe.textContent = text
+      svg.append(probe)
+      const box = probe.getBBox()
+      width = Math.max(width, box.width)
+      line = Math.max(line, box.height)
+      probe.remove()
+    }
+    const leading = line * 1.25
+    sizes.set(mark, {
+      width,
+      height: leading * (linesOf(mark).length - 1) + line,
+      leading,
+    })
   }
 
+  // Only a label placed outside claims a margin; one placed inside sits over the shot.
   const margin = { left: 0, right: 0, top: 0, bottom: 0 }
   for (const mark of labelled) {
+    if (mark.inside) continue
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
     const side = mark.place as Exclude<Place, 'corner'>
@@ -117,6 +143,30 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     }
   }
 
+  /**
+   * Where a disc sits on a box.
+   *
+   * One of eight anchors, pushed clear of the edge when `inside` is off — which is how a
+   * disc ends up in a margin beside a full-width section rather than on top of it.
+   */
+  const anchorOf = (
+    mark: Mark,
+    b: { left: number; top: number; right: number; bottom: number },
+  ) => {
+    const out = mark.inside ? 0 : px(style.number.radius)
+    const x = mark.badge.endsWith('l')
+      ? b.left - out
+      : mark.badge.endsWith('r')
+        ? b.right + out
+        : (b.left + b.right) / 2
+    const y = mark.badge.startsWith('t')
+      ? b.top - out
+      : mark.badge.startsWith('b')
+        ? b.bottom + out
+        : (b.top + b.bottom) / 2
+    return { x: x + px(mark.dx ?? 0), y: y + px(mark.dy ?? 0) }
+  }
+
   // A box drawn on an element that reaches the edge of the shot would have half its
   // stroke outside the canvas, and a disc on that box's corner would be sliced in two.
   // The canvas grows for them exactly as it grows for a label.
@@ -133,9 +183,8 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     ]
     if (mark.place === 'corner' && mark.n !== undefined) {
       const r = px(style.number.radius)
-      const cx = mark.badge.includes('r') ? b.right : b.left
-      const cy = mark.badge.startsWith('b') ? b.bottom : b.top
-      edges.push({ left: cx - r, top: cy - r, right: cx + r, bottom: cy + r })
+      const at = anchorOf(mark, b)
+      edges.push({ left: at.x - r, top: at.y - r, right: at.x + r, bottom: at.y + r })
     }
     for (const edge of edges) {
       margin.left = Math.max(margin.left, -edge.left)
@@ -219,12 +268,8 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
 
   for (const mark of marks) {
     if (mark.place !== 'corner' || mark.n === undefined) continue
-    const b = boxOf(mark)
-    disc(
-      mark.badge.includes('r') ? b.right : b.left,
-      mark.badge.startsWith('b') ? b.bottom : b.top,
-      mark.n,
-    )
+    const at = anchorOf(mark, boxOf(mark))
+    disc(at.x, at.y, mark.n)
   }
 
   // Labels are laid out per side, in the order they were written, and pushed along the
@@ -285,26 +330,49 @@ export function drawAnnotations(spec: AnnotationSpec): { width: number; height: 
     const b = boxOf(mark)
     const side = mark.place as Exclude<Place, 'corner'>
 
+    const dx = px(mark.dx ?? 0)
+    const dy = px(mark.dy ?? 0)
     let x: number
     let y: number
-    if (side === 'left' || side === 'right') {
-      const wanted = (b.top + b.bottom) / 2 - size.height / 2
+    if (mark.inside) {
+      // Beside the box, over the shot, clamped so a label near an edge stays on canvas.
+      const hold = (value: number, max: number) => Math.min(Math.max(value, 0), Math.max(max, 0))
+      const wantX =
+        side === 'left'
+          ? b.left - gap - size.width
+          : side === 'right'
+            ? b.right + gap
+            : (b.left + b.right) / 2 - size.width / 2
+      const wantY =
+        side === 'top'
+          ? b.top - gap - size.height
+          : side === 'bottom'
+            ? b.bottom + gap
+            : (b.top + b.bottom) / 2 - size.height / 2
+      x = hold(wantX + dx, canvas.width - size.width)
+      y = hold(wantY + dy, canvas.height - size.height)
+    } else if (side === 'left' || side === 'right') {
+      const wanted = (b.top + b.bottom) / 2 - size.height / 2 + dy
       y = slot(side, wanted, size.height, canvas.height)
-      x = side === 'left' ? margin.left - gap - size.width : canvas.width - margin.right + gap
+      x =
+        (side === 'left' ? margin.left - gap - size.width : canvas.width - margin.right + gap) + dx
     } else {
-      const wanted = (b.left + b.right) / 2 - size.width / 2
+      const wanted = (b.left + b.right) / 2 - size.width / 2 + dx
       x = slot(side, wanted, size.width, canvas.width)
-      y = side === 'top' ? margin.top - gap - size.height : canvas.height - margin.bottom + gap
+      y =
+        (side === 'top' ? margin.top - gap - size.height : canvas.height - margin.bottom + gap) + dy
     }
 
-    const text = el<SVGTextElement>('text', {
-      ...labelAttrs,
-      x,
-      y,
-      'dominant-baseline': 'hanging',
+    linesOf(mark).forEach((line, index) => {
+      const text = el<SVGTextElement>('text', {
+        ...labelAttrs,
+        x,
+        y: y + index * size.leading,
+        'dominant-baseline': 'hanging',
+      })
+      text.textContent = line
+      svg.append(text)
     })
-    text.textContent = mark.text!
-    svg.append(text)
 
     const from =
       side === 'left'

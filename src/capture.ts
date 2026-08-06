@@ -54,6 +54,9 @@ function marksFor(recipe: Recipe, rects: Record<string, Rect>, origin: Rect): Ma
       place: callout.place,
       badge: callout.badge,
       box: callout.box,
+      inside: callout.inside,
+      ...(callout.dx !== undefined ? { dx: callout.dx } : {}),
+      ...(callout.dy !== undefined ? { dy: callout.dy } : {}),
       ...(callout.pad !== undefined ? { pad: callout.pad } : {}),
       ...(callout.gap !== undefined ? { gap: callout.gap } : {}),
     }

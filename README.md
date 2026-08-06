@@ -272,7 +272,16 @@ which pixels matter.
 | `pad`   | style's  | Distance between the outline and the element                      |
 | `gap`   | style's  | Distance between the label and the outline                        |
 
-`numbered: [a, b, c]` is shorthand for one numbered disc per mark, in order.
+`numbered: [a, b, c]` is shorthand for one numbered disc per mark, in order. Give it the
+style every disc shares by writing it out:
+
+```yaml
+numbered:
+  marks: [header, abilities, defenses, traits]
+  box: false # number the sections without outlining them
+  badge: ml # anchored to the middle of the left edge
+  inside: false # pushed clear, into the margin
+```
 
 ## Macros and data
 

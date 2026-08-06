@@ -96,15 +96,45 @@ export const VERBS = [
 const Callout = z
   .object({
     mark: z.string(),
-    text: z.string().optional(),
+    /** One line, or several. */
+    text: z.union([z.string(), z.array(z.string())]).optional(),
     n: z.int().positive().optional(),
     place: z.enum(['left', 'right', 'top', 'bottom', 'corner']).default('right'),
-    badge: z.enum(['tl', 'tr', 'bl', 'br']).default('tl'),
+    /** One of eight anchors on the box: a corner, or the middle of an edge. */
+    badge: z.enum(['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br']).default('tl'),
     box: z.boolean().default(true),
+    /**
+     * Whether the label or disc sits over the screenshot. A label defaults to outside,
+     * in a margin the canvas grows to make; a disc defaults to inside, on the box.
+     */
+    inside: z.boolean().optional(),
+    /** Nudge, in image pixels, for what geometry alone cannot place. */
+    dx: z.number().optional(),
+    dy: z.number().optional(),
     pad: z.number().optional(),
     gap: z.number().optional(),
   })
   .strict()
+  .transform((callout) => ({
+    ...callout,
+    inside: callout.inside ?? callout.place === 'corner',
+  }))
+
+/** `numbered:` as a plain list, or as a list with the style every disc shares. */
+const Numbered = z.union([
+  z.array(z.string()),
+  z
+    .object({
+      marks: z.array(z.string()),
+      box: z.boolean().default(true),
+      badge: z.enum(['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br']).default('tl'),
+      inside: z.boolean().default(true),
+      dx: z.number().optional(),
+      dy: z.number().optional(),
+      pad: z.number().optional(),
+    })
+    .strict(),
+])
 
 const StylePatch = z.record(z.string(), z.unknown())
 
@@ -128,7 +158,7 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
       marks: z.record(z.string(), Query).default({}),
       callouts: z.array(Callout).default([]),
       /** Shorthand: number these marks 1..n, in order, with a disc on each box. */
-      numbered: z.array(z.string()).optional(),
+      numbered: Numbered.optional(),
     })
     .strict()
 }
@@ -263,7 +293,10 @@ export function parseRecipe(
       )
     }
   }
-  for (const mark of recipe.numbered ?? []) {
+  const numberedMarks = Array.isArray(recipe.numbered)
+    ? recipe.numbered
+    : (recipe.numbered?.marks ?? [])
+  for (const mark of numberedMarks) {
     if (!(mark in recipe.marks)) {
       throw new ShotlistError(
         `numbered lists mark "${mark}", which this recipe does not define`,
@@ -277,11 +310,18 @@ export function parseRecipe(
   return { ...recipe, name }
 }
 
-/** Turn `numbered: [a, b]` into the callouts it stands for, appended to any written by hand. */
+/** Turn `numbered:` into the callouts it stands for, appended to any written by hand. */
 export function withNumbering(recipe: Recipe): Recipe {
-  if (!recipe.numbered?.length) return recipe
-  const discs = recipe.numbered.map((mark, index) =>
-    Callout.parse({ mark, n: index + 1, place: 'corner' }),
+  if (!recipe.numbered) return recipe
+  const list = Array.isArray(recipe.numbered) ? recipe.numbered : recipe.numbered.marks
+  if (!list.length) return recipe
+  // `marks` names which marks to number; it is not a callout field, and a strict schema
+  // rejects it even set to undefined — so it is dropped rather than blanked.
+  const { marks: _named, ...shared } = Array.isArray(recipe.numbered)
+    ? { marks: list }
+    : recipe.numbered
+  const discs = list.map((mark, index) =>
+    Callout.parse({ ...shared, mark, n: index + 1, place: 'corner' }),
   )
   return { ...recipe, callouts: [...recipe.callouts, ...discs], numbered: undefined }
 }

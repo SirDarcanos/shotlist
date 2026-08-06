@@ -30,6 +30,7 @@ function mark(over: Partial<Mark> = {}): Mark {
     place: 'right',
     badge: 'tl',
     box: true,
+    inside: false,
     ...over,
   }
 }
@@ -52,7 +53,7 @@ beforeEach(() => {
 
 describe('canvas', () => {
   it('is the image itself when nothing needs room outside it', () => {
-    expect(draw([mark({ place: 'corner' })])).toEqual(IMAGE)
+    expect(draw([mark({ place: 'corner', inside: true })])).toEqual(IMAGE)
   })
 
   it('grows on the side a label is placed', () => {
@@ -71,10 +72,70 @@ describe('canvas', () => {
   it('grows for a numbered disc sitting on a corner at the edge', () => {
     const plain = draw([mark({ rect: { x: 40, y: 40, width: 80, height: 20 } })])
     const disced = draw([
-      mark({ rect: { x: 0, y: 0, width: 80, height: 20 }, place: 'corner', n: 1 }),
+      mark({ rect: { x: 0, y: 0, width: 80, height: 20 }, place: 'corner', n: 1, inside: true }),
     ])
     expect(plain).toEqual(IMAGE)
     expect(disced.width).toBeGreaterThan(IMAGE.width)
+  })
+})
+
+describe('placement', () => {
+  it('keeps the canvas its own size when a label is placed inside', () => {
+    // The point of `inside`: a mark with empty space beside it does not need the shot to
+    // grow, and growing it would leave a band of dead canvas holding one line of text.
+    const outside = draw([mark({ text: 'What they owe', place: 'right' })])
+    const inside = draw([mark({ text: 'What they owe', place: 'right', inside: true })])
+    expect(outside.width).toBeGreaterThan(IMAGE.width)
+    expect(inside).toEqual(IMAGE)
+  })
+
+  it('clamps an inside label so it cannot leave the canvas', () => {
+    draw([
+      mark({ rect: { x: 380, y: 10, width: 20, height: 20 }, text: 'Long label', inside: true }),
+    ])
+    const text = document.querySelector('#shotlist-layer text')!
+    expect(Number(text.getAttribute('x'))).toBeLessThanOrEqual(IMAGE.width)
+    expect(Number(text.getAttribute('x'))).toBeGreaterThanOrEqual(0)
+  })
+
+  it('writes one line per entry when the label is a list', () => {
+    draw([mark({ text: ['Drag to move', 'a combatant'], inside: true })])
+    const lines = [...document.querySelectorAll('#shotlist-layer text')]
+    expect(lines.map((l) => l.textContent)).toEqual(['Drag to move', 'a combatant'])
+    expect(Number(lines[1]!.getAttribute('y'))).toBeGreaterThan(Number(lines[0]!.getAttribute('y')))
+  })
+
+  it('anchors a disc to any of the eight points on a box', () => {
+    const at = (badge: Mark['badge']) => {
+      document.body.innerHTML = '<img id="shotlist-image">'
+      draw([mark({ place: 'corner', n: 1, badge, inside: true })])
+      const circle = document.querySelector('#shotlist-layer circle')!
+      return { x: Number(circle.getAttribute('cx')), y: Number(circle.getAttribute('cy')) }
+    }
+    expect(at('tc').x).toBeCloseTo((at('tl').x + at('tr').x) / 2)
+    expect(at('ml').y).toBeCloseTo((at('tl').y + at('bl').y) / 2)
+    expect(at('bc').y).toBeCloseTo(at('br').y)
+  })
+
+  it('pushes a disc clear of the box when it is placed outside', () => {
+    document.body.innerHTML = '<img id="shotlist-image">'
+    draw([mark({ place: 'corner', n: 1, badge: 'ml', inside: true })])
+    const on = Number(document.querySelector('#shotlist-layer circle')!.getAttribute('cx'))
+    document.body.innerHTML = '<img id="shotlist-image">'
+    draw([mark({ place: 'corner', n: 1, badge: 'ml', inside: false })])
+    const off = Number(document.querySelector('#shotlist-layer circle')!.getAttribute('cx'))
+    expect(off).toBeLessThan(on)
+  })
+
+  it('moves a mark by its nudge', () => {
+    document.body.innerHTML = '<img id="shotlist-image">'
+    draw([mark({ place: 'corner', n: 1, inside: true })])
+    const plain = Number(document.querySelector('#shotlist-layer circle')!.getAttribute('cy'))
+    document.body.innerHTML = '<img id="shotlist-image">'
+    draw([mark({ place: 'corner', n: 1, inside: true, dy: -70 })])
+    const moved = Number(document.querySelector('#shotlist-layer circle')!.getAttribute('cy'))
+    // Nudges are image pixels, so -70 of them is 35 CSS pixels at 2x.
+    expect(plain - moved).toBeCloseTo(35)
   })
 })
 

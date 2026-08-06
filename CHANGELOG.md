@@ -10,6 +10,37 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+Everything below came out of pointing shotlist at a real application for the first time.
+
+### Added
+
+- **`inside` on a callout.** A label may sit over the screenshot instead of in a margin.
+  Outside never covers the interface but costs width; a shot with clear space beside the
+  mark was spending 40% of its canvas on one line of text. Discs default to inside, and
+  `inside: false` pushes one clear of the box — which is how a column of numbers ends up
+  in the margin beside a full-width section.
+- **Eight anchors for a disc**, not four: `tc`, `ml`, `mr` and `bc` join the corners.
+- **`dx`/`dy` on a callout**, in image pixels, for what geometry alone cannot place.
+- **Multi-line labels.** `text:` takes a list, one line each.
+- **`numbered:` takes options** — `marks`, plus the `box`, `badge`, `inside`, `dx`, `dy`
+  and `pad` every disc shares. The plain list form is unchanged.
+- **`startsWith`**, for a heading that carries its own suffix: "Legendary Actions
+  (3/round, or 4 in lair)" is neither an exact match nor safely a substring.
+- **`within` accepts a query**, not only the name of a resolved mark. Scoping a click to
+  an open dialog was impossible: an application that renders a name in a list _and_ in
+  the dialog above it gave two matches and no way to say which.
+- **`nth`, `child` and `repeat` accept a `$name`.** A count reaching a numeric field had
+  to be rewritten as a list to walk.
+- **A finder called with `null`** takes no arguments, rather than being handed the string
+  "null".
+
+### Fixed
+
+- A step's own keys were interpolated together with the steps nested inside it, so `each`
+  looked up its children's variables before the loop had bound them.
+- A loop bound its variable onto its direct children only. A macro used inside a loop may
+  loop again, and two levels down the outer variable had gone.
+
 ## [0.1.0] — 2026-08-06
 
 The first release that can take a screenshot. 0.0.1 held the name and carried only the

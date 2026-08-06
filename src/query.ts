@@ -10,11 +10,15 @@ export interface Rect {
 
 const Dimension = z.union([z.number(), z.string().regex(/^-?\d+(\.\d+)?(px|vw|vh)$/)])
 
+/** A whole number, or a `$name` standing in for one until the step runs. */
+export const NumberOrRef = z.union([z.int(), z.string().regex(/^\$\{?[A-Za-z_]/)])
+
 const Filters = z.object({
   contains: z.string().optional(),
   containingAll: z.array(z.string()).optional(),
   matching: z.string().optional(),
   text: z.string().optional(),
+  startsWith: z.string().optional(),
   maxChildren: z.int().nonnegative().optional(),
   minChildren: z.int().nonnegative().optional(),
   minWidth: Dimension.optional(),
@@ -59,18 +63,19 @@ export const ElementQuery = Filters.extend({
   heading: z.string().optional(),
   exact: z.boolean().optional(),
 
-  // Scope: the name of an already-resolved rect (a mark, or `clip`). Candidates must
-  // sit geometrically inside it.
-  within: z.string().optional(),
+  // Scope: an already-resolved rect by name (a mark, or `clip`), or a query resolved on
+  // the spot. Candidates must sit geometrically inside it. A query used here resolves in
+  // the page, so it cannot use the sources Playwright's engine answers.
+  within: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
 
   // Traversal, applied in this order.
   ancestor: Ancestor.optional(),
   parent: z.boolean().optional(),
-  child: z.int().nonnegative().optional(),
+  child: NumberOrRef.optional(),
   children: z.boolean().optional(),
 
   pick: z.enum(['first', 'last', 'smallest', 'largest']).optional(),
-  nth: z.int().nonnegative().optional(),
+  nth: NumberOrRef.optional(),
 
   pad: z.number().optional(),
   grow: Grow.optional(),
@@ -106,7 +111,14 @@ const OneSource = ElementQuery.refine(
 
 export const Query: z.ZodType<QueryInput> = z.union([RectQuery, SpanQuery, OneSource])
 
-export type ElementQueryInput = z.input<typeof ElementQuery>
+// `within` is stated by hand, as an interface. It refers back to Query, and a type alias
+// cannot reference itself through z.input — an interface can.
+type ElementQueryBase = Omit<z.input<typeof ElementQuery>, 'within'>
+
+export interface ElementQueryInput extends ElementQueryBase {
+  /** A resolved rect by name, or a query resolved on the spot. */
+  within?: string | QueryInput
+}
 export type QueryInput =
   | ElementQueryInput
   | { rect: [number, number, number, number]; pad?: number; grow?: z.infer<typeof Grow> }
@@ -170,7 +182,7 @@ export function resolveAliases(
     }
     const call = node as Record<string, unknown>
     const raw = call[name]
-    const args = (Array.isArray(raw) ? raw : [raw]).map(String)
+    const args = raw === null || raw === true ? [] : (Array.isArray(raw) ? raw : [raw]).map(String)
     // Keys written alongside the call are the caller's own — `{ listRow: "Acme", pad: 16 }`
     // pads what the finder found, rather than being refused for not being a finder.
     const extra = Object.fromEntries(Object.entries(call).filter(([key]) => key !== name))
@@ -268,7 +280,9 @@ export function resolveQuery(context: QueryContext): Resolved {
   }
 
   if ('span' in spec) {
-    const parts = spec.span.map((part) => resolveQuery({ ...ctx, spec: part }).rect)
+    const parts: Rect[] = spec.span.map(
+      (part: QueryInput) => resolveQuery({ ...ctx, spec: part }).rect,
+    )
     const x0 = Math.min(...parts.map((r) => r.x))
     const y0 = Math.min(...parts.map((r) => r.y))
     const x1 = Math.max(...parts.map((r) => r.x + r.width))
@@ -299,6 +313,7 @@ export function resolveQuery(context: QueryContext): Resolved {
     containingAll?: string[]
     matching?: string
     text?: string
+    startsWith?: string
     maxChildren?: number
     minChildren?: number
     minWidth?: number | string
@@ -317,6 +332,7 @@ export function resolveQuery(context: QueryContext): Resolved {
       return false
     if (f.matching !== undefined && !new RegExp(f.matching).test(content)) return false
     if (f.text !== undefined && content.trim() !== f.text) return false
+    if (f.startsWith !== undefined && !content.trim().startsWith(f.startsWith)) return false
     if (f.maxChildren !== undefined && el.children.length > f.maxChildren) return false
     if (f.minChildren !== undefined && el.children.length < f.minChildren) return false
 
@@ -331,11 +347,20 @@ export function resolveQuery(context: QueryContext): Resolved {
     return true
   }
 
+  // Resolved once, not per candidate: a `within` that is itself a query would otherwise
+  // be re-run against every element on the page.
+  const scope =
+    query.within === undefined
+      ? undefined
+      : typeof query.within === 'string'
+        ? ctx.rects?.[query.within]
+        : resolveQuery({ ...ctx, spec: query.within as QueryInput }).rect
+  if (query.within !== undefined && !scope) {
+    throw new Error(`query names within: "${String(query.within)}", which is not a resolved rect`)
+  }
+
   const insideScope = (el: Element): boolean => {
-    if (query.within === undefined) return true
-    const scope = ctx.rects?.[query.within]
-    if (!scope)
-      throw new Error(`query names within: "${query.within}", which is not a resolved rect`)
+    if (!scope) return true
     const r = rectOf(el)
     const slack = 2
     return (
@@ -368,7 +393,7 @@ export function resolveQuery(context: QueryContext): Resolved {
       .filter((el): el is HTMLElement => el !== null)
   }
   if (query.child !== undefined) {
-    const index = query.child
+    const index = Number(query.child)
     candidates = candidates.map((el) => el.children[index]).filter((el): el is Element => !!el)
   }
   if (query.children === true) {
@@ -382,7 +407,7 @@ export function resolveQuery(context: QueryContext): Resolved {
     return r.width * r.height
   }
   let chosen: Element | undefined
-  if (query.nth !== undefined) chosen = candidates[query.nth]
+  if (query.nth !== undefined) chosen = candidates[Number(query.nth)]
   else if (query.pick === 'last') chosen = candidates[candidates.length - 1]
   else if (query.pick === 'smallest') chosen = [...candidates].sort((a, b) => area(a) - area(b))[0]
   else if (query.pick === 'largest') chosen = [...candidates].sort((a, b) => area(b) - area(a))[0]
