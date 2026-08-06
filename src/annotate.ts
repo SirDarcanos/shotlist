@@ -219,17 +219,6 @@ export function drawAnnotations(spec: AnnotationSpec): {
     })
   }
 
-  // Only a label placed outside claims a margin; one placed inside sits over the shot.
-  const margin = { left: 0, right: 0, top: 0, bottom: 0 }
-  for (const mark of labelled) {
-    if (mark.inside) continue
-    const size = sizes.get(mark)!
-    const gap = px(mark.gap ?? style.label.gap)
-    let side = mark.place as Exclude<Place, 'corner'>
-    const need = side === 'left' || side === 'right' ? size.width + gap * 2 : size.height + gap * 2
-    margin[side] = Math.max(margin[side], need)
-  }
-
   /** A mark's box before the margins are known, in image coordinates. */
   const rawBox = (mark: Mark) => {
     const pad = px(mark.pad ?? style.box.pad)
@@ -238,6 +227,32 @@ export function drawAnnotations(spec: AnnotationSpec): {
       top: mark.rect.y - pad,
       right: mark.rect.x + mark.rect.width + pad,
       bottom: mark.rect.y + mark.rect.height + pad,
+    }
+  }
+
+  // Only a label placed outside claims a margin; one placed inside sits over the shot.
+  const margin = { left: 0, right: 0, top: 0, bottom: 0 }
+  for (const mark of labelled) {
+    if (mark.inside) continue
+    const size = sizes.get(mark)!
+    const gap = px(mark.gap ?? style.label.gap)
+    const side = mark.place as Exclude<Place, 'corner'>
+    const need = side === 'left' || side === 'right' ? size.width + gap * 2 : size.height + gap * 2
+    margin[side] = Math.max(margin[side], need)
+
+    // And on the other axis, where the label is centred on its mark: one longer than the
+    // room beside it overhangs the shot, and without a margin to overhang into it is slid
+    // back against the edge with half its outline off the canvas.
+    const b = rawBox(mark)
+    const ink = px(style.label.strokeWidth) / 2
+    if (side === 'left' || side === 'right') {
+      const middle = (b.top + b.bottom) / 2
+      margin.top = Math.max(margin.top, size.height / 2 - middle + ink)
+      margin.bottom = Math.max(margin.bottom, middle + size.height / 2 - image.height + ink)
+    } else {
+      const centre = (b.left + b.right) / 2
+      margin.left = Math.max(margin.left, size.width / 2 - centre + ink)
+      margin.right = Math.max(margin.right, centre + size.width / 2 - image.width + ink)
     }
   }
 

@@ -10,6 +10,15 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A label above or below its mark was shaved by the edge of the canvas.** Only the side
+  a label is placed on claimed a margin, but a label is centred on what it names — so one
+  above a mark near the right edge overhung a canvas that never grew to hold it, and was
+  slid back until it sat flush and lost half its outline. The margins are now measured on
+  both axes, which fixes the mirror case as well: a label beside a mark at the top or the
+  bottom of a shot.
+
 ## [0.2.2] — 2026-08-06
 
 ### Fixed

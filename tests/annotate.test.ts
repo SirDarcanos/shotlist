@@ -76,6 +76,27 @@ describe('canvas', () => {
     expect(canvas.height).toBeGreaterThan(IMAGE.height - 1)
   })
 
+  it('grows sideways for a label above a mark near the edge', () => {
+    // A top label is centred on its mark, so one wider than the room beside it hangs off
+    // the shot. Without this the label is slid back against the edge and shaved.
+    const canvas = draw([
+      mark({
+        rect: { x: 360, y: 100, width: 20, height: 20 },
+        text: 'Mark them surprised',
+        place: 'top',
+      }),
+    ])
+    expect(canvas.height).toBeGreaterThan(IMAGE.height)
+    expect(canvas.width).toBeGreaterThan(IMAGE.width)
+  })
+
+  it('grows up and down for a label beside a mark at the top edge', () => {
+    const canvas = draw([
+      mark({ rect: { x: 100, y: 0, width: 80, height: 4 }, text: 'What they owe', place: 'right' }),
+    ])
+    expect(canvas.height).toBeGreaterThan(IMAGE.height)
+  })
+
   it('grows for a numbered disc sitting on a corner at the edge', () => {
     const plain = draw([mark({ rect: { x: 40, y: 40, width: 80, height: 20 } })])
     const disced = draw([
