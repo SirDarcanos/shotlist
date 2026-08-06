@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { expandSteps, loadPlaywright, parseRecipe, runSteps } from '../src/index.js'
+import { Macro, expandSteps, loadPlaywright, parseRecipe, runSteps } from '../src/index.js'
 import type { RunContext } from '../src/index.js'
 import type { Browser, BrowserContext, Page } from '../src/playwright.js'
 
@@ -23,7 +23,7 @@ afterAll(async () => {
 })
 
 /** Drive the verbs fixture through a recipe's setup, and hand back the page. */
-async function run(setup: unknown[], url = VERBS) {
+async function run(setup: unknown[], url = VERBS, macros = new Map<string, Macro>()) {
   const page: Page = await context.newPage()
   await page.goto(url, { waitUntil: 'load' })
   const ctx: RunContext = {
@@ -37,7 +37,7 @@ async function run(setup: unknown[], url = VERBS) {
   }
   // Through the schema, so a test also proves the step it writes is one a recipe may use.
   const recipe = parseRecipe({ setup }, { name: 'steps' })
-  await runSteps(expandSteps(recipe.setup, new Map()), ctx)
+  await runSteps(expandSteps(recipe.setup, macros), ctx)
   return { page, ctx }
 }
 
@@ -127,6 +127,30 @@ describe('control-flow verbs', () => {
 
   it('still fails when the same step is not optional', async () => {
     await expect(run([{ click: { css: '#nothingHere' } }])).rejects.toThrow(/no element matched/)
+  })
+
+  it('passes a loop variable into a macro as an argument', async () => {
+    // The frames are built when the file loads, so `$item` still stands for nothing then.
+    const macros = new Map([
+      [
+        'note',
+        Macro.parse({
+          defaults: { what: 'nothing' },
+          steps: [{ fill: { css: '#inpTyped' }, value: '$what' }],
+        }),
+      ],
+    ])
+    const { page } = await run(
+      [{ each: ['one', 'two'], as: 'item', steps: [{ use: 'note', with: { what: '$item' } }] }],
+      VERBS,
+      macros,
+    )
+    const typed = await page.evaluate(
+      () => (document.getElementById('inpTyped') as HTMLInputElement).value,
+      undefined,
+    )
+    expect(typed).toBe('two')
+    await page.close()
   })
 
   it('repeats a block', async () => {

@@ -447,13 +447,24 @@ export function expandSteps(
   })
 }
 
-/** Resolve `$name` and `${name}` in a value against the variables in scope. */
-export function interpolate(value: unknown, vars: Readonly<Record<string, unknown>>): unknown {
+/**
+ * Resolve `$name` and `${name}` in a value against the variables in scope.
+ *
+ * `missing` says what to do with a name nothing in scope answers to: a step means it, so
+ * it fails; a macro's own arguments are resolved before the scope they will run in exists,
+ * so there the name is left as written for the frame below to fill.
+ */
+export function interpolate(
+  value: unknown,
+  vars: Readonly<Record<string, unknown>>,
+  missing: 'throw' | 'keep' = 'throw',
+): unknown {
   if (typeof value === 'string') {
     const whole = /^\$\{?([A-Za-z_][\w.]*)\}?$/.exec(value)
     if (whole) {
       const resolved = lookup(vars, whole[1]!)
       if (resolved !== undefined) return resolved
+      if (missing === 'keep') return value
       throw new ShotlistError(`no value for ${value}`)
     }
     return value.replace(/\$\{?([A-Za-z_][\w.]*)\}?/g, (all, path: string) => {
@@ -461,10 +472,10 @@ export function interpolate(value: unknown, vars: Readonly<Record<string, unknow
       return resolved === undefined ? all : String(resolved)
     })
   }
-  if (Array.isArray(value)) return value.map((item) => interpolate(item, vars))
+  if (Array.isArray(value)) return value.map((item) => interpolate(item, vars, missing))
   if (typeof value === 'object' && value !== null) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, inner]) => [key, interpolate(inner, vars)]),
+      Object.entries(value).map(([key, inner]) => [key, interpolate(inner, vars, missing)]),
     )
   }
   return value

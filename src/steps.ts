@@ -96,7 +96,13 @@ async function runStep(
 ): Promise<void> {
   // A macro's own arguments beat a loop variable of the same name: `with:` is the more
   // specific statement of the two.
-  const scope = { ...ctx.vars, ...outer, ...resolved.vars }
+  //
+  // They are resolved here rather than where the frame was built, because an argument may
+  // name a loop variable — `use: set-hp` `with: {who: $foe}` inside an `each` — and the
+  // frames are built when the file loads, before `$foe` stands for anything.
+  const enclosing = { ...ctx.vars, ...outer }
+  const args = interpolate(resolved.vars, enclosing, 'keep') as Record<string, unknown>
+  const scope = { ...enclosing, ...args }
   // A block's own keys resolve now; the steps inside it do not. `each` binds its loop
   // variable when it runs, so interpolating its children here would look for a value
   // that only exists one level down.

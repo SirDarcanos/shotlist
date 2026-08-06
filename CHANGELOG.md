@@ -18,6 +18,12 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
   slid back until it sat flush and lost half its outline. The margins are now measured on
   both axes, which fixes the mirror case as well: a label beside a mark at the top or the
   bottom of a shot.
+- **A macro argument could not name a loop variable.** `use: set-hp` with
+  `with: { who: $foe }` inside an `each` passed the four characters `$foe`, not the item —
+  macro frames are built when the file loads, and `$foe` stands for nothing until the loop
+  runs. Arguments are resolved against the scope the `use` was written in now, so a loop
+  can drive a macro. A name nothing answers to is still left as written, for the frame
+  below to fill.
 
 ## [0.2.2] — 2026-08-06
 
