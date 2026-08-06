@@ -296,6 +296,19 @@ export function resolveQuery(context: QueryContext): Resolved {
   const query = spec
   const describe = JSON.stringify(query)
 
+  // `role`, `label`, `placeholder` and `testid` are answered by Playwright's own engine
+  // before this runs, and it only seeds the query it was handed. Nested in a `span` or a
+  // `within`, one of them would silently fall through to every element on the page and
+  // pick whichever came first — a wrong box drawn without complaint.
+  const seeded = ['role', 'label', 'placeholder', 'testid'] as const
+  const needsSeeds = seeded.filter((key) => query[key] !== undefined)
+  if (needsSeeds.length > 0 && !(ctx.seeds && ctx.seeds.length > 0)) {
+    throw new Error(
+      `\`${needsSeeds[0]}\` cannot be used inside \`span\` or \`within\` — it is resolved ` +
+        `before the page is searched. Use css, text, startsWith or contains there instead.`,
+    )
+  }
+
   let candidates: Element[]
   if (ctx.seeds && ctx.seeds.length > 0) {
     candidates = [...ctx.seeds]

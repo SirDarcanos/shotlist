@@ -111,6 +111,14 @@ describe('composition', () => {
     })
   })
 
+  it('refuses a Playwright-resolved source nested where it cannot be seeded', () => {
+    // Without this it would search every element on the page and box whichever came
+    // first, which looks like a screenshot rather than like a failure.
+    expect(() => find({ span: [{ role: 'button', name: 'Run' }, { css: '.bar' }] })).toThrow(
+      /`role` cannot be used inside `span` or `within`/,
+    )
+  })
+
   it('names the query it could not match', () => {
     expect(() => find({ css: 'button', text: 'Nope' })).toThrow(/no element matched.*Nope/s)
   })
