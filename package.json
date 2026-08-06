@@ -47,6 +47,14 @@
     "automation",
     "visual-regression"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SirDarcanos/shotlist.git"
+  },
+  "homepage": "https://github.com/SirDarcanos/shotlist#readme",
+  "bugs": {
+    "url": "https://github.com/SirDarcanos/shotlist/issues"
+  },
   "peerDependencies": {
     "playwright": ">=1.40"
   },
