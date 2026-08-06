@@ -10,6 +10,17 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+### Fixed
+
+- **An arrow started on the label's outline.** `getBBox()` measures the fill, and the
+  outline is painted outside it, so a tail at the measured edge sat on the stroke it was
+  meant to be clearing.
+- **An arrow to a label of several lines pointed off-centre.** The text is positioned from
+  a hanging baseline rather than from the top of the ink, and the gap between the two was
+  never measured — so the arrow was aimed at the middle of the anchor box instead of the
+  middle of the writing. Worse, the probe that measures a label left the baseline at its
+  default while the label itself is drawn hanging, which put the error at most of a line.
+
 ## [0.2.1] — 2026-08-06
 
 ### Fixed

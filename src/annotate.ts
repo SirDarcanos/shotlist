@@ -138,17 +138,29 @@ export function drawAnnotations(spec: AnnotationSpec): {
   // side is the widest label placed there.
   const labelled = marks.filter((mark) => mark.text !== undefined && mark.place !== 'corner')
   const linesOf = (mark: Mark) => (Array.isArray(mark.text) ? mark.text : [mark.text!])
-  const sizes = new Map<Mark, { width: number; height: number; leading: number }>()
+  const sizes = new Map<Mark, { width: number; height: number; leading: number; inkTop: number }>()
   for (const mark of labelled) {
     let width = 0
     let line = 0
+    // How far the glyphs sit from the y the text is positioned at. `hanging` is a
+    // baseline, not the top of the ink, so an arrow aimed at the middle of the block
+    // without this lands off-centre by that much.
+    let inkTop = 0
     for (const text of linesOf(mark)) {
-      const probe = el<SVGTextElement>('text', { ...labelAttrs, x: 0, y: 0 })
+      // The same baseline the label is drawn with. Measured against the default one, the
+      // ink offset is off by most of a line, and the arrow with it.
+      const probe = el<SVGTextElement>('text', {
+        ...labelAttrs,
+        x: 0,
+        y: 0,
+        'dominant-baseline': 'hanging',
+      })
       probe.textContent = text
       svg.append(probe)
       const box = probe.getBBox()
       width = Math.max(width, box.width)
       line = Math.max(line, box.height)
+      inkTop = box.y
       probe.remove()
     }
     const leading = line * 1.25
@@ -156,6 +168,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
       width,
       height: leading * (linesOf(mark).length - 1) + line,
       leading,
+      inkTop,
     })
   }
 
@@ -469,14 +482,18 @@ export function drawAnnotations(spec: AnnotationSpec): {
       svg.append(text)
     })
 
+    // The outline is painted outside the box getBBox measures, so a tail starting at the
+    // measured edge sits on top of it. Clear the stroke, then a little air.
+    const clear = px(style.label.strokeWidth) / 2 + px(8)
+    const middle = y + size.inkTop + size.height / 2
     const from =
       side === 'left'
-        ? { x: x + size.width, y: y + size.height / 2 }
+        ? { x: x + size.width + clear, y: middle }
         : side === 'right'
-          ? { x, y: y + size.height / 2 }
+          ? { x: x - clear, y: middle }
           : side === 'top'
-            ? { x: x + size.width / 2, y: y + size.height }
-            : { x: x + size.width / 2, y }
+            ? { x: x + size.width / 2, y: y + size.inkTop + size.height + clear }
+            : { x: x + size.width / 2, y: y + size.inkTop - clear }
     const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
     const to =
       side === 'left'

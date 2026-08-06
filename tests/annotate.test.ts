@@ -53,7 +53,8 @@ beforeEach(() => {
     // every font as missing.
     const family = this.getAttribute('font-family') ?? ''
     const per = /no such family|Nowhere|Neither/.test(family) ? 9 : 10
-    return { width: length * per, height: 20 } as DOMRect
+    // y is the ink top relative to the text's own y, which `hanging` puts above it.
+    return { x: 0, y: -4, width: length * per, height: 20 } as DOMRect
   }
 })
 
@@ -204,6 +205,48 @@ describe('appearance', () => {
     ])
     const [box] = labelBoxes()
     expect(box!.x + box!.w).toBeLessThanOrEqual(370)
+  })
+
+  it('starts the arrow clear of the label, not on its outline', () => {
+    // getBBox measures the fill, and the outline is painted outside it — a tail at the
+    // measured edge sits on top of the stroke it should be clearing.
+    draw([
+      mark({ rect: { x: 260, y: 100, width: 60, height: 20 }, text: 'a label', place: 'left' }),
+    ])
+    const label = labelBoxes()[0]!
+    const points = document
+      .querySelector('#shotlist-layer polygon')!
+      .getAttribute('points')!
+      .split(' ')
+      .map((pair) => Number(pair.split(',')[0]))
+    // Placed left, the arrow runs rightward from the label, so every point is past it.
+    expect(Math.min(...points)).toBeGreaterThan(label.x + label.w)
+  })
+
+  it('aims the arrow at the middle of the ink, not of the anchor box', () => {
+    // Two lines are positioned from a hanging baseline; centring on the anchor without
+    // the ink offset puts the arrow off by that offset.
+    draw([
+      mark({
+        rect: { x: 40, y: 100, width: 60, height: 20 },
+        text: ['first line', 'second line'],
+        place: 'right',
+      }),
+    ])
+    const texts = [...document.querySelectorAll('#shotlist-layer text')]
+    const ys = texts.map((node) => Number(node.getAttribute('y')))
+    const inkTop = -4 // what the stub reports
+    const lineHeight = 20
+    const leading = lineHeight * 1.25
+    const wanted = ys[0]! + inkTop + (leading + lineHeight) / 2
+    const points = document
+      .querySelector('#shotlist-layer polygon')!
+      .getAttribute('points')!
+      .split(' ')
+      .map((pair) => Number(pair.split(',')[1]))
+    // The tail sits at that middle; the head is clamped into the box, so take the extreme.
+    expect(Math.max(...points)).toBeGreaterThanOrEqual(wanted - 1)
+    expect(Math.min(...points)).toBeLessThanOrEqual(wanted + 1)
   })
 
   it('does not draw a label over another mark box', () => {
