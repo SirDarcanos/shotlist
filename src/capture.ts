@@ -128,7 +128,7 @@ export async function shoot(
   recipe: Recipe,
   library: Library,
   loaded: LoadedConfig,
-  options: { install?: boolean } = {},
+  options: { install?: boolean; browser?: Browser } = {},
 ): Promise<ShotResult> {
   const { config } = loaded
   const style = mergeStyle(config.style, recipe.style as never)
@@ -137,8 +137,10 @@ export async function shoot(
   mkdirSync(outDir, { recursive: true })
   const file = join(outDir, `${recipe.name}.png`)
 
-  const playwright = loadPlaywright()
-  const browser = await playwright.chromium.launch()
+  // A caller shooting a whole set passes its own browser: launching one per recipe costs
+  // about a second each, which over a project's worth of recipes is most of the run.
+  const browser = options.browser ?? (await loadPlaywright().chromium.launch())
+  const ours = options.browser === undefined
 
   try {
     let image: Buffer
@@ -222,7 +224,7 @@ export async function shoot(
       size: drawn.size,
     }
   } finally {
-    await browser.close()
+    if (ours) await browser.close()
   }
 }
 

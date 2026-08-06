@@ -80,7 +80,10 @@ export const Config = z.object({
   findersModule: z.string().optional(),
   check: z
     .object({
+      /** The fraction of differing pixels a shot may have before it counts as changed. */
       threshold: z.number().min(0).max(1).default(0.002),
+      /** How far one channel may move before a pixel counts as differing, out of 255. */
+      tolerance: z.number().min(0).max(255).default(8),
     })
     .prefault({}),
 })

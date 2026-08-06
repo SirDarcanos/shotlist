@@ -10,7 +10,30 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-08-06
+
+The first release that can take a screenshot. 0.0.1 held the name and carried only the
+recipe format.
+
 ### Added
+
+- **The `shotlist` command line.**
+
+  ```bash
+  shotlist                       # list every recipe
+  shotlist order-row --install   # shoot one and copy it to its destination
+  shotlist --all --install       # shoot everything
+  shotlist --check               # compare against the committed images
+  ```
+
+- **`--check`.** Re-shoots each recipe and compares it against the image at its install
+  destination, reporting `same`, `CHANGED`, `NEW`, or `skipped` for a recipe that installs
+  nowhere. Exits non-zero when anything needs attention, so it can run in CI. The
+  comparison runs in the browser that took the shot, so no image library is needed.
+- **`check.tolerance`**, how far one channel may move before a pixel counts as differing,
+  beside the existing `check.threshold`.
+- `shoot()` takes a `browser`, so a caller shooting a whole set launches one instead of one
+  per recipe.
 
 - **Shooting a recipe, end to end.** `shoot()` drives the site with Playwright, runs the
   recipe's steps, clips the region, resolves every mark, draws the callouts and installs

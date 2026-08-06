@@ -6,10 +6,9 @@ shotlist opens your running site, drives it to the state you describe, clips a r
 draws callouts on it, and writes the image where you want it. Each screenshot is a YAML
 file. There is no per-screenshot code.
 
-> **Status: early.** Shooting a recipe works end to end through the API — driving the
-> site, clipping, drawing the callouts, and installing. Not built yet: the `shotlist`
-> command line and `--check`. Published 0.0.1 predates all of this; see
-> [CHANGELOG.md](./CHANGELOG.md).
+> **Status:** the pipeline works end to end — driving the site, clipping, drawing the
+> callouts, installing, and `--check`. 0.1.0 is the first release carrying it; the 0.0.1
+> on npm predates all of it. See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Install
 
@@ -59,40 +58,35 @@ callouts:
   - { mark: status, text: Where it stands, place: right }
 ```
 
-**3. Shoot it.** The command line is not built yet, so today this is the API:
+**3. Shoot it:**
 
-```ts
-import { loadConfig, loadLibrary, shoot, withNumbering } from 'shotlist'
-
-const loaded = loadConfig()
-const library = loadLibrary({ ...loaded.config.paths, finders: loaded.config.finders })
-const recipe = withNumbering(library.recipes.get('order-row')!)
-
-await shoot(recipe, library, loaded, { install: true })
+```bash
+npx shotlist order-row --install
 ```
 
-The image is written to `screenshots/out/order-row.png`, and `install: true` copies it to
+The image is written to `screenshots/out/order-row.png`, and `--install` copies it to
 `content/guide/images/order-row.png`.
 
 ## Configuration
 
-| Key                  | Default               | What it sets                                        |
-| -------------------- | --------------------- | --------------------------------------------------- |
-| `site.url`           | required              | Where the site is running                           |
-| `site.viewport`      | `1280 × 800`          | Browser size                                        |
-| `site.scale`         | `2`                   | Device pixel ratio; `2` gives Retina images         |
-| `site.theme`         | `light`               | `light`, `dark` or `no-preference`                  |
-| `site.reducedMotion` | `true`                | Disables animation before capture                   |
-| `site.ready`         | —                     | Selector waited for after each navigation           |
-| `site.settle`        | `0`                   | Extra milliseconds to wait after `ready`            |
-| `site.timeout`       | `15000`               | Per-step timeout in milliseconds                    |
-| `paths.recipes`      | `screenshots/recipes` | Where recipes live                                  |
-| `paths.macros`       | `screenshots/macros`  | Where macros live                                   |
-| `paths.data`         | `screenshots/data`    | Where data files live                               |
-| `paths.out`          | `screenshots/out`     | Where images are written                            |
-| `install`            | `{}`                  | Named destinations you refer to by name in a recipe |
-| `finders`            | `{}`                  | Named query aliases (see [Finders](#finders))       |
-| `check.threshold`    | `0.002`               | Pixel difference `--check` tolerates                |
+| Key                  | Default               | What it sets                                                                 |
+| -------------------- | --------------------- | ---------------------------------------------------------------------------- |
+| `site.url`           | required              | Where the site is running                                                    |
+| `site.viewport`      | `1280 × 800`          | Browser size                                                                 |
+| `site.scale`         | `2`                   | Device pixel ratio; `2` gives Retina images                                  |
+| `site.theme`         | `light`               | `light`, `dark` or `no-preference`                                           |
+| `site.reducedMotion` | `true`                | Disables animation before capture                                            |
+| `site.ready`         | —                     | Selector waited for after each navigation                                    |
+| `site.settle`        | `0`                   | Extra milliseconds to wait after `ready`                                     |
+| `site.timeout`       | `15000`               | Per-step timeout in milliseconds                                             |
+| `paths.recipes`      | `screenshots/recipes` | Where recipes live                                                           |
+| `paths.macros`       | `screenshots/macros`  | Where macros live                                                            |
+| `paths.data`         | `screenshots/data`    | Where data files live                                                        |
+| `paths.out`          | `screenshots/out`     | Where images are written                                                     |
+| `install`            | `{}`                  | Named destinations you refer to by name in a recipe                          |
+| `finders`            | `{}`                  | Named query aliases (see [Finders](#finders))                                |
+| `check.threshold`    | `0.002`               | Fraction of pixels that may differ before `--check` calls a shot changed     |
+| `check.tolerance`    | `8`                   | How far one channel may move, out of 255, before a pixel counts as differing |
 
 ### Style
 
@@ -346,6 +340,26 @@ npx shotlist --all --install      # shoot everything
 npx shotlist --check              # compare against committed images
 npx shotlist --config <file>      # use a specific config
 ```
+
+## Using it from code
+
+The command line is a thin wrapper. Everything it does is available directly:
+
+```ts
+import { check, loadConfig, loadLibrary, shoot, withNumbering } from 'shotlist'
+
+const loaded = loadConfig()
+const { paths, finders } = loaded.config
+const library = loadLibrary({ ...paths, finders })
+
+const recipe = withNumbering(library.recipes.get('order-row')!)
+await shoot(recipe, library, loaded, { install: true })
+
+const results = await check([recipe], library, loaded)
+```
+
+Pass a `browser` to `shoot` to reuse one across many recipes; without it each call
+launches and closes its own.
 
 ## Editor support
 

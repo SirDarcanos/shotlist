@@ -1,27 +1,20 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { fileURLToPath } from 'node:url'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { loadLibrary, parseConfig, readDocument, shoot, withNumbering } from '../src/index.js'
+import { loadConfig, loadLibrary, shoot, withNumbering } from '../src/index.js'
 import type { LoadedConfig } from '../src/index.js'
+import { removeProjects, tempProject } from './tempProject.js'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const ROOT = join(HERE, 'project')
-const FIXTURE = pathToFileURL(join(HERE, 'fixture/index.html')).href
-
-/** The fixture project, pointed at the fixture page on disk. */
+/** A throwaway copy of the fixture project, loaded through the public API. */
 function project(): { loaded: LoadedConfig; library: ReturnType<typeof loadLibrary> } {
-  const raw = readDocument(join(ROOT, 'shotlist.config.yaml')) as Record<string, unknown>
-  const site = raw['site'] as Record<string, unknown>
-  site['url'] = FIXTURE
-  const config = parseConfig(raw)
-  const loaded: LoadedConfig = { config, root: ROOT, file: join(ROOT, 'shotlist.config.yaml') }
+  const root = tempProject()
+  const loaded = loadConfig(join(root, 'shotlist.config.yaml'))
+  const { paths, finders } = loaded.config
   const library = loadLibrary({
-    recipes: join(ROOT, config.paths.recipes),
-    macros: join(ROOT, config.paths.macros),
-    data: join(ROOT, config.paths.data),
-    finders: config.finders,
+    recipes: join(root, paths.recipes),
+    macros: join(root, paths.macros),
+    data: join(root, paths.data),
+    finders,
   })
   return { loaded, library }
 }
@@ -32,10 +25,7 @@ function pngSize(file: string): { width: number; height: number } {
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
 }
 
-afterAll(() => {
-  rmSync(join(ROOT, 'out'), { recursive: true, force: true })
-  rmSync(join(ROOT, 'installed'), { recursive: true, force: true })
-})
+afterAll(removeProjects)
 
 describe('shoot', () => {
   it(
@@ -46,7 +36,7 @@ describe('shoot', () => {
       const result = await shoot(recipe, library, loaded, { install: true })
 
       expect(existsSync(result.file)).toBe(true)
-      expect(result.installed).toBe(join(ROOT, 'installed', 'order-row.png'))
+      expect(result.installed).toMatch(/installed\/order-row\.png$/)
       expect(existsSync(result.installed!)).toBe(true)
 
       // The canvas is wider than the clip because a label sits in a margin on each side.

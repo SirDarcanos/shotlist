@@ -28,7 +28,7 @@ export interface Page {
   waitForSelector(selector: string, options?: Record<string, unknown>): Promise<unknown>
   waitForTimeout(ms: number): Promise<void>
   screenshot(options?: Record<string, unknown>): Promise<Buffer>
-  evaluate<R, A>(fn: (arg: A) => R, arg: A): Promise<R>
+  evaluate<R, A>(fn: (arg: A) => R | Promise<R>, arg: A): Promise<R>
   evaluateHandle<R, A>(fn: (arg: A) => R, arg: A): Promise<JSHandle<R>>
   keyboard: { press(key: string): Promise<void>; type(text: string): Promise<void> }
   getByRole(role: string, options?: Record<string, unknown>): Locator

@@ -16,6 +16,9 @@
     "./recipe.schema.json": "./dist/recipe.schema.json",
     "./macro.schema.json": "./dist/macro.schema.json"
   },
+  "bin": {
+    "shotlist": "./dist/cli.js"
+  },
   "files": [
     "dist",
     "README.md",
