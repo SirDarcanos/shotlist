@@ -111,7 +111,7 @@ function covers(pattern: string, host: string): boolean {
 /**
  * The hosts a config's own site covers.
  *
- * `rollful.dev` covers `api.rollful.dev`; a `www.` host covers the apex it is the www of,
+ * `example.com` covers `api.example.com`; a `www.` host covers the apex it is the www of,
  * because writing one and meaning the other is the ordinary case rather than a mistake.
  * There is no public-suffix list here, so nothing wider than that is inferred: a second
  * domain is something the config says out loud.

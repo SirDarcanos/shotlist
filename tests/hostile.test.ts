@@ -11,7 +11,7 @@ import {
 } from '../src/index.js'
 
 const NUL = String.fromCharCode(0)
-const SITE = 'https://rollful.dev/'
+const SITE = 'https://example.com/'
 const guard = (deny: string[] = [], untrusted = true) =>
   trustFrom({ root: '/project', siteUrl: SITE, deny }, untrusted)
 
@@ -20,12 +20,12 @@ const guard = (deny: string[] = [], untrusted = true) =>
 describe('a URL written to look like the site', () => {
   it('reads the host, not the part of the URL that resembles one', () => {
     for (const url of [
-      'https://rollful.dev@evil.test/', // the host is evil.test
-      'http://rollful.dev:8080@evil.test/',
-      'https://evil.test#rollful.dev',
-      'https://evil.test/?x=rollful.dev',
-      'https://rollful.dev.evil.test/',
-      'https://evilrollful.dev/',
+      'https://example.com@evil.test/', // the host is evil.test
+      'http://example.com:8080@evil.test/',
+      'https://evil.test#example.com',
+      'https://evil.test/?x=example.com',
+      'https://example.com.evil.test/',
+      'https://evilexample.com/',
       'https://xn--rllful-5wa.dev/', // а Cyrillic homograph, punycoded
     ]) {
       expect(() => checkUrl(guard(), url, '`url`'), url).toThrow(/not this site/)
@@ -33,7 +33,7 @@ describe('a URL written to look like the site', () => {
   })
 
   it('is not fooled by case', () => {
-    expect(() => checkUrl(guard(), 'https://ROLLFUL.DEV/x', '`url`')).not.toThrow()
+    expect(() => checkUrl(guard(), 'https://EXAMPLE.COM/x', '`url`')).not.toThrow()
   })
 })
 
@@ -55,14 +55,14 @@ describe('a path hiding behind a control character', () => {
   })
 
   it('refuses it in a URL path too', () => {
-    expect(() => checkUrl(guard(['fake-secret']), 'https://rollful.dev/a%00b', '`url`')).toThrow(
+    expect(() => checkUrl(guard(['fake-secret']), 'https://example.com/a%00b', '`url`')).toThrow(
       /holds a control character/,
     )
   })
 
   it('sees through percent-encoding, which the server will decode', () => {
     expect(() =>
-      checkUrl(guard(['fake-secret']), 'https://rollful.dev/%66ake-secret/x', '`url`'),
+      checkUrl(guard(['fake-secret']), 'https://example.com/%66ake-secret/x', '`url`'),
     ).toThrow(/forbidden path/)
   })
 })

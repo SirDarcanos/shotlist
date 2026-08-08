@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { checkCommand, checkPath, checkUrl, hostsFor, secretIn, trustFrom } from '../src/trust.js'
 
-const SITE = 'https://rollful.dev/'
+const SITE = 'https://example.com/'
 const own = (allow: string[] = []) => trustFrom({ root: '/project', siteUrl: SITE, allow }, false)
 const strange = (allow: string[] = []) =>
   trustFrom({ root: '/project', siteUrl: SITE, allow }, true)
@@ -11,19 +11,19 @@ const strange = (allow: string[] = []) =>
 describe('the site a shot list covers', () => {
   it('covers the site itself and everything under it', () => {
     for (const url of [
-      'https://rollful.dev/',
-      'https://rollful.dev/docs/api',
-      'https://api.rollful.dev/v1/roll',
-      'http://staging.eu.rollful.dev/',
+      'https://example.com/',
+      'https://example.com/docs/api',
+      'https://api.example.com/v1/roll',
+      'http://staging.eu.example.com/',
     ]) {
       expect(() => checkUrl(own(), url, '`url`')).not.toThrow()
     }
   })
 
   it('covers the apex when the site is written with www', () => {
-    expect(hostsFor('https://www.rollful.dev/')).toContain('rollful.dev')
-    const site = trustFrom({ root: '/p', siteUrl: 'https://www.rollful.dev/' }, false)
-    expect(() => checkUrl(site, 'https://api.rollful.dev/', '`url`')).not.toThrow()
+    expect(hostsFor('https://www.example.com/')).toContain('example.com')
+    const site = trustFrom({ root: '/p', siteUrl: 'https://www.example.com/' }, false)
+    expect(() => checkUrl(site, 'https://api.example.com/', '`url`')).not.toThrow()
   })
 
   it('refuses somewhere else, and says where to say otherwise', () => {
@@ -31,7 +31,7 @@ describe('the site a shot list covers', () => {
       /google\.com is not this site.*site\.allow/s,
     )
     // A near-miss is still a different site: nothing infers one domain from another.
-    expect(() => checkUrl(own(), 'https://rollful.dev.evil.test/', '`url`')).toThrow(
+    expect(() => checkUrl(own(), 'https://example.com.evil.test/', '`url`')).toThrow(
       /not this site/,
     )
   })
@@ -205,13 +205,13 @@ describe('a name the project put out of bounds', () => {
   // "That folder" is as likely to mean a path on the site as one on the disk.
   it('stops the same name served over http', () => {
     for (const url of [
-      'https://rollful.dev/fake-secret/',
-      'https://rollful.dev/fake-secret/reports/q3',
-      'https://api.rollful.dev/fake-secret',
+      'https://example.com/fake-secret/',
+      'https://example.com/fake-secret/reports/q3',
+      'https://api.example.com/fake-secret',
     ]) {
       expect(() => checkUrl(policy(['fake-secret']), url, '`url`'), url).toThrow(/forbidden path/)
     }
-    expect(() => checkUrl(policy(['fake-secret']), 'https://rollful.dev/public', 'x')).not.toThrow()
+    expect(() => checkUrl(policy(['fake-secret']), 'https://example.com/public', 'x')).not.toThrow()
   })
 
   it('stops a name written as a glob, for files as well as folders', () => {
@@ -234,7 +234,7 @@ describe('a name the project put out of bounds', () => {
 
   it('holds when the config is not trusted, because it can only refuse more', () => {
     const strict = trustFrom({ root: '/project', siteUrl: SITE, deny: ['fake-secret'] }, true)
-    expect(() => checkUrl(strict, 'https://rollful.dev/fake-secret/', 'x')).toThrow(
+    expect(() => checkUrl(strict, 'https://example.com/fake-secret/', 'x')).toThrow(
       /forbidden path/,
     )
   })
@@ -246,7 +246,7 @@ describe('a name the project put out of bounds', () => {
     try {
       process.env['SHOTLIST_DENY'] = '/fake-secret, *.pdf'
       const fromEnv = trustFrom({ root: '/project', siteUrl: SITE }, false)
-      expect(() => checkUrl(fromEnv, 'https://rollful.dev/fake-secret/x', 'x')).toThrow(
+      expect(() => checkUrl(fromEnv, 'https://example.com/fake-secret/x', 'x')).toThrow(
         /forbidden path/,
       )
       expect(() => checkPath(fromEnv, '/project/docs/report.pdf', 'x')).toThrow(/forbidden path/)
