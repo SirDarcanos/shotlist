@@ -47,6 +47,15 @@ export { runSteps } from './steps.js'
 export type { RunContext } from './steps.js'
 export { check } from './check.js'
 export type { CheckResult } from './check.js'
+export {
+  BASELINE_FILE,
+  baselineFile,
+  describeEnvironment,
+  environmentDrift,
+  readBaseline,
+  writeBaseline,
+} from './baseline.js'
+export type { Drift, Environment } from './baseline.js'
 export { startServer, tokenize, withServer } from './serve.js'
 export type { Server } from './serve.js'
 export { run } from './cli.js'

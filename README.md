@@ -500,6 +500,26 @@ npx shotlist --check
 Re-shoots every recipe and compares each against the committed image, reporting the ones
 that changed. Exits non-zero if any did, so it can run in CI.
 
+### What the images were taken with
+
+`--install` also writes `shotlist.baseline.json` beside the config, recording the
+shotlist, Playwright and Chromium versions and the platform. Commit it with the images.
+
+A different Chromium rasterises text differently, and a different platform has different
+faces to rasterise — either moves pixels without the site moving at all. When `--check`
+runs somewhere else, it says so before the results, so a difference is not read as a
+regression that was never there:
+
+```
+! this is not the machine the committed images were taken on:
+    chromium: 141.0.0.0 → 139.0.0.0
+    platform: darwin → linux
+  Differences below may be that, rather than the site.
+```
+
+A field missing from either side is not a difference: an older record has no Chromium
+version because nothing wrote one.
+
 ## CLI
 
 ```bash

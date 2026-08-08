@@ -12,6 +12,14 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`--check` says when it is not running on the machine that took the images.**
+  `--install` now records the shotlist, Playwright and Chromium versions and the platform
+  in `shotlist.baseline.json`, beside the config, to be committed with the images. A
+  different Chromium rasterises text differently and a different platform has different
+  faces to rasterise, so either moves pixels with the site untouched — and a check that
+  reports `0.83% of pixels differ` and stops there sends somebody looking for a
+  regression that was never there. The difference is now named before the results.
+
 - **`mask` on a recipe**, for the part of a shot the recipe does not decide. A frame
   holding a clock, a live total or a face differs on every re-shoot, and until now the
   only answer was `check: false` — giving up drift detection on the whole image to

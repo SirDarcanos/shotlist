@@ -11,6 +11,13 @@ import type { Retry } from './capture.js'
 import { check } from './check.js'
 import { loadPlaywright } from './playwright.js'
 import { withServer } from './serve.js'
+import {
+  BASELINE_FILE,
+  describeEnvironment,
+  environmentDrift,
+  readBaseline,
+  writeBaseline,
+} from './baseline.js'
 
 const USAGE = `shotlist — annotated UI screenshots from YAML recipes
 
@@ -126,7 +133,21 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     /** Everything that wants the site up, so the server's lifetime is exactly this. */
     const work = async (): Promise<number> => {
       if (values.check) {
-        const results = await check(recipes, library, loaded, { keepGoing, onRetry })
+        const browser = await loadPlaywright().chromium.launch()
+        let results
+        try {
+          // Said before the results, so they are read in the light of it: a different
+          // Chromium rasterises text differently, and that is not the site changing.
+          const drift = environmentDrift(readBaseline(loaded), describeEnvironment(browser))
+          if (drift.length) {
+            io.out('! this is not the machine the committed images were taken on:')
+            for (const { field, was, now } of drift) io.out(`    ${field}: ${was} → ${now}`)
+            io.out('  Differences below may be that, rather than the site.')
+          }
+          results = await check(recipes, library, loaded, { browser, keepGoing, onRetry })
+        } finally {
+          await browser.close()
+        }
         let changed = 0
         for (const result of results) {
           if (result.status === 'same') {
@@ -183,6 +204,12 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
       if (failed.length) {
         io.err(`${failed.length} of ${recipes.length} failed: ${failed.join(', ')}`)
         return 1
+      }
+      // What was just installed is the baseline a later `--check` compares against, so
+      // this is the moment the machine that took it is worth recording.
+      if (values.install) {
+        writeBaseline(loaded, describeEnvironment(browser))
+        io.out(`  recorded this machine in ${BASELINE_FILE}`)
       }
       return 0
     }

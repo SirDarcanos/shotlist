@@ -152,6 +152,37 @@ describe('mask', () => {
   }, 120_000)
 })
 
+describe('the machine a baseline was taken on', () => {
+  it('is recorded when images are installed, and read back on a check', async () => {
+    const root = project()
+    const { out } = await cli(root, ['order-row', '--install'])
+    expect(out).toContain('recorded this machine in shotlist.baseline.json')
+
+    const file = join(root, 'shotlist.baseline.json')
+    const recorded = JSON.parse(readFileSync(file, 'utf8'))
+    expect(recorded.platform).toBe(process.platform)
+    expect(recorded.chromium).toMatch(/^\d+\./)
+
+    // The same machine: nothing to say.
+    const same = await cli(root, ['--check', 'order-row'])
+    expect(same.out).not.toContain('not the machine')
+
+    // A baseline from somewhere else: the drift is named before the results, so a
+    // moved pixel is not read as the site having changed.
+    writeFileSync(file, JSON.stringify({ ...recorded, chromium: '1.0.0', platform: 'aix' }))
+    const moved = await cli(root, ['--check', 'order-row'])
+    expect(moved.out).toContain('not the machine the committed images were taken on')
+    expect(moved.out).toMatch(/chromium: 1\.0\.0 → \d+\./)
+    expect(moved.out).toContain(`platform: aix → ${process.platform}`)
+  }, 120_000)
+
+  it('is not written by a run that installs nothing', async () => {
+    const root = project()
+    await cli(root, ['order-row'])
+    expect(existsSync(join(root, 'shotlist.baseline.json'))).toBe(false)
+  }, 120_000)
+})
+
 describe('--check', () => {
   it('reports a recipe with nothing committed as new, and exits non-zero', async () => {
     const root = project()

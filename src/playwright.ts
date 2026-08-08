@@ -14,6 +14,8 @@ export interface PlaywrightModule {
 export interface Browser {
   newContext(options?: Record<string, unknown>): Promise<BrowserContext>
   close(): Promise<void>
+  /** Optional: a fake in a test has no version, and neither has a run with no browser. */
+  version?(): string
 }
 
 export interface BrowserContext {

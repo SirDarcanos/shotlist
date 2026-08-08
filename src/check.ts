@@ -81,9 +81,12 @@ export async function check(
   recipes: readonly Recipe[],
   library: Library,
   loaded: LoadedConfig,
-  options: { keepGoing?: boolean; onRetry?: (retry: Retry) => void } = {},
+  options: { browser?: Browser; keepGoing?: boolean; onRetry?: (retry: Retry) => void } = {},
 ): Promise<CheckResult[]> {
-  const browser: Browser = await loadPlaywright().chromium.launch()
+  // A caller that already has one passes it, the same way `shoot` takes one — the CLI
+  // reads the browser's version off it before any recipe is re-shot.
+  const browser: Browser = options.browser ?? (await loadPlaywright().chromium.launch())
+  const ours = options.browser === undefined
   const results: CheckResult[] = []
   try {
     const page = await (await browser.newContext()).newPage()
@@ -153,7 +156,7 @@ export async function check(
       })
     }
   } finally {
-    await browser.close()
+    if (ours) await browser.close()
   }
   return results
 }
