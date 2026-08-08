@@ -37,6 +37,18 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`--untrusted`, for running a config that is not yours.** The hardening so far assumed
+  a desk: your project, your config, your machine. Automation inverts that — a pull
+  request from a fork can edit the config, and the runner it lands on has credentials, a
+  network position and other people's work on it; a service shooting what strangers submit
+  is the same problem louder. With the flag (or `SHOTLIST_UNTRUSTED=1`, for a fixed
+  command line) a run starts no processes, opens nothing but http(s), opens nothing on the
+  network the runner sits in — localhost, 10/8, 192.168, 169.254, the cloud metadata
+  names — and neither reads nor writes outside the project. It is set from the command
+  line and the environment and never from the config, because a control the config can
+  switch off is not a control. `repeat` is capped at 1000 for the same reason `retries`
+  was capped at 5.
+
 - **`check.ignore`, for a shot whose subject is the part that changes.** `mask` hides a
   region in the image, and `check: false` gives up on the shot entirely — neither helps
   when the volatile thing is what the screenshot is _of_. `check.ignore` shoots the region

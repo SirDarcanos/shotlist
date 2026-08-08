@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { createConnection } from 'node:net'
 import { ShotlistError, fromRoot } from './config.js'
+import { checkCommand } from './trust.js'
 import type { LoadedConfig, Serve } from './config.js'
 
 /** A server shotlist started, and is therefore responsible for stopping. */
@@ -143,6 +144,7 @@ function quoted(output: readonly string[]): string {
 export async function startServer(loaded: LoadedConfig): Promise<Server | null> {
   const { serve, url } = loaded.config.site
   if (!serve) return null
+  if (loaded.trust) checkCommand(loaded.trust, 'site.serve')
   if (isHttp(url) && (await answers(url))) return null
 
   const { tokens, bare } = parseCommand(serve.command)

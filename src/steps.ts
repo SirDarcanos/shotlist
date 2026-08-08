@@ -1,4 +1,6 @@
 import { ShotlistError, pageMessage } from './config.js'
+import { checkUrl } from './trust.js'
+import type { Trust } from './trust.js'
 import { interpolate } from './recipe.js'
 import { resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
@@ -14,6 +16,8 @@ export interface RunContext {
   viewport: { width: number; height: number }
   timeout: number
   newPage(): Promise<Page>
+  /** What this recipe may reach, when the operator said the config is not theirs. */
+  trust?: Trust
 }
 
 const LOCATOR_SOURCES = ['role', 'label', 'placeholder', 'testid'] as const
@@ -150,7 +154,9 @@ async function runStep(
   const text = (key: string) => String(step[key])
 
   if ('goto' in step) {
-    await page.goto(text('goto'), { waitUntil: 'load' })
+    const to = text('goto')
+    if (ctx.trust) checkUrl(ctx.trust, to, '`goto`')
+    await page.goto(to, { waitUntil: 'load' })
     return
   }
   if ('click' in step) {
@@ -251,7 +257,9 @@ async function runStep(
     const opened = await ctx.newPage()
     const viewport = step['viewport'] as { width: number; height: number } | undefined
     if (viewport) await opened.setViewportSize(viewport)
-    await opened.goto(text('openPage'), { waitUntil: 'load' })
+    const to = text('openPage')
+    if (ctx.trust) checkUrl(ctx.trust, to, '`openPage`')
+    await opened.goto(to, { waitUntil: 'load' })
     ctx.pages.set(text('as'), opened)
     ctx.page = opened
     return

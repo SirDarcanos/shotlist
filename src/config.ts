@@ -248,6 +248,11 @@ export interface LoadedConfig {
   /** The config file's own directory: every path in `paths` and `install` resolves from here. */
   root: string
   file: string
+  /**
+   * What this config is allowed to do to the machine running it, set by the operator.
+   * Absent means the config is the operator's own, which is what a desk looks like.
+   */
+  trust?: import('./trust.js').Trust
 }
 
 /** Load the nearest config file, or the one given, with its root directory. */

@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
+import { checkPath, checkUrl } from './trust.js'
 import type { Config, LoadedConfig, Style } from './config.js'
 import { expandSteps } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
@@ -82,7 +83,11 @@ function destinationFor(recipe: Recipe, loaded: LoadedConfig): string | undefine
         (known.length ? ` — it defines ${known.join(', ')}` : ' — it defines no destinations'),
     )
   }
-  return join(fromRoot(loaded, target), `${recipe.name}.png`)
+  const destination = join(fromRoot(loaded, target), `${recipe.name}.png`)
+  if (loaded.trust) {
+    checkPath(loaded.trust, destination, `recipe "${recipe.name}": install."${recipe.install}"`)
+  }
+  return destination
 }
 
 /** Turn the recipe's callouts into what the drawing layer needs, once the rects are known. */
@@ -193,6 +198,7 @@ function sourceImage(
   loaded: LoadedConfig,
 ): { image: Buffer; pixels: { width: number; height: number } } {
   const path = fromRoot(loaded, recipe.file!)
+  if (loaded.trust) checkPath(loaded.trust, path, `recipe "${recipe.name}": \`file:\``)
   if (!existsSync(path)) {
     throw inRecipe(
       recipe,
@@ -228,6 +234,14 @@ export async function shoot(
   const { config } = loaded
   const style = mergeStyle(config.style, recipe.style as never)
   const settings = settingsFor(recipe, config)
+  // A `source: file` recipe never opens the site, so it is not asked to justify a URL.
+  if (loaded.trust && recipe.source === 'app') {
+    checkUrl(
+      loaded.trust,
+      settings.url,
+      `recipe "${recipe.name}": ${recipe.url ? '`url`' : '`site.url`'}`,
+    )
+  }
   const outDir = fromRoot(loaded, config.paths.out)
   mkdirSync(outDir, { recursive: true })
   const file = join(outDir, `${recipe.name}.png`)
@@ -325,6 +339,7 @@ export async function shoot(
           viewport: settings.viewport,
           timeout: config.site.timeout,
           newPage: () => context.newPage(),
+          ...(loaded.trust ? { trust: loaded.trust } : {}),
         }
         try {
           await runSteps(expandSteps(recipe.setup, library.macros), ctx)

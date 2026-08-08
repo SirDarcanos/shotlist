@@ -712,30 +712,51 @@ files can use it — point yours at `node_modules/shotlist/skills/shotlist/SKILL
 
 ## What a config can do to the machine that runs it
 
-A `shotlist.config.yaml` is a file in a repository, and running shotlist is not meant to
-be a decision about what that repository may do to your machine. It is worth knowing
-exactly where the line is before running it in a checkout you did not write.
+A `shotlist.config.yaml` is a file in a repository. Whether that is fine depends entirely
+on **whose repository**, and there are two answers.
 
-**A config cannot run code.** There is no `eval:` step and no way to reach one. Queries
-travel into the page as data, never as source: a malformed selector is a `SyntaxError`
-from `querySelectorAll`, not an execution. `site.serve` runs a program directly with no
-shell, so `&&`, `|`, `>` and a `VAR=value` prefix are refused rather than interpreted.
+**At a desk, on your own project**, a config is something you wrote, and it is allowed to
+start your dev server and write images where you keep them. That is the default.
 
-**A config can do these, by design:**
+**In automation it is not.** A pull request from a fork can edit the config, and the
+runner it lands on has your credentials, your network, and other people's work on it. A
+service that shoots what strangers submit is the same problem with the volume turned up.
+For that, run it with `--untrusted` (or `SHOTLIST_UNTRUSTED=1`, for a fixed command line):
 
-- **start a process** — `site.serve` runs the command it names, with the arguments it
-  names. Read it before running a strange project;
-- **fetch what it names** — `site.url`, a recipe's `url`, `openPage` and
-  `style.label.fontUrl` are all fetched from the machine doing the shooting, which may be
-  inside a network the author is not;
-- **write images where it says** — an `install` destination may be absolute or climb out
-  of the project, and the directories are created. The contents are always a PNG, and a
-  recipe's `name` cannot contain a path, so what can be written is `<destination>/<name>.png`
-  and nothing else.
+```bash
+npx shotlist --check --untrusted
+```
 
-**A run is bounded.** `site.timeout` limits how long a query may take to resolve, so a
-`matching` pattern that backtracks fails with a message instead of hanging the build; a
-viewport and scale are held to what a browser can actually paint; and `retries` is capped.
+|                                                         | default | `--untrusted` |
+| ------------------------------------------------------- | ------- | ------------- |
+| `site.serve` starts a process                           | yes     | **refused**   |
+| opens `file:` and `data:` URLs                          | yes     | **refused**   |
+| opens localhost, 10/8, 192.168, 169.254, cloud metadata | yes     | **refused**   |
+| reads or writes outside the project                     | yes     | **refused**   |
+
+It is set from the command line and the environment, never from the config: **a control
+the config can switch off is not a control.**
+
+**What is always true, either way.** A config cannot run code — there is no `eval:` step
+and no way to reach one. Queries travel into the page as data, never as source, so a
+malformed selector is a `SyntaxError` from `querySelectorAll` rather than an execution.
+`site.serve` runs a program directly with no shell, so `&&`, `|`, `>` and a `VAR=value`
+prefix are refused rather than interpreted. `site.timeout` bounds how long a query may
+take, viewport and scale are held to what a browser can paint, and `retries` and `repeat`
+are capped — so a run cannot be made to hang.
+
+**What `--untrusted` does not do.** It reads the host out of the URL; it cannot see that a
+name you allowed resolves to an address you did not. If you shoot what strangers submit,
+put the runner somewhere that cannot reach anything it should not, and rate-limit it —
+shotlist drives a real browser, so a recipe pointed at somebody else's site is traffic
+you are sending, and a `fill:` step is a string you are typing into their forms.
+
+**shotlist has no database and issues no SQL**, so there is nothing in it to inject into.
+What it does have is a browser: a recipe is a script that types into whatever it is
+pointed at, and a hosted one that lets a stranger choose both the target and the keystrokes
+is an attack proxy for anything a browser can do — SQL injection through somebody else's
+form included. `--untrusted` keeps that off your own network; keeping it off everyone
+else's is the operator choosing what a submitted recipe may aim at.
 
 ## License
 

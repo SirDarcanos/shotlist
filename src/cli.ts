@@ -13,6 +13,7 @@ import { check } from './check.js'
 import { loadPlaywright } from './playwright.js'
 import { withServer } from './serve.js'
 import { scaffold } from './init.js'
+import { trustFrom } from './trust.js'
 import {
   BASELINE_FILE,
   describeEnvironment,
@@ -34,6 +35,8 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
 
   --config <file>   use this config instead of the nearest one
   --keep-going      carry on past a recipe that fails, and report them at the end
+  --untrusted       the config is not yours: no processes, no leaving the project,
+                    and nothing opened on the network this machine sits in
   --help            this
   --version         print the version`
 
@@ -93,6 +96,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         'keep-going': { type: 'boolean', default: false },
         diff: { type: 'boolean', default: false },
         json: { type: 'boolean', default: false },
+        untrusted: { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
       },
@@ -134,6 +138,8 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
 
   try {
     const { loaded, library } = open(values.config)
+    // Set here and nowhere else: a control the config could switch off is not one.
+    loaded.trust = trustFrom(loaded.root, values.untrusted)
 
     // No recipe named and nothing to do with them: list what there is.
     if (!values.all && !values.check && positionals.length === 0) {

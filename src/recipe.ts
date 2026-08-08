@@ -43,7 +43,9 @@ function makeStep(aliases: Readonly<Record<string, unknown>>): z.ZodType<StepInp
           ...StepBase,
         })
         .strict(),
-      z.object({ repeat: z.number().int().positive(), steps: z.array(Step), ...StepBase }).strict(),
+      z
+        .object({ repeat: z.int().positive().max(1000), steps: z.array(Step), ...StepBase })
+        .strict(),
       z
         .object({
           each: z.union([z.string(), z.array(z.unknown())]),
