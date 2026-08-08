@@ -12,250 +12,78 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Changed
 
-- **`place` on a callout defaults to `auto`, which was `right`.** A label to the left or
-  right grows the canvas by its _width_ and one above or below by its _height_, so on a
-  wide shot the default cost hundreds of pixels of margin for no reason — a real recipe
-  here went from 3782×1524 to 2880×1654 by moving two labels off the sides. `auto` weighs
-  that against how far the arrow has to travel and whether its path crosses another mark
-  or a masked region, and whether it can go over the shot rather than in a margin at all —
-  which it settles by reading the pixels it would cover, a region of one flat colour
-  counting as nothing worth keeping. On the recipe above that took the canvas to
-  2880×1524, the shot's own size, with no margin anywhere. **A callout that relied on the
-  old default now has to say `place: right`**; an explicit side is obeyed exactly as before, and `numbered` discs are
-  unaffected because they are placed `corner`. What `auto` cannot see is the pixels
-  nobody pointed at, so a shot whose arrow must miss a paragraph still wants a named side.
-
-- **`ancestor` climbs from the element's parent, not from the element.** It started at the
-  element itself, so whenever the filters happened to fit the element it answered with
-  that — `{ heading: …, ancestor: { widerThan: 400, narrowerThan: 700 } }`, meant to climb
-  out of a heading to the column holding it, matched the heading, because a heading is a
-  block as wide as its column. The result was a box drawn round the wrong thing with
-  nothing to say so. An element is not its own ancestor, which is what the README always
-  said. **If a query of yours relied on the element matching itself, drop the `ancestor`
-  key** — that is what it was doing. `pick: outermost` is unaffected in practice, since
-  it climbed past the element anyway.
+- **`place` on a callout defaults to `auto`.** It weighs what a side costs the canvas
+  against what its arrow would cross, and whether the label can sit over the shot at all.
+  A callout that relied on the old default has to say `place: right`.
+- **A shot list covers its own site.** `site.url` decides what a run may open: that host
+  and everything under it. A config that shot more than one site has to name the others in
+  `site.allow`.
+- **`ancestor` climbs from the element's parent**, not from the element — an element is
+  not its own ancestor. A query relying on the element matching itself should drop the key.
 
 ### Added
 
-- **`nth` and `child` count from the end when the number is negative**, the way
-  `Array.at` does: `-1` is the last match, `-2` the one before it. `-1` says what
-  `pick: last` says; `-2` is the only way to say the one before the last.
-
-- **A shot list covers its own site.** `site.url` now decides what a run may open: that
-  host and everything under it, so a config for `rollful.dev` shoots `api.rollful.dev` and
-  is refused `google.com`. Wandering off the site is a mistake far more often than an
-  intention; when it is one, `site.allow` names the hosts. This holds in every mode, with
-  no flag to set. **A config that shot more than one site now has to list the others.**
-- **Paths that are never read or written, in any mode:** `.env` and its variants, `.git`,
-  `.ssh`, `.gnupg`, `.aws`, `.npmrc`, `.netrc`, `.htpasswd`, `credentials`, ssh private
-  keys, and `.pem` / `.key` / `.p12` / `.pfx` / `.keystore` / `.jks` files. Not about
-  trust: a config you wrote has no reason to read your keys, and a typo in an `install`
-  destination should not be able to write into `.git`.
-- **`deny:` in the config, `--deny` on the command line, and `SHOTLIST_DENY` in the
-  environment**, for names a project puts out of bounds on top of the ones shotlist never
-  touches. One path segment each, with `*` for any run of characters, so `fake-secret`
-  stops a folder and everything under it and `*.sqlite` stops a file. Checked against
-  filesystem paths and URL paths alike — `/fake-secret` is out of bounds whether a recipe
-  reaches it through the disk or through the site. The refusal is one line —
-  `"fake-secret" is a forbidden path — contact the administrator` — and is the same
-  sentence for a name shotlist forbids and one the project does. It says neither which of
-  the three set it nor which list it came from: whoever hits it cannot act on either, and
-  naming the config key mostly invites editing it out. All three add up and none can
-  subtract, so a `deny` holds even under `--untrusted`: unlike `site.allow` it can only
-  ever refuse more. The environment is the one a recipe author cannot edit their way
-  out of, which is what an administrator setting up a machine wants.
-- **`--allow <host>` and `--allow-path <dir>`**, repeatable, for what the operator wants
-  reachable. Unlike `site.allow` they come from the command line, so they still mean
-  something under `--untrusted`.
-- **`--untrusted`, for running a config that is not yours.** The hardening so far assumed
-  a desk: your project, your config, your machine. Automation inverts that — a pull
-  request from a fork can edit the config, and the runner it lands on has credentials, a
-  network position and other people's work on it; a service shooting what strangers submit
-  is the same problem louder. With the flag (or `SHOTLIST_UNTRUSTED=1`, for a fixed
-  command line) a run starts no processes, opens nothing but http(s), opens nothing on the
-  network the runner sits in — localhost, 10/8, 192.168, 169.254, the cloud metadata
-  names — and neither reads nor writes outside the project. It is set from the command
-  line and the environment and never from the config, because a control the config can
-  switch off is not a control. `repeat` is capped at 1000 for the same reason `retries`
-  was capped at 5.
-
-- **`check.ignore`, for a shot whose subject is the part that changes.** `mask` hides a
-  region in the image, and `check: false` gives up on the shot entirely — neither helps
-  when the volatile thing is what the screenshot is _of_. `check.ignore` shoots the region
-  as it is and leaves its contents out of the comparison, so the rest of the shot stays
-  checked at the usual threshold. Only the contents are excused: the region is blanked
-  where it resolves to now, in both images, so a box that moved or resized still reports —
-  what it used to cover is compared — and one that renders nothing fails outright, because
-  the query matches nothing. That is the assertion `check: false` cannot make. A result
-  that skipped something says `(1 region not compared)`, so a pass is not read as covering
-  the whole image.
-
-- **`--check --json`**, so a pipeline can act on a run rather than parse it. The report
-  goes to stdout and everything written for a person moves to stderr, which is what makes
-  `--check --json > report.json` leave a usable file. It carries each recipe's status and
-  ratio, the diff written for it, and the environment drift — so a job can tell a
-  re-render on a different Chromium apart from a regression without reading prose.
-
-- **`--init`**, writing a commented `shotlist.config.yaml` and a first recipe. Starting a
-  project meant copying two files out of the README into an empty directory and finding
-  out which keys were required by being told. The scaffold parses, so `npx shotlist`
-  lists `example` straight after it, and the recipe carries the `yaml-language-server`
-  line that turns on editor completion. Neither file is overwritten: run it in a project
-  that already has recipes and it writes only the half that was missing.
-
-- **`--check --diff`, so a drift report shows what moved.** `2.13% of pixels differ` says
-  a shot changed and nothing about how, which is the thing you need before deciding
-  whether to bless it or fix it. It now writes a three-up per changed shot into
-  `<paths.out>/diff/`: the committed image, the re-shot one, and the re-shot one again
-  with every changed pixel tinted. Two panels when the sizes differ, since there is
-  nothing to overlay. It is drawn in the browser that took the shot, so it costs no image
-  library, and only a shot that actually moved pays for it.
-
-- **`--check` says when it is not running on the machine that took the images.**
-  `--install` now records the shotlist, Playwright and Chromium versions and the platform
-  in `shotlist.baseline.json`, beside the config, to be committed with the images. A
-  different Chromium rasterises text differently and a different platform has different
-  faces to rasterise, so either moves pixels with the site untouched — and a check that
-  reports `0.83% of pixels differ` and stops there sends somebody looking for a
-  regression that was never there. The difference is now named before the results.
-
-- **`mask` on a recipe**, for the part of a shot the recipe does not decide. A frame
-  holding a clock, a live total or a face differs on every re-shoot, and until now the
-  only answer was `check: false` — giving up drift detection on the whole image to
-  tolerate one corner of it, which makes the check something nobody reads. `mask` takes
-  the same queries as everything else, so a finder works and an element carrying neither
-  a class nor a test id is still reachable — by position, or by a literal box. It has to
-  be keyed on something that survives the value changing: `{ text: $42.00 }` matches the
-  figure being hidden today and nothing at all tomorrow. A mask that matches nothing
-  stops the run rather than quietly producing an unmasked shot that then reports drift
-  for ever. Regions are painted before the callouts, so a callout may still outline a
-  masked box. `style.mask.fill` sets the colour; it is neutral rather than the callout
-  colour, because a mask is not pointing anything out.
-
-- **A skill for coding agents**, at `skills/shotlist/SKILL.md` in the package. The README
-  is reference — what every key does — and an agent writing its first recipe needs the
-  other half: that a query should key on what a person can see rather than on a generated
-  class name, that `pick: smallest` is what makes "the row containing X" resolve to the row
-  and not to `<body>`, that `ancestor: { pick: outermost }` is how you reach a dialog's
-  card out of its backdrop, and that shotlist places a label but cannot know which pixels
-  it must not point across. Copy it to `.claude/skills/`; it is Markdown with frontmatter,
-  so anything that reads instruction files can use it.
-
-- **`site.serve`, so a run can start the site it shoots.** Until now `site.url` had to be
-  answering already, and nothing said whose job that was — which is fine at a desk with
-  the dev server in another tab, and is the whole problem in CI. `serve: npm run dev`
-  starts it, waits until it is genuinely up, and stops it afterwards. It probes
-  `site.url` first and starts nothing when something already answers, so it can stay in
-  the config permanently rather than being a thing CI turns on: while you are writing
-  recipes it uses the server you already have. `ready:` says what counts as up — a
-  http(s) URL, a port, or `{ log: <pattern> }` — and defaults to fetching `site.url`. The
-  command runs in its own process group and is stopped through it, including on Ctrl-C,
-  because `npm run dev` is npm spawning the server and signalling only the process
-  shotlist launched leaves the one holding the port. There is no shell: `&&`, `|`, `>`
-  and a `VAR=value` prefix are refused with what to write instead, so a config file
-  cannot become a way to run arbitrary shell in somebody else's checkout.
-
-- **`retries:` on a recipe, for a shot that is flaky rather than wrong.** A capture drives
-  a real application, and some of what it trips over — an element that had not rendered
-  yet, a request that had not landed — is gone on the next attempt. `retries: 2` shoots
-  three times before giving up, each in a fresh browser context, and reports the attempts
-  that failed while the run is still going rather than after it. It is capped at 5,
-  because a recipe whose query is simply wrong fails identically every time and a larger
-  number only buys a slower way to be told so. A `source: file` recipe never retries: it
-  has no page to be flaky about.
-- **`--keep-going`, so one broken recipe does not decide the run.** A run stops at the
-  first failure, which is the right answer when you are shooting one recipe and the wrong
-  one when you are shooting forty in CI — the other thirty-nine had answers worth having.
-  With the flag each failure is printed as it happens and named again at the end
-  (`1 of 5 failed: broken`), and the exit code is still non-zero. It applies to `--check`
-  too, where a recipe that could not be shot is now a `FAILED` result alongside the ones
-  that diffed, rather than the end of the run.
+- **`site.serve`** starts the site, waits until it answers, and stops it afterwards. A
+  server already running is used as it is, so it can stay in the config.
+- **`mask`** paints over a region the recipe does not decide — a clock, a live total, a
+  face — so the rest of the shot stays checkable.
+- **`check.ignore`** leaves a region's contents out of the comparison but shoots it as it
+  is, for when the volatile thing is what the screenshot is _of_. A box that moves or
+  renders nothing is still reported.
+- **`retries` on a recipe**, for a shot that is flaky rather than wrong.
+- **`--keep-going`** finishes the run and names every failure at the end.
+- **`--init`** writes a commented config and a first recipe.
+- **`--check --diff`** writes a committed/re-shot/changed three-up for each drifted shot.
+- **`--check --json`** puts the report on stdout and everything written for a person on
+  stderr.
+- **`--check` says when it is not on the machine that took the images**, which `--install`
+  records in `shotlist.baseline.json`.
+- **`nth` and `child` count from the end when negative**, the way `Array.at` does.
+- **A skill for coding agents**, at `skills/shotlist/SKILL.md`, to copy into
+  `.claude/skills/`.
+- **`--untrusted`**, for a config that is not yours: no processes, nothing but http(s),
+  nothing on the network the runner sits in, nothing outside the project, and `site.allow`
+  ignored. Set from the command line or `SHOTLIST_UNTRUSTED`, never from the config.
+- **`--allow <host>` and `--allow-path <dir>`**, repeatable. Unlike `site.allow` they come
+  from the operator, so they survive `--untrusted`.
+- **`deny:`, `--deny` and `SHOTLIST_DENY`** put a file or folder name out of bounds, on
+  disk and in a URL path alike. They add up and none of them can subtract.
+- **Names never read or written, in any mode**: `.env` and its variants, `.git`, `.ssh`,
+  `.gnupg`, `.aws`, `.npmrc`, `.netrc`, `.htpasswd`, `credentials`, ssh private keys, and
+  `.pem` / `.key` / `.p12` / `.pfx` / `.keystore` / `.jks`.
 
 ### Fixed
 
-- **`grow` with a single side never worked.** `grow: { left: 4 }` was read as a call to a
-  finder named `left`, because `grow`'s keys are sides rather than query keys and a
-  one-key object with a foreign key is how a finder call is spelled. Two sides happened to
-  work, which is why it went unnoticed. Nothing inside a `grow` is a finder call now.
-- **A negative `pad`, `grow` or `rect` size was carried until something further down
-  complained.** Padding is what is added around a box, and a box with no width is not a
-  box. Each is refused where it is written, naming the key.
-- **A query resolving to a box with no area** reported the clip that box became rather
-  than the query that produced it. `visible: true` is the filter for skipping those.
-
-- **A name hidden behind a null byte got past every path check.** `.env\0.png` is `.env`
-  to the filesystem and something else to a comparison, so a forbidden name could be
-  written with one appended and slip through — on disk and in a URL path alike. A path or
-  URL carrying any control character is now refused outright, and a name is matched at the
-  byte the null would have ended it on.
-- **A symlink inside the project was a way out of it.** An `--untrusted` run compared the
-  path as written, so a link committed in the repository pointing anywhere led anywhere.
-  The destination is resolved before it is judged.
-- **`$__proto__` in a data reference answered with `Object.prototype`.** A reference read
-  through the prototype chain, so `${a.constructor.name}` and friends reached the shape of
-  the interpreter rather than the data — and a step is free to put whatever it resolves
-  into a query. Only a key the data holds itself is read now.
-- **A query nested deep enough killed the process.** `span` holds queries, so nesting has
-  no natural end, and everything that walks one recurses — the schema included. Past 64
-  it is refused with a sentence rather than a stack overflow.
-- **A recipe `name` could hold a control character.** It names a file and goes into every
-  line a run prints; a newline in one corrupted both.
-
-- **`mask` and `check.ignore` covered only the first element their query matched.** A
-  page has three avatars far more often than it has one, and a mask over `.avatar` shipped
-  two of them. Both now cover every match; naming `pick` or `nth` still says you mean one.
-
-- **A `fontUrl` could put script into the page the callouts are drawn in.** It was
-  interpolated straight into a `<link href>`, so a value carrying a quote closed the
-  attribute and opened a tag — in the page holding the screenshot. It is now held to a
-  http(s), `data:` or `file:` URL _and_ escaped where it is written; the two checks fail
-  independently.
-- **A `matching` pattern could hang a run for ever.** It is a regular expression run
-  inside the page against the text of every candidate, and one with nested quantifiers
-  backtracks exponentially — 34 characters of the wrong text took 90 seconds here, and 40
-  would have taken an hour. Resolving a query is now bounded by `site.timeout` and fails
-  naming the query and the limit.
-- **A viewport or scale past what a browser can paint crashed it.** `viewport: { width:
-200000 }` took the tab down and reported a Playwright protocol error with the whole
-  Chromium command line in it. Both are now bounded, separately and as the product they
-  make: `4000 × scale 8` is refused for being 32000 device pixels rather than dying.
-- **A recipe's `name` could climb out of the out directory.** `name: ../../elsewhere`
-  wrote there. It names an image, so it may no longer contain a path.
-
-- **A bad value in a union said `Invalid input` and stopped there.** Several keys accept
-  more than one shape — `clip`, `numbered` and `check` — and a mistake inside one was
-  reported as the union as a whole not matching, naming neither the key that was wrong nor
-  what it should have been. The failure now follows the union into the branch that was
-  plainly being written, so a misspelled key reads `numbered: Unrecognized key: "badgee"`.
-  A branch that failed only because the value is the wrong type entirely is not one the
-  author was attempting, and is left out; when no branch got further than that, zod's own
-  summary stands.
-
-- **A query that matched nothing reported itself in JavaScript.** The message was
-  `page.evaluateHandle: Error: no element matched {…}` followed by a stack through
-  `UtilityScript` — the query language is resolved by a function serialized into the
-  browser, and the wrapping came out with it. It is the failure a recipe hits most often,
-  and it named neither the recipe nor which of its keys was being resolved, so a project
-  shooting a set of recipes was told what went wrong and not where it was written. A
-  failure now reads `recipe "order-row": marks.amount — no element matched {…}`, and says
-  `clip`, or ``setup — `click`:``, when it was one of those instead.
-- **A site that was not running said `net::ERR_CONNECTION_REFUSED`.** The first thing a new
-  project gets wrong is the one error that did not say which key to look at. It now names
-  `site.url` — or the recipe's own `url` — and asks whether the site is up. A `site.ready`
-  selector that never appears is likewise reported against `site.ready`, with what it
-  waited for and for how long.
-- **`source: file` failed on the PNG header rather than on the file.** A path that did not
-  exist raised a bare `ENOENT` naming an absolute path nobody had written, and anything
-  that was not a PNG raised `not a PNG` — no recipe, no filename, no fix. Both now name
-  the recipe and `file:`, and both are checked before a browser is launched, since a typo
-  should not cost the second it takes to start one.
-
+- **A query that matched nothing reported itself in JavaScript**, through a stack in
+  `UtilityScript`. A failure names the recipe and the key:
+  `recipe "order-row": marks.amount — no element matched {…}`.
+- **A site that was not running said `net::ERR_CONNECTION_REFUSED`.** It names `site.url`,
+  or the recipe's own `url`, and asks whether the site is up.
+- **`source: file` failed on the PNG header rather than on the file**, after launching a
+  browser it did not need.
+- **A bad value in a union said `Invalid input` and stopped.** It follows the union into
+  the branch being written: `numbered: Unrecognized key: "badgee"`.
+- **`grow` with a single side never worked.** `grow: { left: 4 }` read as a call to a
+  finder named `left`; two sides happened to work, which is why it went unnoticed.
+- **`mask` and `check.ignore` covered only the first element their query matched.** A mask
+  over `.avatar` shipped every face but one.
+- **A `fontUrl` could put script into the page the callouts are drawn in.** It is held to
+  a URL and escaped where it is written.
+- **A `matching` pattern could hang a run for ever** by backtracking. Resolving a query is
+  bounded by `site.timeout`.
+- **A viewport or scale past what a browser can paint crashed it**, reporting a Playwright
+  error with the whole Chromium command line in it.
+- **A recipe `name` could climb out of the out directory**, or hold a control character.
+- **A null byte got a forbidden name past every path check**, on disk and in a URL path.
+- **A symlink inside the project was a way out of it** under `--untrusted`.
+- **`$__proto__` in a data reference answered with `Object.prototype`.** Only a key the
+  data holds itself is read.
+- **A query nested deep enough killed the process.** Past 64 deep it is refused.
+- **A negative `pad`, `grow` or `rect` size** was carried until something downstream
+  complained. Each is refused where it is written.
+- **A query resolving to a box with no area** reported the clip it became rather than the
+  query that produced it.
 - **The README's reference tables had fallen behind the schemas they describe.**
-  `startsWith` and `exact` on a query, `inside`, `dx` and `dy` on a callout, `comment` on
-  any step, and `viewport` on `openPage` all worked but appeared nowhere, and the CLI
-  section was missing `--check <name>`, `--help` and `--version`. `style.number.fill` is a
-  fallback to `color` rather than the fixed `#DC2626` the defaults block implied, so a
-  project changing `color` was told its discs would stay red.
 
 ## [0.2.3] — 2026-08-06
 
