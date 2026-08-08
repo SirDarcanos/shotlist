@@ -169,6 +169,24 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Fixed
 
+- **A name hidden behind a null byte got past every path check.** `.env\0.png` is `.env`
+  to the filesystem and something else to a comparison, so a forbidden name could be
+  written with one appended and slip through — on disk and in a URL path alike. A path or
+  URL carrying any control character is now refused outright, and a name is matched at the
+  byte the null would have ended it on.
+- **A symlink inside the project was a way out of it.** An `--untrusted` run compared the
+  path as written, so a link committed in the repository pointing anywhere led anywhere.
+  The destination is resolved before it is judged.
+- **`$__proto__` in a data reference answered with `Object.prototype`.** A reference read
+  through the prototype chain, so `${a.constructor.name}` and friends reached the shape of
+  the interpreter rather than the data — and a step is free to put whatever it resolves
+  into a query. Only a key the data holds itself is read now.
+- **A query nested deep enough killed the process.** `span` holds queries, so nesting has
+  no natural end, and everything that walks one recurses — the schema included. Past 64
+  it is refused with a sentence rather than a stack overflow.
+- **A recipe `name` could hold a control character.** It names a file and goes into every
+  line a run prints; a newline in one corrupted both.
+
 - **`mask` and `check.ignore` covered only the first element their query matched.** A
   page has three avatars far more often than it has one, and a mask over `.avatar` shipped
   two of them. Both now cover every match; naming `pick` or `nth` still says you mean one.

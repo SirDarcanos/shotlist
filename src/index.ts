@@ -32,7 +32,9 @@ export {
   resolveQuery,
   aliasKeyOf,
   isAliasCall,
+  MAX_QUERY_DEPTH,
   parseQuery,
+  refuseDeepNesting,
   resolveAliases,
   substitute,
 } from './query.js'

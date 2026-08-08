@@ -217,7 +217,33 @@ export function parseQuery(
   node: unknown,
   aliases: Readonly<Record<string, unknown>> = {},
 ): QueryInput {
+  refuseDeepNesting(node)
   return Query.parse(resolveAliases(node, aliases)) as QueryInput
+}
+
+/** How far a query may nest. Far past anything a person writes, and short of the stack. */
+export const MAX_QUERY_DEPTH = 64
+
+/**
+ * Refuse a query nested deeper than anyone means it.
+ *
+ * `span` holds queries, so a query can nest without limit — and everything that walks one
+ * recurses, including the schema. Deep enough and the whole thing dies of a stack
+ * overflow, which is a crash rather than a complaint. Counted iteratively, so the check
+ * cannot go the same way as what it is checking.
+ */
+export function refuseDeepNesting(node: unknown, limit = MAX_QUERY_DEPTH): void {
+  const pending: [unknown, number][] = [[node, 1]]
+  for (;;) {
+    const next = pending.pop()
+    if (!next) return
+    const [value, depth] = next
+    if (typeof value !== 'object' || value === null) continue
+    if (depth > limit) {
+      throw new Error(`a query nested more than ${limit} deep, which is deeper than it can mean`)
+    }
+    for (const inner of Object.values(value)) pending.push([inner, depth + 1])
+  }
 }
 
 /** Everything the page needs to answer one query. */

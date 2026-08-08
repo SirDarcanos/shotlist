@@ -153,6 +153,9 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
         .refine((value) => !/[\\/]|^\.\.?$/.test(value), {
           message: 'is the name of an image, so it cannot contain a path',
         })
+        .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), {
+          message: 'is a filename, so it cannot hold control characters',
+        })
         .optional(),
       source: z.enum(['app', 'file']).default('app'),
       /** With `source: file`, the PNG to annotate instead of driving the site. */
@@ -522,10 +525,20 @@ export function interpolate(
   return value
 }
 
-/** Read a dotted path out of the variable scope. */
+/**
+ * Keys that read the language rather than the data.
+ *
+ * `$__proto__` answered with `Object.prototype`, and a step is free to put whatever it
+ * resolves into a query — so a reference could reach out of the scope it was given into
+ * the shape of the interpreter. Data files hold data.
+ */
+const NOT_DATA = new Set(['__proto__', 'constructor', 'prototype'])
+
+/** Read a dotted path out of the variable scope, and out of nothing else. */
 function lookup(vars: Readonly<Record<string, unknown>>, path: string): unknown {
   return path.split('.').reduce<unknown>((current, key) => {
     if (current === null || typeof current !== 'object') return undefined
+    if (NOT_DATA.has(key) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined
     return (current as Record<string, unknown>)[key]
   }, vars)
 }

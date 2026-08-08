@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { ShotlistError } from './config.js'
 
 /**
@@ -81,7 +82,10 @@ function segmentPattern(glob: string): RegExp {
 export function secretIn(path: string, also: readonly string[] = []): string | null {
   const patterns = [...SECRET, ...also.map(segmentPattern)]
   for (const part of path.split(/[\\/]+/).filter(Boolean)) {
-    if (patterns.some((pattern) => pattern.test(part))) return part
+    // A null byte ends the string for whatever opens the path next, so `.env\0.png` is
+    // `.env` to the filesystem and something else to a comparison. Match what it will be.
+    const seen = part.split('\u0000')[0]!
+    if (patterns.some((pattern) => pattern.test(seen))) return seen
   }
   return null
 }
@@ -122,6 +126,9 @@ export function hostsFor(siteUrl: string, allow: readonly string[] = []): string
   const apex = host.replace(/^www\./i, '')
   return [...new Set([host, apex, ...allow].filter(Boolean))]
 }
+
+/** A character no path or URL has a reason to carry, and that hides what follows it. */
+const CONTROL = /[\u0000-\u001f\u007f]/
 
 /** Addresses that are somewhere else on the network the runner happens to sit in. */
 const PRIVATE =
@@ -214,6 +221,9 @@ export function checkUrl(trust: Trust, url: string, where: string): void {
     )
   }
 
+  if (CONTROL.test(decodeURIComponent(parsed.pathname))) {
+    throw new ShotlistError(`${where}: ${parsed.pathname} holds a control character`)
+  }
   const forbidden = secretIn(decodeURIComponent(parsed.pathname), trust.deny)
   if (forbidden !== null) throw refuse(where, forbidden)
 
@@ -225,8 +235,32 @@ export function checkUrl(trust: Trust, url: string, where: string): void {
   }
 }
 
+/**
+ * A path with every link along it followed, as far as it exists.
+ *
+ * A destination is usually a directory that has not been made yet, so this climbs to the
+ * nearest part that does exist and resolves that: what is not there cannot be a link.
+ */
+function realpathOf(path: string): string {
+  let here = path
+  const rest: string[] = []
+  for (;;) {
+    try {
+      return resolve(realpathSync(here), ...rest.reverse())
+    } catch {
+      const up = dirname(here)
+      if (up === here) return path
+      rest.push(here.slice(up.length + 1))
+      here = up
+    }
+  }
+}
+
 /** Refuse a path that holds a secret, or — untrusted — one that leaves the project. */
 export function checkPath(trust: Trust, path: string, where: string): void {
+  if (CONTROL.test(path)) {
+    throw new ShotlistError(`${where}: ${JSON.stringify(path)} holds a control character`)
+  }
   const full = isAbsolute(path) ? path : resolve(trust.root, path)
 
   // Always, in every mode: these are not things anybody screenshots.
@@ -234,8 +268,12 @@ export function checkPath(trust: Trust, path: string, where: string): void {
   if (secret !== null) throw refuse(where, secret)
 
   if (!trust.untrusted) return
+  // Where the path really goes: a link committed in the project points wherever it likes,
+  // and comparing the name would confine a run to a doormat. `realpath` walks the parts
+  // that exist, which is enough — what does not exist yet cannot be a link.
+  const real = realpathOf(full)
   const within = (root: string) => {
-    const inside = relative(root, full)
+    const inside = relative(realpathOf(root), real)
     return inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))
   }
   if (within(trust.root) || trust.paths.some(within)) return
