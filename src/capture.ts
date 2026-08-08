@@ -3,6 +3,8 @@ import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
 import { checkPath, checkUrl } from './trust.js'
+import { MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
+import type { Format } from './image.js'
 import type { Config, LoadedConfig, Style } from './config.js'
 import { expandSteps } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
@@ -57,6 +59,8 @@ function settingsFor(recipe: Recipe, config: Config) {
     viewport: recipe.viewport ?? config.site.viewport,
     scale: recipe.scale ?? config.site.scale,
     theme: recipe.theme ?? config.site.theme,
+    format: recipe.format ?? config.image.format,
+    quality: recipe.quality ?? config.image.quality,
   }
   // Each is in range on its own; it is the product the browser has to paint, and past
   // what it can the tab dies with a protocol error rather than anything to act on.
@@ -84,7 +88,10 @@ function destinationFor(recipe: Recipe, loaded: LoadedConfig): string | undefine
         (known.length ? ` — it defines ${known.join(', ')}` : ' — it defines no destinations'),
     )
   }
-  const destination = join(fromRoot(loaded, target), `${recipe.name}.png`)
+  const destination = join(
+    fromRoot(loaded, target),
+    `${recipe.name}${extensionOf(recipe.format ?? loaded.config.image.format)}`,
+  )
   if (loaded.trust) {
     checkPath(loaded.trust, destination, `recipe "${recipe.name}": install."${recipe.install}"`)
   }
@@ -193,6 +200,7 @@ async function annotate(
   marks: Mark[],
   masks: Rect[],
   font: FontSheet,
+  sourceMedia: string,
 ): Promise<{
   png: Buffer
   size: { width: number; height: number }
@@ -216,7 +224,7 @@ async function annotate(
     await page.setContent(
       sheet +
         `<style>html,body{margin:0}img{display:block}</style>` +
-        `<img id="shotlist-image" src="data:image/png;base64,${image.toString('base64')}">`,
+        `<img id="shotlist-image" src="data:${sourceMedia};base64,${image.toString('base64')}">`,
     )
     // A webfont arrives after the document does; measuring before it lands would size
     // every label against the fallback.
@@ -273,22 +281,68 @@ async function annotate(
   }
 }
 
-/** The pixel size in a PNG's header, or null for anything that is not one. */
-function pngSize(png: Buffer): { width: number; height: number } | null {
-  if (png.length < 24 || png.readUInt32BE(0) !== 0x89504e47) return null
-  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+/**
+ * Re-encode a PNG as something else, in the browser that drew it.
+ *
+ * The only encoder here is a canvas, which is why the formats are the three a canvas
+ * writes. It answers a request it cannot meet with a PNG rather than an error — ask it
+ * for AVIF and you get a PNG under an `.avif` name — so what came back is checked.
+ */
+async function reEncode(
+  browser: Browser,
+  png: Buffer,
+  format: Format,
+  quality: number,
+): Promise<Buffer> {
+  const context = await browser.newContext()
+  try {
+    const page = await context.newPage()
+    await page.setContent('<body></body>')
+    const url = await page.evaluate(
+      (input) =>
+        new Promise<string>((done, fail) => {
+          const img = new Image()
+          img.addEventListener('error', () => fail(new Error('the image could not be decoded')), {
+            once: true,
+          })
+          img.addEventListener(
+            'load',
+            () => {
+              const canvas = document.createElement('canvas')
+              canvas.width = img.naturalWidth
+              canvas.height = img.naturalHeight
+              canvas.getContext('2d')!.drawImage(img, 0, 0)
+              done(canvas.toDataURL(input.media, input.quality / 100))
+            },
+            { once: true },
+          )
+          img.src = input.source
+        }),
+      { source: `data:image/png;base64,${png.toString('base64')}`, media: MEDIA[format], quality },
+    )
+    if (!url.startsWith(`data:${MEDIA[format]}`)) {
+      throw new ShotlistError(
+        `this browser cannot write ${format}, and answered with ` +
+          `${url.slice(5, url.indexOf(';'))} instead`,
+      )
+    }
+    return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')
+  } finally {
+    await context.close()
+  }
 }
 
 /**
  * Read the image a `source: file` recipe annotates, before a browser is launched.
  *
- * A path typo and a JPEG are both mistakes a person makes while writing the recipe, and
- * neither should cost the second it takes to start Chromium before being reported.
+ * A path typo and a file that is not an image are both mistakes a person makes while
+ * writing the recipe, and neither should cost the second it takes to start Chromium
+ * before being reported.
  */
 function sourceImage(
   recipe: Recipe,
   loaded: LoadedConfig,
-): { image: Buffer; pixels: { width: number; height: number } } {
+): { image: Buffer; pixels: { width: number; height: number }; format: Format } {
   const path = fromRoot(loaded, recipe.file!)
   if (loaded.trust) checkPath(loaded.trust, path, `recipe "${recipe.name}": \`file:\``)
   if (!existsSync(path)) {
@@ -299,15 +353,19 @@ function sourceImage(
     )
   }
   const image = readFileSync(path)
-  const pixels = pngSize(image)
-  if (!pixels) {
+  // Read from the bytes rather than the name: a `capture.png` that is really a JPEG is a
+  // mistake worth reporting as the one it is.
+  const format = formatOf(image)
+  const pixels = format && sizeOf(image, format)
+  if (!format || !pixels) {
     throw inRecipe(
       recipe,
       '`file:`',
-      `${recipe.file} is not a PNG — the image size is read from a PNG header, so convert it first`,
+      `${recipe.file} is not a PNG, JPEG or WebP — its size is read from the header, and it ` +
+        'has none of theirs',
     )
   }
-  return { image, pixels }
+  return { image, pixels, format }
 }
 
 /**
@@ -337,7 +395,7 @@ export async function shoot(
   const outDir = fromRoot(loaded, config.paths.out)
   if (loaded.trust) checkPath(loaded.trust, outDir, 'paths.out')
   mkdirSync(outDir, { recursive: true })
-  const file = join(outDir, `${recipe.name}.png`)
+  const file = join(outDir, `${recipe.name}${extensionOf(settings.format)}`)
   const source = recipe.source === 'file' ? sourceImage(recipe, loaded) : undefined
 
   // A caller shooting a whole set passes its own browser: launching one per recipe costs
@@ -512,6 +570,7 @@ export async function shoot(
             marks,
             masks,
             fontSheet(style, loaded),
+            source ? MEDIA[source.format] : MEDIA.png,
           )
         : {
             png: image,
@@ -529,7 +588,13 @@ export async function shoot(
       height: rect.height * settings.scale,
     }))
 
-    writeFileSync(file, drawn.png)
+    // Everything above works in PNG, because that is what a screenshot and a canvas both
+    // hand back losslessly. The format the project asked for is applied once, at the end.
+    const written = isLossless(settings.format)
+      ? drawn.png
+      : await reEncode(browser, drawn.png, settings.format, settings.quality)
+
+    writeFileSync(file, written)
     const destination = destinationFor(recipe, loaded)
     if (options.install && destination) {
       mkdirSync(dirname(destination), { recursive: true })

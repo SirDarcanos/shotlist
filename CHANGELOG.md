@@ -23,6 +23,17 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`image.format` — `png`, `jpeg` or `webp`**, with `quality` for the two that are lossy,
+  and a per-recipe `format`/`quality` to override it. The written file takes the
+  extension the format is known by, and `--check` compares against the same. `webp` is the
+  one worth reaching for: a shot of this site's homepage is 87 KB as PNG and 33 KB as
+  WebP, with text a JPEG at the same size would have smeared. `source: file` reads all
+  three now, from the bytes rather than the name.
+
+  There is no AVIF. The only encoder here is a browser, and Chromium reads AVIF but will
+  not write it — worse, it answers a request for one with a PNG rather than an error, so
+  every conversion checks what it actually got back.
+
 - **`site.serve`** starts the site, waits until it answers, and stops it afterwards. A
   server already running is used as it is, so it can stay in the config.
 - **`mask`** paints over a region the recipe does not decide — a clock, a live total, a

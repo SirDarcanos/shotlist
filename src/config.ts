@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
+import { FORMATS } from './image.js'
 
 const Style = z
   .object({
@@ -125,6 +126,22 @@ export const Config = z.object({
       macros: z.string().default('screenshots/macros'),
       data: z.string().default('screenshots/data'),
       out: z.string().default('screenshots/out'),
+    })
+    .prefault({}),
+  /**
+   * What images are written as. `png` keeps every pixel; `webp` is a good deal smaller
+   * for the same thing and is what a browser will be showing them in anyway. `jpeg` is
+   * lossy in the way that shows worst on the thing a UI screenshot is mostly made of,
+   * which is text.
+   *
+   * AVIF is not here: the encoder is a browser, and Chromium reads AVIF but will not
+   * write it.
+   */
+  image: z
+    .object({
+      format: z.enum(FORMATS).default('png'),
+      /** Ignored by `png`, which has nothing to trade. */
+      quality: z.int().min(1).max(100).default(90),
     })
     .prefault({}),
   /** Named install destinations a recipe selects with `install: <name>`. */

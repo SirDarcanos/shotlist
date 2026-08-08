@@ -279,11 +279,11 @@ describe('source: file', () => {
     )
   })
 
-  it('says a file that is not a PNG is not one, rather than failing on its header', async () => {
+  it('says a file that is not an image is not one, rather than failing on its header', async () => {
     const { loaded, library } = project()
     const recipe = { ...library.recipes.get('annotated')!, file: 'shotlist.config.yaml' }
     await expect(shoot(recipe, library, loaded, { browser: unusable })).rejects.toThrow(
-      /^recipe "annotated": `file:` — shotlist\.config\.yaml is not a PNG — the image size is read from a PNG header, so convert it first$/,
+      /^recipe "annotated": `file:` — shotlist\.config\.yaml is not a PNG, JPEG or WebP — /,
     )
   })
 })

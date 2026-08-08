@@ -40,6 +40,8 @@ export {
 } from './query.js'
 export type { QueryContext, QueryInput, Rect, Resolved } from './query.js'
 
+export { FORMATS, MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
+export type { Format } from './image.js'
 export { shoot } from './capture.js'
 export type { Retry, ShotResult } from './capture.js'
 export { drawAnnotations } from './annotate.js'

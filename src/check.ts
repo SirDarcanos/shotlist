@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fromRoot } from './config.js'
 import type { LoadedConfig } from './config.js'
 import { shoot } from './capture.js'
+import { MEDIA, extensionOf, formatOf } from './image.js'
 import type { Retry } from './capture.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser } from './playwright.js'
@@ -173,7 +174,9 @@ async function comparePixels(input: {
 function committedFile(recipe: Recipe, loaded: LoadedConfig): string | undefined {
   if (!recipe.install || recipe.install === 'none') return undefined
   const target = loaded.config.install[recipe.install]
-  return target ? `${fromRoot(loaded, target)}/${recipe.name}.png` : undefined
+  if (!target) return undefined
+  const format = recipe.format ?? loaded.config.image.format
+  return `${fromRoot(loaded, target)}/${recipe.name}${extensionOf(format)}`
 }
 
 /**
@@ -241,7 +244,10 @@ export async function check(
         results.push({ name: recipe.name!, status: 'new', shot: shotResult.file, against })
         continue
       }
-      const uri = (file: string) => `data:image/png;base64,${readFileSync(file).toString('base64')}`
+      const uri = (file: string) => {
+        const bytes = readFileSync(file)
+        return `data:${MEDIA[formatOf(bytes) ?? 'png']};base64,${bytes.toString('base64')}`
+      }
       const ignore = shotResult.ignored ?? []
       const compared = await page.evaluate(comparePixels, {
         before: uri(against),

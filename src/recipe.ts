@@ -2,6 +2,7 @@ import { readdirSync, existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
 import { MAX_PIXELS, ShotlistError, formatIssues, readDocument } from './config.js'
+import { FORMATS } from './image.js'
 import { makeQuery } from './query.js'
 import type { QueryInput } from './query.js'
 
@@ -169,6 +170,9 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
         })
         .optional(),
       scale: z.number().positive().max(64).optional(),
+      /** What this shot is written as, when it differs from the project's. */
+      format: z.enum(FORMATS).optional(),
+      quality: z.int().min(1).max(100).optional(),
       theme: z.enum(['light', 'dark', 'no-preference']).optional(),
       style: StylePatch.optional(),
       setup: z.array(makeStep(aliases)).default([]),

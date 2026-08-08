@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { formatOf } from '../src/image.js'
 import { run } from '../src/cli.js'
 import type { Io } from '../src/cli.js'
 import { removeProjects, tempProject } from './tempProject.js'
@@ -200,4 +201,43 @@ describe('a shot taller than the viewport', () => {
     expect(err).toBe('')
     expect(code).toBe(0)
   })
+})
+
+// A screenshot of an interface is mostly text, which is the thing JPEG treats worst and
+// WebP treats about as well as PNG for a good deal fewer bytes.
+describe('the format a shot is written in', () => {
+  it('writes each one, under the name it is known by', { timeout: 120_000 }, async () => {
+    const root = project({
+      'as-png': 'name: as-png\nclip: viewport\n',
+      'as-jpeg': 'name: as-jpeg\nformat: jpeg\nclip: viewport\n',
+      'as-webp': 'name: as-webp\nformat: webp\nclip: viewport\n',
+    })
+    const { code } = await cli(root, ['as-png', 'as-jpeg', 'as-webp'])
+    expect(code).toBe(0)
+
+    // The bytes, not the name: a browser asked for a format it cannot write answers with
+    // a PNG, and that would land here under the wrong extension without a word.
+    for (const [file, format] of [
+      ['out/as-png.png', 'png'],
+      ['out/as-jpeg.jpg', 'jpeg'],
+      ['out/as-webp.webp', 'webp'],
+    ] as const) {
+      expect(formatOf(readFileSync(join(root, file))), file).toBe(format)
+    }
+  })
+
+  it(
+    'checks a shot against the committed file of the same format',
+    { timeout: 120_000 },
+    async () => {
+      const root = project({
+        shot: 'name: shot\ninstall: guide\nformat: webp\nclip: { css: table, pad: 8 }\ncheck: { ignore: [{ css: .seen }] }\n',
+      })
+      await cli(root, ['shot', '--install'])
+      expect(existsSync(join(root, 'installed/shot.webp'))).toBe(true)
+      const { code, out } = await cli(root, ['--check', 'shot'])
+      expect(code).toBe(0)
+      expect(out).toContain('same     shot')
+    },
+  )
 })
