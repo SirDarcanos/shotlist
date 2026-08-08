@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
 import { checkPath, checkUrl } from './trust.js'
 import type { Config, LoadedConfig, Style } from './config.js'
@@ -110,6 +111,78 @@ function marksFor(recipe: Recipe, rects: Record<string, Rect>, origin: Rect): Ma
   })
 }
 
+/** What a font stylesheet becomes in the page: a link to fetch, or CSS to inline. */
+interface FontSheet {
+  href?: string
+  css?: string
+}
+
+/** The media type a font file is served as, from its extension. */
+function fontType(path: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase()
+  if (ext === 'woff2') return 'font/woff2'
+  if (ext === 'woff') return 'font/woff'
+  if (ext === 'otf') return 'font/otf'
+  if (ext === 'ttf') return 'font/ttf'
+  return 'application/octet-stream'
+}
+
+/**
+ * The stylesheet `style.label.fontUrl` names, ready to put in the drawing page.
+ *
+ * A remote sheet is linked and fetched. A local one cannot be: the page is built with
+ * `setContent`, so it has no file origin and Chromium refuses it a `file:` subresource —
+ * silently, which is worse than refusing it loudly. So a local sheet is read and inlined,
+ * and the font files it points at are inlined into it, because a relative `url()` in an
+ * inlined sheet would resolve against a page that is nowhere.
+ */
+function fontSheet(style: Style, loaded: LoadedConfig): FontSheet {
+  const named = style.label.fontUrl
+  if (!named) return {}
+
+  let path = named
+  try {
+    const url = new URL(named)
+    if (url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'data:') {
+      return { href: named }
+    }
+    if (url.protocol !== 'file:') {
+      throw new ShotlistError(
+        `style.label.fontUrl: ${url.protocol} is not something to load a stylesheet from`,
+      )
+    }
+    path = fileURLToPath(url)
+  } catch (error) {
+    if (error instanceof ShotlistError) throw error
+    // Not a URL at all, so it is a path — relative to the config, like every other path.
+  }
+
+  const file = fromRoot(loaded, path)
+  if (loaded.trust) checkPath(loaded.trust, file, 'style.label.fontUrl')
+  if (!existsSync(file)) {
+    throw new ShotlistError(
+      `style.label.fontUrl: no stylesheet at ${file} — a relative path is resolved from the ` +
+        "config file's directory",
+    )
+  }
+
+  const css = readFileSync(file, 'utf8').replace(
+    /url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
+    (whole, _quote: string, target: string) => {
+      if (/^(https?:|data:)/i.test(target)) return whole
+      const asset = fromRoot({ root: dirname(file) }, target.split(/[?#]/)[0]!)
+      if (loaded.trust) checkPath(loaded.trust, asset, 'style.label.fontUrl')
+      if (!existsSync(asset)) {
+        throw new ShotlistError(
+          `style.label.fontUrl: ${basename(file)} points at ${target}, and there is no file there`,
+        )
+      }
+      return `url(data:${fontType(asset)};base64,${readFileSync(asset).toString('base64')})`
+    },
+  )
+  return { css }
+}
+
 /** Draw the callouts over a captured image and return the finished PNG. */
 async function annotate(
   browser: Browser,
@@ -119,6 +192,7 @@ async function annotate(
   style: Style,
   marks: Mark[],
   masks: Rect[],
+  font: FontSheet,
 ): Promise<{
   png: Buffer
   size: { width: number; height: number }
@@ -131,10 +205,14 @@ async function annotate(
   })
   try {
     const page = await context.newPage()
-    // Escaped even though the schema holds it to a URL: this is markup, and the two
-    // checks fail independently.
-    const href = style.label.fontUrl?.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
-    const sheet = href ? `<link rel="stylesheet" href="${href}">` : ''
+    // Escaped even where the schema already held it to a URL: this is markup, and the
+    // two checks fail independently.
+    const escape = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+    const sheet = font.href
+      ? `<link rel="stylesheet" href="${escape(font.href)}">`
+      : font.css
+        ? `<style>${font.css.replace(/<\/style/gi, '<\\/style')}</style>`
+        : ''
     await page.setContent(
       sheet +
         `<style>html,body{margin:0}img{display:block}</style>` +
@@ -142,8 +220,22 @@ async function annotate(
     )
     // A webfont arrives after the document does; measuring before it lands would size
     // every label against the fallback.
-    if (style.label.fontUrl) {
-      await page.evaluate(() => document.fonts.ready.then(() => undefined), undefined)
+    // Ask for the face by name rather than waiting on `document.fonts.ready`. A webfont
+    // is fetched when something uses it, and until the callouts are drawn nothing here
+    // does — so `ready` resolves against an empty queue and the drawing measures a font
+    // that has not arrived. The label renders correctly in the end, but the check for
+    // whether the family resolved runs before it and reports a fallback that never was.
+    if (font.href || font.css) {
+      const wanted = `${style.label.weight} ${style.label.size}px ${style.label.font}`
+      await page.evaluate(
+        (spec) =>
+          document.fonts
+            .load(spec)
+            .catch(() => undefined)
+            .then(() => document.fonts.ready)
+            .then(() => undefined),
+        wanted,
+      )
     }
     await page.evaluate(
       () =>
@@ -401,7 +493,16 @@ export async function shoot(
     // out but something to hide still goes through it.
     const drawn =
       marks.length || masks.length
-        ? await annotate(browser, image, size, settings.scale, style, marks, masks)
+        ? await annotate(
+            browser,
+            image,
+            size,
+            settings.scale,
+            style,
+            marks,
+            masks,
+            fontSheet(style, loaded),
+          )
         : {
             png: image,
             size: { width: size.width, height: size.height },

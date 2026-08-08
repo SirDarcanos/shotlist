@@ -54,6 +54,17 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Fixed
 
+- **`style.label.fontUrl` could not name a font the project ships.** A relative path was
+  refused, and an absolute `file:` URL was accepted and then silently did nothing — the
+  drawing page is built with `setContent`, so it has no file origin and a browser gives it
+  no `file:` subresource. A local stylesheet is read and inlined now, with the font files
+  it points at inlined into it, so a path relative to the config works.
+- **The font warning fired on a webfont that had loaded.** Nothing on the drawing page
+  uses the family until the callouts are drawn, so `document.fonts.ready` resolved against
+  an empty queue and the check ran before the face arrived. The label came out right and
+  the warning contradicted it. The face is now asked for by name, at the label's own
+  weight, before anything is measured.
+
 - **A query that matched nothing reported itself in JavaScript**, through a stack in
   `UtilityScript`. A failure names the recipe and the key:
   `recipe "order-row": marks.amount — no element matched {…}`.

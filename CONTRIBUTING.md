@@ -72,6 +72,11 @@ Two constraints:
 - **Nothing in either comes from a real product.** If you need a new shape to test
   against, add a neutral one.
 
+`tests/fixture/JetBrainsMono-Bold.woff2` is there for the tests that load a font from
+disk; it is SIL Open Font License 1.1, and `JetBrainsMono-OFL.txt` beside it is the
+licence. It is a test asset and is not published — `files` in `package.json` ships only
+`dist`, `skills`, the README and the licence.
+
 ## Before opening a pull request
 
 ```bash

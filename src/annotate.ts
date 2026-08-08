@@ -126,8 +126,15 @@ export function drawAnnotations(spec: AnnotationSpec): {
    * family that does not exist. Measuring can.
    */
   const fontInUse = (): string | undefined => {
+    // At the label's own weight: a webfont is usually declared at one weight, and a face
+    // that only exists at 700 does not resolve for a probe asking at 400 — so the family
+    // would read as missing on exactly the fonts a project goes to the trouble of loading.
     const probe = (family: string) => {
-      const node = el<SVGTextElement>('text', { 'font-family': family, 'font-size': 22 })
+      const node = el<SVGTextElement>('text', {
+        'font-family': family,
+        'font-weight': String(style.label.weight),
+        'font-size': 22,
+      })
       node.textContent = 'Handgloves 0123'
       svg.append(node)
       const width = node.getBBox().width

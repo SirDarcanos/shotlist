@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   drawAnnotations,
@@ -406,4 +407,79 @@ describe('arrow placement in a real browser', () => {
       await browser.close()
     }
   })
+})
+
+// A local stylesheet cannot be linked: the drawing page is built with `setContent`, so it
+// has no file origin and a browser refuses it a `file:` subresource — silently, which is
+// worse than refusing it loudly. It is read and inlined instead, fonts and all.
+describe('a font the project ships itself', () => {
+  const FONT = join(dirname(fileURLToPath(import.meta.url)), 'fixture/JetBrainsMono-Bold.woff2')
+
+  const SHEET = `@font-face {
+    font-family: 'Shotlist Mono';
+    src: url('JetBrainsMono-Bold.woff2') format('woff2');
+    font-weight: 700;
+  }`
+
+  /**
+   * A project whose labels are set in a font it ships.
+   *
+   * The family is named with no fallback on purpose. A stack that ends in Arial resolves
+   * whatever happens to the webfont, and the warning — the only signal here that the font
+   * arrived — would stay silent either way.
+   */
+  function withFont(css: string, fontUrl: string) {
+    const { loaded, library } = project()
+    mkdirSync(join(loaded.root, 'fonts'), { recursive: true })
+    writeFileSync(join(loaded.root, 'fonts/mono.css'), css)
+    copyFileSync(FONT, join(loaded.root, 'fonts/JetBrainsMono-Bold.woff2'))
+    loaded.config.style.label.font = 'Shotlist Mono'
+    loaded.config.style.label.fontUrl = fontUrl
+    return { loaded, library }
+  }
+
+  const shootIt = (loaded: LoadedConfig, library: ReturnType<typeof loadLibrary>) =>
+    shoot(library.recipes.get('order-row')!, library, loaded)
+
+  it('is silent about a font that arrived, and says so when one did not', async () => {
+    // Both halves, because either alone passes for the wrong reason: a stylesheet that
+    // loads nothing is the control that proves the silence means something.
+    const arrived = withFont(SHEET, 'fonts/mono.css')
+    expect((await shootIt(arrived.loaded, arrived.library)).warnings ?? []).toEqual([])
+
+    const missing = withFont('/* defines no family */', 'fonts/mono.css')
+    expect((await shootIt(missing.loaded, missing.library)).warnings?.[0]).toMatch(
+      /names Shotlist Mono, and none of them is available/,
+    )
+  }, 120_000)
+
+  it('loads one named by an absolute file: URL', { timeout: 120_000 }, async () => {
+    const { loaded, library } = withFont(SHEET, 'x')
+    loaded.config.style.label.fontUrl = pathToFileURL(join(loaded.root, 'fonts/mono.css')).href
+    expect((await shootIt(loaded, library)).warnings ?? []).toEqual([])
+  })
+
+  it('says where it looked for a stylesheet that is not there', async () => {
+    const { loaded, library } = withFont(SHEET, 'fonts/missing.css')
+    await expect(shootIt(loaded, library)).rejects.toThrow(
+      /style\.label\.fontUrl: no stylesheet at .*fonts\/missing\.css/,
+    )
+  }, 120_000)
+
+  it('treats a value that is markup as the path it is not, rather than as markup', async () => {
+    // It used to be interpolated into a `<link href>`, where a quote closed the attribute
+    // and opened a script tag — in the page holding the screenshot.
+    const { loaded, library } = withFont(SHEET, '"><script>globalThis.PWNED=1</script>')
+    await expect(shootIt(loaded, library)).rejects.toThrow(/no stylesheet at /)
+  }, 120_000)
+
+  it('says which font a stylesheet points at when that is missing', async () => {
+    const { loaded, library } = withFont(
+      "@font-face { font-family: 'X'; src: url('gone.woff2'); }",
+      'fonts/mono.css',
+    )
+    await expect(shootIt(loaded, library)).rejects.toThrow(
+      /mono\.css points at gone\.woff2, and there is no file there/,
+    )
+  }, 120_000)
 })

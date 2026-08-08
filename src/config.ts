@@ -35,22 +35,12 @@ const Style = z
          * sheet. Without it a family has to be installed on the machine that shoots.
          * Needs network access at shoot time.
          *
-         * Held to a URL because it is put into the drawing page's markup: a value with a
-         * quote in it used to close the attribute and open a script tag.
+         * A http(s) or `data:` URL is linked and fetched. Anything else is a path — read
+         * from disk and inlined, along with the font files it points at, because the
+         * drawing page is built with `setContent` and a browser will not give a page
+         * with no file origin a `file:` subresource.
          */
-        fontUrl: z
-          .string()
-          .refine(
-            (value) => {
-              try {
-                return ['http:', 'https:', 'data:', 'file:'].includes(new URL(value).protocol)
-              } catch {
-                return false
-              }
-            },
-            { message: 'must be a http(s), data: or file: URL' },
-          )
-          .optional(),
+        fontUrl: z.string().optional(),
       })
       .prefault({}),
     number: z

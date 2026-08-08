@@ -132,15 +132,14 @@ describe('what a config is not allowed to be', () => {
     expect(({} as { polluted?: unknown }).polluted).toBeUndefined()
   })
 
-  it('refuses a fontUrl that is not a URL, since it is put into markup', () => {
-    // A quote in it used to close the attribute and open a script tag in the page the
-    // callouts are drawn in — the page holding the screenshot.
-    expect(() =>
-      parseConfig({ site, style: { label: { fontUrl: '"><script>x</script>' } } }),
-    ).toThrow(/fontUrl: must be a http\(s\), data: or file: URL/)
-    expect(() =>
-      parseConfig({ site, style: { label: { fontUrl: 'https://fonts.example/x.css' } } }),
-    ).not.toThrow()
+  it('takes a fontUrl that is not a URL as a path, which is what a local font is', () => {
+    // What it must never be is markup. A value carrying a quote used to close the
+    // attribute and open a script tag in the page the callouts are drawn in; it is now
+    // escaped there, and anything that is not a http(s) or data: URL never reaches that
+    // branch at all — it is read from disk instead.
+    for (const fontUrl of ['fonts/mono.css', 'https://fonts.example/x.css', '"><script>x']) {
+      expect(() => parseConfig({ site, style: { label: { fontUrl } } }), fontUrl).not.toThrow()
+    }
   })
 
   it('refuses a viewport or scale past what a browser can paint', () => {
