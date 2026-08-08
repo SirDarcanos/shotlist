@@ -12,6 +12,14 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`--check --diff`, so a drift report shows what moved.** `2.13% of pixels differ` says
+  a shot changed and nothing about how, which is the thing you need before deciding
+  whether to bless it or fix it. It now writes a three-up per changed shot into
+  `<paths.out>/diff/`: the committed image, the re-shot one, and the re-shot one again
+  with every changed pixel tinted. Two panels when the sizes differ, since there is
+  nothing to overlay. It is drawn in the browser that took the shot, so it costs no image
+  library, and only a shot that actually moved pays for it.
+
 - **`--check` says when it is not running on the machine that took the images.**
   `--install` now records the shotlist, Playwright and Chromium versions and the platform
   in `shotlist.baseline.json`, beside the config, to be committed with the images. A

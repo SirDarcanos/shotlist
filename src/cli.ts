@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { join } from 'node:path'
 import { ShotlistError, fromRoot, loadConfig } from './config.js'
 import { loadLibrary, withNumbering } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
@@ -26,6 +27,7 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   shotlist <name>... --install   …and copy each to its install destination
   shotlist --all --install       shoot everything
   shotlist --check [<name>...]   re-shoot and compare against the committed images
+  shotlist --check --diff        …and write a before/after/changed image for each
 
   --config <file>   use this config instead of the nearest one
   --keep-going      carry on past a recipe that fails, and report them at the end
@@ -85,6 +87,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         check: { type: 'boolean', default: false },
         config: { type: 'string' },
         'keep-going': { type: 'boolean', default: false },
+        diff: { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
       },
@@ -144,7 +147,14 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
             for (const { field, was, now } of drift) io.out(`    ${field}: ${was} → ${now}`)
             io.out('  Differences below may be that, rather than the site.')
           }
-          results = await check(recipes, library, loaded, { browser, keepGoing, onRetry })
+          results = await check(recipes, library, loaded, {
+            browser,
+            keepGoing,
+            onRetry,
+            ...(values.diff
+              ? { diffDir: join(fromRoot(loaded, loaded.config.paths.out), 'diff') }
+              : {}),
+          })
         } finally {
           await browser.close()
         }
@@ -159,6 +169,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
             io.out(`  CHANGED  ${result.name} — ${why}`)
             io.out(`           committed: ${result.against}`)
             io.out(`           re-shot:   ${result.shot}`)
+            if (result.diff) io.out(`           diff:      ${result.diff}`)
           } else if (result.status === 'new') {
             changed++
             io.out(`  NEW      ${result.name} — nothing committed at ${result.against}`)

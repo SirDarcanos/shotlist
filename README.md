@@ -500,6 +500,24 @@ npx shotlist --check
 Re-shoots every recipe and compares each against the committed image, reporting the ones
 that changed. Exits non-zero if any did, so it can run in CI.
 
+A percentage says a shot moved; it does not say what moved. `--diff` writes a three-up
+into `<paths.out>/diff/` for each one that did — the committed image, the re-shot one, and
+the re-shot one again with every changed pixel tinted:
+
+```bash
+npx shotlist --check --diff
+```
+
+```
+  CHANGED  order-row — 2.13% of pixels differ
+           committed: content/guide/images/order-row.png
+           re-shot:   screenshots/out/order-row.png
+           diff:      screenshots/out/diff/order-row.png
+```
+
+When the two are different sizes there is nothing to overlay, so the image is the two
+panels and the size change is the whole story.
+
 ### What the images were taken with
 
 `--install` also writes `shotlist.baseline.json` beside the config, recording the

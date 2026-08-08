@@ -7,6 +7,12 @@ import { removeProjects, tempProject } from './tempProject.js'
 
 const project = tempProject
 
+/** A PNG's pixel size, read from its header. */
+function pngSize(file: string): { width: number; height: number } {
+  const png = readFileSync(file)
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+}
+
 /** Run the command line, collecting what it printed. */
 async function cli(root: string, args: string[]) {
   const out: string[] = []
@@ -149,6 +155,61 @@ describe('mask', () => {
     const { code, err } = await cli(root, ['plain'])
     expect(code).toBe(1)
     expect(err).toMatch(/recipe "plain": mask\[0\] — no element matched/)
+  }, 120_000)
+})
+
+// A percentage says a shot moved. It does not say what moved, which is the thing you
+// actually need before deciding whether to bless it.
+describe('--diff', () => {
+  /** Install order-row, then make what is committed for it a different picture. */
+  async function drifted(width: 'same' | 'other') {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    await cli(root, [width === 'same' ? 'order-row' : 'modal'])
+    if (width === 'other') {
+      cpSync(join(root, 'out/modal.png'), join(root, 'installed/order-row.png'))
+    } else {
+      // Same size, different pixels: mask a region of the committed image.
+      writeFileSync(
+        join(root, 'recipes/order-row.yaml'),
+        `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, text: $42.00 }]\n`,
+      )
+    }
+    return root
+  }
+
+  it('writes a before/after/changed image beside the shot, and names it', async () => {
+    const root = await drifted('same')
+    const { code, out } = await cli(root, ['--check', 'order-row', '--diff'])
+    expect(code).toBe(1)
+    const file = join(root, 'out/diff/order-row.png')
+    expect(out).toContain(`diff:      ${file}`)
+    expect(existsSync(file)).toBe(true)
+
+    // Three panels and two gaps across, one panel tall — the shot, twice over, plus
+    // the same again with the moved pixels tinted.
+    const shot = pngSize(join(root, 'out/order-row.png'))
+    const diff = pngSize(file)
+    expect(diff.width).toBe(shot.width * 3 + 12 * 2)
+    expect(diff.height).toBe(shot.height)
+  }, 120_000)
+
+  it('shows two panels when the sizes differ, since pixels cannot be overlaid', async () => {
+    const root = await drifted('other')
+    await cli(root, ['--check', 'order-row', '--diff'])
+    const committed = pngSize(join(root, 'installed/order-row.png'))
+    const reshot = pngSize(join(root, 'out/order-row.png'))
+    const diff = pngSize(join(root, 'out/diff/order-row.png'))
+    expect(diff.width).toBe(committed.width + reshot.width + 12)
+    expect(diff.height).toBe(Math.max(committed.height, reshot.height))
+  }, 120_000)
+
+  it('writes nothing for a shot that did not move', async () => {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    const { code } = await cli(root, ['--check', 'order-row', '--diff'])
+    expect(code).toBe(0)
+    expect(existsSync(join(root, 'out/diff/order-row.png'))).toBe(false)
   }, 120_000)
 })
 

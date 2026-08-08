@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fromRoot } from './config.js'
 import type { LoadedConfig } from './config.js'
 import { shoot } from './capture.js'
@@ -16,6 +17,97 @@ export interface CheckResult {
   reason?: string
   shot?: string
   against?: string
+  /** Where the three-up was written, when `--diff` asked for one. */
+  diff?: string
+}
+
+/**
+ * How a diff image is painted.
+ *
+ * Not config: a diff is shotlist's own diagnostic, looked at once and thrown away, not
+ * an image the project ships. The style keys exist for what a project publishes.
+ */
+const DIFF = { gap: 12, background: '#0D1117', highlight: '#FF2D55' }
+
+/**
+ * Render baseline, current, and the changed pixels, side by side, in the page.
+ *
+ * Serialized into the browser like `comparePixels`, so it closes over nothing — the two
+ * repeat a few lines of image loading between them for that reason. Only a shot that
+ * actually changed pays for this second pass.
+ */
+async function renderDiff(input: {
+  before: string
+  after: string
+  tolerance: number
+  gap: number
+  background: string
+  highlight: string
+}): Promise<string> {
+  const load = (src: string) =>
+    new Promise<HTMLImageElement>((done, fail) => {
+      const img = new Image()
+      img.addEventListener('load', () => done(img), { once: true })
+      img.addEventListener('error', () => fail(new Error('could not decode image')), { once: true })
+      img.src = src
+    })
+
+  const draw = (img: HTMLImageElement) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    canvas.getContext('2d')!.drawImage(img, 0, 0)
+    return canvas
+  }
+
+  const [before, after] = await Promise.all([load(input.before), load(input.after)])
+  const panels = [draw(before), draw(after)]
+
+  // A pixel overlay needs the two to line up. When they do not, the size change is the
+  // whole story and the two panels tell it.
+  if (before.naturalWidth === after.naturalWidth && before.naturalHeight === after.naturalHeight) {
+    const overlay = draw(after)
+    const context = overlay.getContext('2d')!
+    const a = draw(before).getContext('2d')!.getImageData(0, 0, overlay.width, overlay.height)
+    const b = context.getImageData(0, 0, overlay.width, overlay.height)
+    const tint = context.createImageData(overlay.width, overlay.height)
+    for (let i = 0; i < a.data.length; i += 4) {
+      const moved =
+        Math.max(
+          Math.abs(a.data[i]! - b.data[i]!),
+          Math.abs(a.data[i + 1]! - b.data[i + 1]!),
+          Math.abs(a.data[i + 2]! - b.data[i + 2]!),
+          Math.abs(a.data[i + 3]! - b.data[i + 3]!),
+        ) > input.tolerance
+      if (!moved) continue
+      tint.data[i] = parseInt(input.highlight.slice(1, 3), 16)
+      tint.data[i + 1] = parseInt(input.highlight.slice(3, 5), 16)
+      tint.data[i + 2] = parseInt(input.highlight.slice(5, 7), 16)
+      tint.data[i + 3] = 255
+    }
+    const patch = document.createElement('canvas')
+    patch.width = overlay.width
+    patch.height = overlay.height
+    patch.getContext('2d')!.putImageData(tint, 0, 0)
+    context.drawImage(patch, 0, 0)
+    panels.push(overlay)
+  }
+
+  const height = Math.max(...panels.map((panel) => panel.height))
+  const width =
+    panels.reduce((total, panel) => total + panel.width, 0) + input.gap * (panels.length - 1)
+  const sheet = document.createElement('canvas')
+  sheet.width = width
+  sheet.height = height
+  const context = sheet.getContext('2d')!
+  context.fillStyle = input.background
+  context.fillRect(0, 0, width, height)
+  let x = 0
+  for (const panel of panels) {
+    context.drawImage(panel, x, 0)
+    x += panel.width + input.gap
+  }
+  return sheet.toDataURL('image/png')
 }
 
 /** Count the pixels that differ between two images, in the page. */
@@ -81,7 +173,13 @@ export async function check(
   recipes: readonly Recipe[],
   library: Library,
   loaded: LoadedConfig,
-  options: { browser?: Browser; keepGoing?: boolean; onRetry?: (retry: Retry) => void } = {},
+  options: {
+    browser?: Browser
+    keepGoing?: boolean
+    onRetry?: (retry: Retry) => void
+    /** Where to write a three-up for each shot that changed. */
+    diffDir?: string
+  } = {},
 ): Promise<CheckResult[]> {
   // A caller that already has one passes it, the same way `shoot` takes one — the CLI
   // reads the browser's version off it before any recipe is re-shot.
@@ -136,6 +234,21 @@ export async function check(
         after: uri(shotResult.file),
         tolerance: limits.tolerance,
       })
+      /** The three-up for a shot that moved, written where `--diff` asked for it. */
+      const drawDiff = async (): Promise<string | undefined> => {
+        if (!options.diffDir) return undefined
+        const url = await page.evaluate(renderDiff, {
+          before: uri(against),
+          after: uri(shotResult.file),
+          tolerance: limits.tolerance,
+          ...DIFF,
+        })
+        mkdirSync(options.diffDir, { recursive: true })
+        const file = join(options.diffDir, `${recipe.name}.png`)
+        writeFileSync(file, Buffer.from(url.split(',')[1]!, 'base64'))
+        return file
+      }
+
       if (compared.differing < 0) {
         results.push({
           name: recipe.name!,
@@ -143,16 +256,19 @@ export async function check(
           reason: `size changed, ${compared.sizes[0]} to ${compared.sizes[1]}`,
           shot: shotResult.file,
           against,
+          diff: await drawDiff(),
         })
         continue
       }
       const ratio = compared.total ? compared.differing / compared.total : 0
+      const changed = ratio > limits.threshold
       results.push({
         name: recipe.name!,
-        status: ratio > limits.threshold ? 'changed' : 'same',
+        status: changed ? 'changed' : 'same',
         ratio,
         shot: shotResult.file,
         against,
+        ...(changed ? { diff: await drawDiff() } : {}),
       })
     }
   } finally {
