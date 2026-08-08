@@ -58,6 +58,17 @@ describe('parseRecipe', () => {
     expect(() => parseRecipe({ source: 'file' }, { name: 'x' })).toThrow(/needs a `file:`/)
   })
 
+  it('shoots once unless the recipe asks for retries', () => {
+    expect(parseRecipe({}, { name: 'x' }).retries).toBe(0)
+    expect(parseRecipe({ retries: 3 }, { name: 'x' }).retries).toBe(3)
+  })
+
+  it('refuses a retry count that is negative, fractional, or past the cap', () => {
+    expect(() => parseRecipe({ retries: -1 }, { name: 'x' })).toThrow(/retries/)
+    expect(() => parseRecipe({ retries: 1.5 }, { name: 'x' })).toThrow(/retries/)
+    expect(() => parseRecipe({ retries: 6 }, { name: 'x' })).toThrow(/retries/)
+  })
+
   it('resolves aliases before validating, so an author sees their own query', () => {
     const recipe = parseRecipe(
       { marks: { row: { listRow: 'Acme Corp' } } },

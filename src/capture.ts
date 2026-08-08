@@ -21,6 +21,16 @@ export interface ShotResult {
   warnings?: string[]
 }
 
+/** An attempt that failed and is about to be made again. */
+export interface Retry {
+  name: string
+  /** Which attempt failed, counting from 1. */
+  attempt: number
+  /** How many will be made in all. */
+  of: number
+  why: string
+}
+
 /**
  * A failure during a shot, addressed by the key in the recipe that caused it.
  *
@@ -183,7 +193,7 @@ export async function shoot(
   recipe: Recipe,
   library: Library,
   loaded: LoadedConfig,
-  options: { install?: boolean; browser?: Browser } = {},
+  options: { install?: boolean; browser?: Browser; onRetry?: (retry: Retry) => void } = {},
 ): Promise<ShotResult> {
   const { config } = loaded
   const style = mergeStyle(config.style, recipe.style as never)
@@ -198,7 +208,8 @@ export async function shoot(
   const browser = options.browser ?? (await loadPlaywright().chromium.launch())
   const ours = options.browser === undefined
 
-  try {
+  /** One attempt at the whole shot: a fresh context, through to the written file. */
+  const attempt = async (): Promise<ShotResult> => {
     let image: Buffer
     let size: { width: number; height: number }
     let marks: Mark[]
@@ -312,6 +323,21 @@ export async function shoot(
       ...(options.install && destination ? { installed: destination } : {}),
       size: drawn.size,
       ...(drawn.warnings.length ? { warnings: drawn.warnings } : {}),
+    }
+  }
+
+  try {
+    // `source: file` has no page to be flaky about: its failures are in the recipe
+    // itself, and shooting it again would only report them again, more slowly.
+    const attempts = source ? 1 : 1 + recipe.retries
+    for (let n = 1; ; n++) {
+      try {
+        return await attempt()
+      } catch (error) {
+        if (n >= attempts) throw error
+        const why = error instanceof ShotlistError ? error.message : pageMessage(error)
+        options.onRetry?.({ name: recipe.name!, attempt: n, of: attempts, why })
+      }
     }
   } finally {
     if (ours) await browser.close()

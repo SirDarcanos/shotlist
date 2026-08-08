@@ -7,6 +7,7 @@ import { ShotlistError, fromRoot, loadConfig } from './config.js'
 import { loadLibrary, withNumbering } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
 import { shoot } from './capture.js'
+import type { Retry } from './capture.js'
 import { check } from './check.js'
 import { loadPlaywright } from './playwright.js'
 
@@ -19,6 +20,7 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   shotlist --check [<name>...]   re-shoot and compare against the committed images
 
   --config <file>   use this config instead of the nearest one
+  --keep-going      carry on past a recipe that fails, and report them at the end
   --help            this
   --version         print the version`
 
@@ -74,6 +76,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         all: { type: 'boolean', default: false },
         check: { type: 'boolean', default: false },
         config: { type: 'string' },
+        'keep-going': { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
       },
@@ -109,9 +112,18 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     }
 
     const recipes = pick(library, positionals, values.all)
+    const keepGoing = values['keep-going']
+
+    /** Say an attempt failed while it is happening, so a retrying run is not silent. */
+    const onRetry = (retry: Retry) =>
+      io.out(
+        `  ↻ ${retry.name} — attempt ${retry.attempt} of ${retry.of} failed: ` +
+          // The line already names the recipe, so the message repeating it says nothing.
+          retry.why.replace(`recipe "${retry.name}": `, ''),
+      )
 
     if (values.check) {
-      const results = await check(recipes, library, loaded)
+      const results = await check(recipes, library, loaded, { keepGoing, onRetry })
       let changed = 0
       for (const result of results) {
         if (result.status === 'same') {
@@ -125,6 +137,9 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         } else if (result.status === 'new') {
           changed++
           io.out(`  NEW      ${result.name} — nothing committed at ${result.against}`)
+        } else if (result.status === 'failed') {
+          changed++
+          io.out(`  FAILED   ${result.name} — ${result.reason}`)
         } else {
           io.out(`  skipped  ${result.name} — ${result.reason}`)
         }
@@ -136,18 +151,32 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     }
 
     const browser = await loadPlaywright().chromium.launch()
+    const failed: string[] = []
     try {
       for (const recipe of recipes) {
-        const result = await shoot(recipe, library, loaded, {
-          install: values.install,
-          browser,
-        })
-        io.out(`  ✓ ${result.name} → ${result.file}`)
-        if (result.installed) io.out(`    installed ${result.installed}`)
-        for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
+        try {
+          const result = await shoot(recipe, library, loaded, {
+            install: values.install,
+            browser,
+            onRetry,
+          })
+          io.out(`  ✓ ${result.name} → ${result.file}`)
+          if (result.installed) io.out(`    installed ${result.installed}`)
+          for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
+        } catch (error) {
+          // Without `--keep-going` the first failure is the answer. With it, one broken
+          // recipe must not hide what the other thirty-nine would have said.
+          if (!keepGoing) throw error
+          failed.push(recipe.name!)
+          io.err(`  ✗ ${error instanceof ShotlistError ? error.message : String(error)}`)
+        }
       }
     } finally {
       await browser.close()
+    }
+    if (failed.length) {
+      io.err(`${failed.length} of ${recipes.length} failed: ${failed.join(', ')}`)
+      return 1
     }
     return 0
   } catch (error) {

@@ -10,6 +10,24 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Added
+
+- **`retries:` on a recipe, for a shot that is flaky rather than wrong.** A capture drives
+  a real application, and some of what it trips over — an element that had not rendered
+  yet, a request that had not landed — is gone on the next attempt. `retries: 2` shoots
+  three times before giving up, each in a fresh browser context, and reports the attempts
+  that failed while the run is still going rather than after it. It is capped at 5,
+  because a recipe whose query is simply wrong fails identically every time and a larger
+  number only buys a slower way to be told so. A `source: file` recipe never retries: it
+  has no page to be flaky about.
+- **`--keep-going`, so one broken recipe does not decide the run.** A run stops at the
+  first failure, which is the right answer when you are shooting one recipe and the wrong
+  one when you are shooting forty in CI — the other thirty-nine had answers worth having.
+  With the flag each failure is printed as it happens and named again at the end
+  (`1 of 5 failed: broken`), and the exit code is still non-zero. It applies to `--check`
+  too, where a recipe that could not be shot is now a `FAILED` result alongside the ones
+  that diffed, rather than the end of the run.
+
 ### Fixed
 
 - **A query that matched nothing reported itself in JavaScript.** The message was

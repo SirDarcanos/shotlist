@@ -135,6 +135,101 @@ describe('a site that is not up', () => {
   }, 120_000)
 })
 
+// A capture drives a real application, so some of what it trips over is gone a second
+// later. `retries` is the recipe saying which of its shots are like that.
+describe('retries', () => {
+  /** A browser that fails every context, counting how many were asked for. */
+  function broken() {
+    const contexts: number[] = []
+    return {
+      contexts,
+      browser: {
+        newContext: () => {
+          contexts.push(contexts.length + 1)
+          return Promise.reject(new Error('the context could not be opened'))
+        },
+        close: () => Promise.resolve(),
+      },
+    }
+  }
+
+  it('shoots once when the recipe asks for no retries', async () => {
+    const { loaded, library } = project()
+    const { browser, contexts } = broken()
+    const recipe = library.recipes.get('order-row')!
+    await expect(shoot(recipe, library, loaded, { browser })).rejects.toThrow()
+    expect(contexts.length).toBe(1)
+  })
+
+  it('shoots one more time per retry, and no more', async () => {
+    const { loaded, library } = project()
+    const { browser, contexts } = broken()
+    const recipe = { ...library.recipes.get('order-row')!, retries: 2 }
+    await expect(shoot(recipe, library, loaded, { browser })).rejects.toThrow(
+      'the context could not be opened',
+    )
+    expect(contexts.length).toBe(3)
+  })
+
+  it('reports each failed attempt as it happens, with what went wrong', async () => {
+    const { loaded, library } = project()
+    const { browser } = broken()
+    const seen: string[] = []
+    const recipe = { ...library.recipes.get('order-row')!, retries: 2 }
+    await expect(
+      shoot(recipe, library, loaded, {
+        browser,
+        onRetry: (retry) => seen.push(`${retry.attempt}/${retry.of} ${retry.why}`),
+      }),
+    ).rejects.toThrow()
+    // Two reports, not three: the last attempt is a failure, not a retry.
+    expect(seen).toEqual([
+      '1/3 the context could not be opened',
+      '2/3 the context could not be opened',
+    ])
+  })
+
+  it('returns the shot when a later attempt succeeds', { timeout: 120_000 }, async () => {
+    const { loaded, library } = project()
+    const real = await loadPlaywright().chromium.launch()
+    let contexts = 0
+    // Fails once, then behaves. Nothing about the recipe is wrong, which is the case
+    // `retries` exists for: the same shot taken again is the whole fix.
+    const flaky = {
+      newContext: (options?: Record<string, unknown>) =>
+        ++contexts === 1 ? Promise.reject(new Error('a flake')) : real.newContext(options as never),
+      close: () => Promise.resolve(),
+    }
+    const recipe = { ...library.recipes.get('order-row')!, retries: 1 }
+    try {
+      const result = await shoot(recipe, library, loaded, { browser: flaky })
+      expect(existsSync(result.file)).toBe(true)
+    } finally {
+      await real.close()
+    }
+  })
+
+  it('never retries `source: file`, which has no page to be flaky about', async () => {
+    const { loaded, library } = project()
+    const seen: string[] = []
+    const recipe = {
+      ...library.recipes.get('annotated')!,
+      file: 'incoming/not-here.png',
+      retries: 3,
+    }
+    await expect(
+      shoot(recipe, library, loaded, {
+        browser: {
+          newContext: () => Promise.reject(new Error('a browser was used')),
+          close: () => Promise.resolve(),
+        },
+        onRetry: (retry) => seen.push(retry.why),
+      }),
+    ).rejects.toThrow(/no file at /)
+    expect(seen).toEqual([])
+  })
+})
+
 describe('source: file', () => {
   it(
     'annotates an image already on disk, with no page to query',

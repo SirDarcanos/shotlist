@@ -160,6 +160,15 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
       /** Shorthand: number these marks 1..n, in order, with a disc on each box. */
       numbered: Numbered.optional(),
       /**
+       * How many times to shoot this again if it fails. A capture drives a real
+       * application, and what it trips over — an element that had not rendered yet, a
+       * request that had not landed — is often gone on the next attempt.
+       *
+       * Capped, because a recipe whose query is simply wrong fails identically every
+       * time, and the only thing a large number buys is a slower way to be told so.
+       */
+      retries: z.int().min(0).max(5).default(0),
+      /**
        * How `--check` treats this recipe. `false` never diffs it, for a shot whose
        * content the recipe does not control — live dice, a clock, anything the
        * application decides for itself.

@@ -61,6 +61,66 @@ describe('shotlist', () => {
   })
 })
 
+// A project shoots its whole set in one run, and one recipe that cannot be shot should
+// not decide whether the other thirty-nine get taken.
+describe('--keep-going', () => {
+  /** Add a recipe to a project that no page can satisfy. Sorts first, so it fails first. */
+  function withBroken(root: string): string {
+    writeFileSync(
+      join(root, 'recipes/broken.yaml'),
+      'name: broken\ninstall: guide\nmarks:\n  nowhere: { css: .no-such-element }\n',
+    )
+    return root
+  }
+
+  it('stops at the first failure without it', { timeout: 120_000 }, async () => {
+    const root = withBroken(project())
+    const { code, err } = await cli(root, ['--all'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/recipe "broken": marks\.nowhere/)
+    // order-row sorts after broken, so a run that stopped never reached it.
+    expect(existsSync(join(root, 'out/order-row.png'))).toBe(false)
+  })
+
+  it(
+    'shoots the rest, then names what failed and exits non-zero',
+    { timeout: 120_000 },
+    async () => {
+      const root = withBroken(project())
+      const { code, out, err } = await cli(root, ['--all', '--keep-going'])
+      expect(code).toBe(1)
+      expect(out).toContain('✓ order-row')
+      expect(existsSync(join(root, 'out/order-row.png'))).toBe(true)
+      expect(err).toContain('1 of 5 failed: broken')
+    },
+  )
+
+  it(
+    'carries a failure through --check as a result, not an abort',
+    { timeout: 120_000 },
+    async () => {
+      const root = withBroken(project())
+      await cli(root, ['order-row', '--install'])
+      const { code, out } = await cli(root, ['--check', '--all', '--keep-going'])
+      expect(code).toBe(1)
+      expect(out).toMatch(/FAILED {3}broken — recipe "broken": marks\.nowhere/)
+      expect(out).toContain('same     order-row')
+    },
+  )
+
+  it('says which attempt failed while a recipe is retrying', { timeout: 120_000 }, async () => {
+    const root = withBroken(project())
+    const file = join(root, 'recipes/broken.yaml')
+    writeFileSync(file, `${readFileSync(file, 'utf8')}retries: 2\n`)
+    const { code, out } = await cli(root, ['broken', '--keep-going'])
+    expect(code).toBe(1)
+    expect(out).toContain('↻ broken — attempt 1 of 3 failed: marks.nowhere')
+    expect(out).toContain('↻ broken — attempt 2 of 3 failed: marks.nowhere')
+    // Two retry lines for three attempts: the last is a failure, not a retry.
+    expect(out.match(/↻/g)).toHaveLength(2)
+  })
+})
+
 describe('--check', () => {
   it('reports a recipe with nothing committed as new, and exits non-zero', async () => {
     const root = project()

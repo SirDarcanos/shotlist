@@ -39,7 +39,7 @@ export {
 export type { QueryContext, QueryInput, Rect, Resolved } from './query.js'
 
 export { shoot } from './capture.js'
-export type { ShotResult } from './capture.js'
+export type { Retry, ShotResult } from './capture.js'
 export { drawAnnotations } from './annotate.js'
 export type { AnnotationSpec, Badge, DrawStyle, Mark, Place } from './annotate.js'
 export { loadPlaywright } from './playwright.js'

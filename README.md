@@ -167,6 +167,7 @@ number here to match.
 | `marks`    | `{}`       | Named regions, resolved after `setup` runs                |
 | `callouts` | `[]`       | What to draw on those marks                               |
 | `numbered` | —          | Marks to number 1…n with a disc, in the order given       |
+| `retries`  | `0`        | How many times to shoot this again if it fails, up to 5   |
 | `check`    | project's  | This recipe's own `--check` limits, or `false` to skip it |
 
 ## Steps
@@ -386,6 +387,40 @@ callouts:
   - { mark: plan, text: The current plan, place: top }
 ```
 
+## When a shot fails
+
+A run stops at the first recipe that fails, and says which recipe and which key in it
+could not be resolved. `--keep-going` shoots the rest instead, prints each failure as it
+happens, and names them all at the end:
+
+```bash
+npx shotlist --all --keep-going
+```
+
+```
+  ✓ modal → screenshots/out/modal.png
+  ✗ recipe "order-row": marks.amount — no element matched {"css":".amount"}
+1 of 2 failed: order-row
+```
+
+Either way the exit code is non-zero, so CI still fails. `--keep-going` works the same
+way with `--check`, where a recipe that could not be shot is reported `FAILED` alongside
+the ones that did diff.
+
+A capture drives a real application, so some failures are gone a second later — an
+element that had not rendered, a request that had not landed. `retries` says a recipe is
+one of those:
+
+```yaml
+name: order-row
+retries: 2 # three attempts in all
+```
+
+Each attempt is a fresh browser context, and the run reports the ones that failed while
+it is still going rather than after the fact. A `source: file` recipe never retries: it
+has no page to be flaky about, so shooting it again would only report the same mistake
+more slowly.
+
 ## Checking for stale screenshots
 
 ```bash
@@ -402,6 +437,7 @@ npx shotlist                      # list every recipe
 npx shotlist <name> [<name>…]     # shoot into paths.out
 npx shotlist <name> --install     # …and copy to its install destination
 npx shotlist --all --install      # shoot everything
+npx shotlist --all --keep-going   # …carrying on past a recipe that fails
 npx shotlist --check              # compare against committed images
 npx shotlist --check <name>       # …just these ones
 npx shotlist --config <file>      # use a specific config
