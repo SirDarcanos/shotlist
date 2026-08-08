@@ -70,6 +70,12 @@ export interface AnnotationSpec {
 export function drawAnnotations(spec: AnnotationSpec): {
   width: number
   height: number
+  /**
+   * How far the shot sits from the canvas's top-left, once labels have claimed their
+   * margins. A caller holding a rect in image coordinates needs this to find it again
+   * in the finished picture.
+   */
+  margin: { left: number; top: number }
   /** Set when no family named in `label.font` was available and the default was used. */
   fontWarning?: string
 } {
@@ -592,5 +598,6 @@ export function drawAnnotations(spec: AnnotationSpec): {
     })
   }
 
-  return fontWarning ? { ...canvas, fontWarning } : canvas
+  const drawn = { ...canvas, margin: { left: margin.left, top: margin.top } }
+  return fontWarning ? { ...drawn, fontWarning } : drawn
 }

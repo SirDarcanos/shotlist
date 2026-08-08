@@ -19,6 +19,8 @@ export interface CheckResult {
   against?: string
   /** Where the three-up was written, when `--diff` asked for one. */
   diff?: string
+  /** How many regions `check.ignore` left out of the comparison. */
+  ignored?: number
 }
 
 /**
@@ -43,6 +45,7 @@ async function renderDiff(input: {
   gap: number
   background: string
   highlight: string
+  ignore: { x: number; y: number; width: number; height: number }[]
 }): Promise<string> {
   const load = (src: string) =>
     new Promise<HTMLImageElement>((done, fail) => {
@@ -56,7 +59,11 @@ async function renderDiff(input: {
     const canvas = document.createElement('canvas')
     canvas.width = img.naturalWidth
     canvas.height = img.naturalHeight
-    canvas.getContext('2d')!.drawImage(img, 0, 0)
+    const context = canvas.getContext('2d')!
+    context.drawImage(img, 0, 0)
+    // Blanked in the panels as well, so the three-up shows what was left out.
+    context.fillStyle = '#3F3F46'
+    for (const rect of input.ignore) context.fillRect(rect.x, rect.y, rect.width, rect.height)
     return canvas
   }
 
@@ -115,6 +122,7 @@ async function comparePixels(input: {
   before: string
   after: string
   tolerance: number
+  ignore: { x: number; y: number; width: number; height: number }[]
 }): Promise<{ differing: number; total: number; sizes: [string, string] }> {
   const load = (src: string) =>
     new Promise<HTMLImageElement>((done, fail) => {
@@ -130,6 +138,11 @@ async function comparePixels(input: {
     canvas.height = img.naturalHeight
     const context = canvas.getContext('2d')!
     context.drawImage(img, 0, 0)
+    // Filled identically in both images, so whatever is inside can never differ. The
+    // rects come from the shot just taken, so a box that moved leaves its old contents
+    // unblanked in the committed image and is still reported.
+    context.fillStyle = '#000000'
+    for (const rect of input.ignore) context.fillRect(rect.x, rect.y, rect.width, rect.height)
     return context.getImageData(0, 0, canvas.width, canvas.height)
   }
 
@@ -229,10 +242,12 @@ export async function check(
         continue
       }
       const uri = (file: string) => `data:image/png;base64,${readFileSync(file).toString('base64')}`
+      const ignore = shotResult.ignored ?? []
       const compared = await page.evaluate(comparePixels, {
         before: uri(against),
         after: uri(shotResult.file),
         tolerance: limits.tolerance,
+        ignore,
       })
       /** The three-up for a shot that moved, written where `--diff` asked for it. */
       const drawDiff = async (): Promise<string | undefined> => {
@@ -241,6 +256,7 @@ export async function check(
           before: uri(against),
           after: uri(shotResult.file),
           tolerance: limits.tolerance,
+          ignore,
           ...DIFF,
         })
         mkdirSync(options.diffDir, { recursive: true })
@@ -266,6 +282,7 @@ export async function check(
         name: recipe.name!,
         status: changed ? 'changed' : 'same',
         ratio,
+        ...(ignore.length ? { ignored: ignore.length } : {}),
         shot: shotResult.file,
         against,
         ...(changed ? { diff: await drawDiff() } : {}),

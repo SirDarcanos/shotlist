@@ -17,6 +17,12 @@ export interface ShotResult {
   file: string
   installed?: string
   size: { width: number; height: number }
+  /**
+   * Regions `check.ignore` asked not to be compared, in the written image's own pixels.
+   * Resolved on this shot, so a check blanks where the box is now — a box that moved is
+   * still a difference.
+   */
+  ignored?: Rect[]
   /** Things worth saying that did not stop the shot — a font that fell back, so far. */
   warnings?: string[]
 }
@@ -95,7 +101,12 @@ async function annotate(
   style: Style,
   marks: Mark[],
   masks: Rect[],
-): Promise<{ png: Buffer; size: { width: number; height: number }; warnings: string[] }> {
+): Promise<{
+  png: Buffer
+  size: { width: number; height: number }
+  margin: { left: number; top: number }
+  warnings: string[]
+}> {
   const context = await browser.newContext({
     viewport: { width: Math.ceil(size.width), height: Math.ceil(size.height) },
     deviceScaleFactor: scale,
@@ -141,6 +152,7 @@ async function annotate(
     return {
       png,
       size: { width: canvas.width, height: canvas.height },
+      margin: canvas.margin,
       warnings: canvas.fontWarning ? [canvas.fontWarning] : [],
     }
   } finally {
@@ -216,6 +228,7 @@ export async function shoot(
     let size: { width: number; height: number }
     let marks: Mark[]
     let masks: Rect[]
+    let ignore: Rect[] = []
 
     if (source) {
       image = source.image
@@ -328,6 +341,16 @@ export async function shoot(
           }
         }
 
+        const skip = recipe.check === false ? [] : (recipe.check?.ignore ?? [])
+        for (const [i, query] of skip.entries()) {
+          try {
+            const { rect } = await resolveInPage(ctx.page, query, ctx)
+            ignore.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+          } catch (error) {
+            throw inRecipe(recipe, `check.ignore[${i}]`, pageMessage(error))
+          }
+        }
+
         image = await ctx.page.screenshot({ clip, animations: 'disabled' })
         size = { width: clip.width, height: clip.height }
         marks = marksFor(recipe, ctx.rects, clip)
@@ -341,7 +364,21 @@ export async function shoot(
     const drawn =
       marks.length || masks.length
         ? await annotate(browser, image, size, settings.scale, style, marks, masks)
-        : { png: image, size: { width: size.width, height: size.height }, warnings: [] }
+        : {
+            png: image,
+            size: { width: size.width, height: size.height },
+            margin: { left: 0, top: 0 },
+            warnings: [],
+          }
+
+    // Image pixels: the rect is measured against the clip, the canvas may have grown
+    // around it for labels, and the picture is written at `scale` device pixels each.
+    const ignored = ignore.map((rect) => ({
+      x: (rect.x + drawn.margin.left) * settings.scale,
+      y: (rect.y + drawn.margin.top) * settings.scale,
+      width: rect.width * settings.scale,
+      height: rect.height * settings.scale,
+    }))
 
     writeFileSync(file, drawn.png)
     const destination = destinationFor(recipe, loaded)
@@ -354,6 +391,7 @@ export async function shoot(
       file,
       ...(options.install && destination ? { installed: destination } : {}),
       size: drawn.size,
+      ...(ignored.length ? { ignored } : {}),
       ...(drawn.warnings.length ? { warnings: drawn.warnings } : {}),
     }
   }

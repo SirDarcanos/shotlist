@@ -24,6 +24,17 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`check.ignore`, for a shot whose subject is the part that changes.** `mask` hides a
+  region in the image, and `check: false` gives up on the shot entirely — neither helps
+  when the volatile thing is what the screenshot is _of_. `check.ignore` shoots the region
+  as it is and leaves its contents out of the comparison, so the rest of the shot stays
+  checked at the usual threshold. Only the contents are excused: the region is blanked
+  where it resolves to now, in both images, so a box that moved or resized still reports —
+  what it used to cover is compared — and one that renders nothing fails outright, because
+  the query matches nothing. That is the assertion `check: false` cannot make. A result
+  that skipped something says `(1 region not compared)`, so a pass is not read as covering
+  the whole image.
+
 - **`--check --json`**, so a pipeline can act on a run rather than parse it. The report
   goes to stdout and everything written for a person moves to stderr, which is what makes
   `--check --json > report.json` leave a usable file. It carries each recipe's status and

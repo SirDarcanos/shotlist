@@ -522,6 +522,37 @@ value you are hiding.
 With `source: file` there is no page to query, so a mask is a literal
 `rect: [x, y, width, height]`, the same as a mark.
 
+## A shot with one part that always changes
+
+`mask` hides the region in the image. When the region has to _stay_ in the image — the
+result of a roll, a live figure the screenshot is about — `check.ignore` shoots it as it
+is and leaves its contents out of the comparison instead:
+
+```yaml
+name: roll-form
+clip: { css: '.card' }
+check:
+  ignore:
+    - { css: 'output#result' }
+```
+
+The rest of the card is still checked at the usual threshold, so a layout change anywhere
+else trips it.
+
+**Only the contents are excused, not the geometry.** The region is blanked where it
+resolves to _now_, in both images — so if the box moves or changes size, what it used to
+cover is still compared, and the difference is reported. A shot whose widget renders
+nothing at all fails outright, because the query matches nothing. That is the assertion
+`check: false` gives up: it says the shot still works, without saying anything about what
+is inside.
+
+A result that skipped something says so, so a pass is not read as covering the whole
+image:
+
+```
+  same     roll-form  (1 region not compared)
+```
+
 ## Checking for stale screenshots
 
 ```bash

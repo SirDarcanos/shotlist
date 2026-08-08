@@ -234,6 +234,71 @@ describe('--init', () => {
   })
 })
 
+// A region the recipe does not decide should not cost the whole shot its check, but
+// excusing its contents must not excuse it moving: that is the shot breaking.
+describe('check.ignore', () => {
+  /** A page with one box, whose contents and position the test controls. */
+  function page(root: string, { text, top }: { text: string; top: number }) {
+    writeFileSync(
+      join(root, 'moving.html'),
+      `<html><body style="margin:0;background:#fff">
+         <div id="live" style="position:absolute;left:20px;top:${top}px;width:200px;height:40px;
+              background:#eee;font:16px sans-serif">${text}</div>
+       </body></html>`,
+    )
+  }
+
+  /** A recipe shooting that page, with the box's contents left out of the comparison. */
+  function recipe(root: string) {
+    writeFileSync(
+      join(root, 'recipes/live.yaml'),
+      `name: live\ninstall: guide\nurl: file://${join(root, 'moving.html')}\n` +
+        'viewport: { width: 320, height: 200 }\nclip: viewport\n' +
+        "check:\n  ignore:\n    - { css: '#live' }\n",
+    )
+  }
+
+  it('passes when only the contents of the region changed', async () => {
+    const root = project()
+    recipe(root)
+    page(root, { text: 'rolled 14', top: 20 })
+    await cli(root, ['live', '--install'])
+
+    page(root, { text: 'rolled 3', top: 20 })
+    const { code, out } = await cli(root, ['--check', 'live'])
+    expect(code).toBe(0)
+    expect(out).toContain('same     live  (1 region not compared)')
+  }, 120_000)
+
+  it('still reports the region moving, which is the shot breaking', async () => {
+    const root = project()
+    recipe(root)
+    page(root, { text: 'rolled 14', top: 20 })
+    await cli(root, ['live', '--install'])
+
+    // Same contents, 60px lower. Blanking happens where the box is now, so where it
+    // used to be is compared — and the committed image still has it there.
+    page(root, { text: 'rolled 14', top: 80 })
+    const { code, out } = await cli(root, ['--check', 'live'])
+    expect(code).toBe(1)
+    expect(out).toContain('CHANGED  live')
+  }, 120_000)
+
+  it('names the region that matched nothing rather than skipping the check', async () => {
+    const root = project()
+    writeFileSync(
+      join(root, 'recipes/live.yaml'),
+      `name: live\ninstall: guide\nurl: file://${join(root, 'moving.html')}\n` +
+        'viewport: { width: 320, height: 200 }\nclip: viewport\n' +
+        "check:\n  ignore:\n    - { css: '#nowhere' }\n",
+    )
+    page(root, { text: 'rolled 14', top: 20 })
+    const { code, err } = await cli(root, ['live'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/recipe "live": check\.ignore\[0\] — no element matched/)
+  }, 120_000)
+})
+
 describe('--diff', () => {
   /** Install order-row, then make what is committed for it a different picture. */
   async function drifted(width: 'same' | 'other') {

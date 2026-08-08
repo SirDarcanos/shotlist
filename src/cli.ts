@@ -148,6 +148,12 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     const recipes = pick(library, positionals, values.all)
     const keepGoing = values['keep-going']
 
+    /** Note the regions a result did not cover, so a pass is not read as covering them. */
+    const notCompared = (result: { ignored?: number }) =>
+      result.ignored
+        ? `  (${result.ignored} region${result.ignored === 1 ? '' : 's'} not compared)`
+        : ''
+
     /** Say an attempt failed while it is happening, so a retrying run is not silent. */
     const onRetry = (retry: Retry) =>
       io.out(
@@ -188,12 +194,12 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         let changed = 0
         for (const result of results) {
           if (result.status === 'same') {
-            say(`  same     ${result.name}`)
+            say(`  same     ${result.name}${notCompared(result)}`)
           } else if (result.status === 'changed') {
             changed++
             const why =
               result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
-            say(`  CHANGED  ${result.name} — ${why}`)
+            say(`  CHANGED  ${result.name} — ${why}${notCompared(result)}`)
             say(`           committed: ${result.against}`)
             say(`           re-shot:   ${result.shot}`)
             if (result.diff) say(`           diff:      ${result.diff}`)

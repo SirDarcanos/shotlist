@@ -187,6 +187,16 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
             .object({
               threshold: z.number().min(0).max(1).optional(),
               tolerance: z.number().min(0).max(255).optional(),
+              /**
+               * Regions whose contents are not compared, for a shot that is worth
+               * checking apart from the part of it the recipe does not decide.
+               *
+               * The region is shot as it is — unlike `mask`, nothing is painted over
+               * it — and blanked in both images before they are diffed. It is blanked
+               * at the place it resolves to now, so the box moving or changing size is
+               * still reported: what is excused is the content, not the geometry.
+               */
+              ignore: z.array(Query).default([]),
             })
             .strict(),
         ])
