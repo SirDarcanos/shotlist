@@ -95,7 +95,7 @@ inside it that could not be resolved:
 recipe "order-row": marks.amount — no element matched {"css":".amount"}
 ```
 
-## The rule everything serves
+## A recipe is data
 
 A recipe is data. There is no step that evaluates JavaScript and there will not be one: if
 a screenshot cannot be described, that is a missing verb or query primitive, and it gets
