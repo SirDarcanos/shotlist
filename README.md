@@ -72,6 +72,7 @@ The image is written to `screenshots/out/order-row.png`, and `--install` copies 
 | Key                  | Default               | What it sets                                                                 |
 | -------------------- | --------------------- | ---------------------------------------------------------------------------- |
 | `site.url`           | required              | Where the site is running                                                    |
+| `site.serve`         | —                     | Command that starts the site, when nothing answers at `site.url`             |
 | `site.viewport`      | `1280 × 800`          | Browser size                                                                 |
 | `site.scale`         | `2`                   | Device pixel ratio; `2` gives Retina images                                  |
 | `site.theme`         | `light`               | `light`, `dark` or `no-preference`                                           |
@@ -87,6 +88,51 @@ The image is written to `screenshots/out/order-row.png`, and `--install` copies 
 | `finders`            | `{}`                  | Named query aliases (see [Finders](#finders))                                |
 | `check.threshold`    | `0.002`               | Fraction of pixels that may differ before `--check` calls a shot changed     |
 | `check.tolerance`    | `8`                   | How far one channel may move, out of 255, before a pixel counts as differing |
+
+### Starting the site
+
+shotlist expects the site at `site.url` to be running. `serve` lets a run start it:
+
+```yaml
+site:
+  url: http://localhost:3000
+  serve: npm run dev
+```
+
+**A server that is already up is used as it is.** shotlist fetches `site.url` first and
+starts nothing when something answers, so `serve` can stay in the config while you write
+recipes with the dev server open in another terminal. CI, where nothing is listening, is
+where it actually launches one.
+
+What a run starts, it stops — including on Ctrl-C. The command runs in its own process
+group, because `npm run dev` is npm, which spawns the server: signalling only the process
+shotlist launched would leave the one holding the port, and the next run would find it
+answering and quietly shoot the old build.
+
+The mapping form takes the rest:
+
+```yaml
+site:
+  serve:
+    command: npm run dev
+    ready: 3000 # a http(s) URL, a port, or { log: <pattern> }
+    cwd: apps/web # resolved from the config file's directory
+    env: { PORT: '3000' }
+    timeout: 30000
+```
+
+`ready` is what proves the server is up, and defaults to fetching `site.url`. A URL is
+ready on any response at all, including a 404: that something answered is the question,
+not what it said. A port is ready when it accepts a connection, and `{ log: … }` when the
+pattern matches the server's output.
+
+**There is no shell.** The command is run directly, so `&&`, `|`, `>` and a `VAR=value`
+prefix are refused rather than half-understood — environment goes under `env:`, and
+anything that genuinely needs a shell goes in a script you run instead. A config file
+that could reach a shell would make shooting somebody else's checkout a different kind of
+decision than it is.
+
+A run of only `source: file` recipes never opens the site, and does not start one.
 
 ### Style
 

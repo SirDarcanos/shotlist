@@ -50,6 +50,35 @@ describe('parseConfig', () => {
   })
 })
 
+describe('serve', () => {
+  /** The complaint about a config, as the author would see it. */
+  function complaint(site: Record<string, unknown>): string {
+    try {
+      parseConfig({ site: { url: 'http://x', ...site } })
+    } catch (error) {
+      return (error as Error).message
+    }
+    throw new Error('the config was expected to be refused')
+  }
+
+  it('reads a bare string as the command, with everything else defaulted', () => {
+    const { serve } = parseConfig({ site: { url: 'http://x', serve: 'npm run dev' } }).site
+    expect(serve).toEqual({ command: 'npm run dev', env: {}, timeout: 30000 })
+  })
+
+  it('names a misspelled key rather than reporting the shorthand did not match', () => {
+    expect(complaint({ serve: { command: 'npm run dev', reddy: 3000 } })).toMatch(
+      /site\.serve: Unrecognized key: "reddy"/,
+    )
+  })
+
+  it('follows the union inside `ready` too, keeping the whole path', () => {
+    expect(complaint({ serve: { command: 'npm run dev', ready: { logg: 'up' } } })).toMatch(
+      /site\.serve\.ready: Unrecognized key: "logg"/,
+    )
+  })
+})
+
 describe('mergeStyle', () => {
   it('merges a recipe override one level deep, keeping the rest', () => {
     const base = parseConfig({ site: { url: 'x' } }).style

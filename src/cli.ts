@@ -10,6 +10,7 @@ import { shoot } from './capture.js'
 import type { Retry } from './capture.js'
 import { check } from './check.js'
 import { loadPlaywright } from './playwright.js'
+import { withServer } from './serve.js'
 
 const USAGE = `shotlist — annotated UI screenshots from YAML recipes
 
@@ -122,63 +123,73 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
           retry.why.replace(`recipe "${retry.name}": `, ''),
       )
 
-    if (values.check) {
-      const results = await check(recipes, library, loaded, { keepGoing, onRetry })
-      let changed = 0
-      for (const result of results) {
-        if (result.status === 'same') {
-          io.out(`  same     ${result.name}`)
-        } else if (result.status === 'changed') {
-          changed++
-          const why = result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
-          io.out(`  CHANGED  ${result.name} — ${why}`)
-          io.out(`           committed: ${result.against}`)
-          io.out(`           re-shot:   ${result.shot}`)
-        } else if (result.status === 'new') {
-          changed++
-          io.out(`  NEW      ${result.name} — nothing committed at ${result.against}`)
-        } else if (result.status === 'failed') {
-          changed++
-          io.out(`  FAILED   ${result.name} — ${result.reason}`)
-        } else {
-          io.out(`  skipped  ${result.name} — ${result.reason}`)
+    /** Everything that wants the site up, so the server's lifetime is exactly this. */
+    const work = async (): Promise<number> => {
+      if (values.check) {
+        const results = await check(recipes, library, loaded, { keepGoing, onRetry })
+        let changed = 0
+        for (const result of results) {
+          if (result.status === 'same') {
+            io.out(`  same     ${result.name}`)
+          } else if (result.status === 'changed') {
+            changed++
+            const why =
+              result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
+            io.out(`  CHANGED  ${result.name} — ${why}`)
+            io.out(`           committed: ${result.against}`)
+            io.out(`           re-shot:   ${result.shot}`)
+          } else if (result.status === 'new') {
+            changed++
+            io.out(`  NEW      ${result.name} — nothing committed at ${result.against}`)
+          } else if (result.status === 'failed') {
+            changed++
+            io.out(`  FAILED   ${result.name} — ${result.reason}`)
+          } else {
+            io.out(`  skipped  ${result.name} — ${result.reason}`)
+          }
         }
+        io.out(
+          changed
+            ? `${changed} of ${results.length} need attention`
+            : 'every screenshot is current',
+        )
+        return changed ? 1 : 0
       }
-      io.out(
-        changed ? `${changed} of ${results.length} need attention` : 'every screenshot is current',
-      )
-      return changed ? 1 : 0
+
+      const browser = await loadPlaywright().chromium.launch()
+      const failed: string[] = []
+      try {
+        for (const recipe of recipes) {
+          try {
+            const result = await shoot(recipe, library, loaded, {
+              install: values.install,
+              browser,
+              onRetry,
+            })
+            io.out(`  ✓ ${result.name} → ${result.file}`)
+            if (result.installed) io.out(`    installed ${result.installed}`)
+            for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
+          } catch (error) {
+            // Without `--keep-going` the first failure is the answer. With it, one broken
+            // recipe must not hide what the other thirty-nine would have said.
+            if (!keepGoing) throw error
+            failed.push(recipe.name!)
+            io.err(`  ✗ ${error instanceof ShotlistError ? error.message : String(error)}`)
+          }
+        }
+      } finally {
+        await browser.close()
+      }
+      if (failed.length) {
+        io.err(`${failed.length} of ${recipes.length} failed: ${failed.join(', ')}`)
+        return 1
+      }
+      return 0
     }
 
-    const browser = await loadPlaywright().chromium.launch()
-    const failed: string[] = []
-    try {
-      for (const recipe of recipes) {
-        try {
-          const result = await shoot(recipe, library, loaded, {
-            install: values.install,
-            browser,
-            onRetry,
-          })
-          io.out(`  ✓ ${result.name} → ${result.file}`)
-          if (result.installed) io.out(`    installed ${result.installed}`)
-          for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
-        } catch (error) {
-          // Without `--keep-going` the first failure is the answer. With it, one broken
-          // recipe must not hide what the other thirty-nine would have said.
-          if (!keepGoing) throw error
-          failed.push(recipe.name!)
-          io.err(`  ✗ ${error instanceof ShotlistError ? error.message : String(error)}`)
-        }
-      }
-    } finally {
-      await browser.close()
-    }
-    if (failed.length) {
-      io.err(`${failed.length} of ${recipes.length} failed: ${failed.join(', ')}`)
-      return 1
-    }
-    return 0
+    // A set of `source: file` recipes never opens the site, and should not wait on one.
+    const needsSite = recipes.some((recipe) => recipe.source === 'app')
+    return needsSite ? await withServer(loaded, work) : await work()
   } catch (error) {
     io.err(error instanceof ShotlistError ? error.message : String(error))
     return 1

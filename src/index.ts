@@ -9,7 +9,7 @@ export {
   parseConfig,
   readDocument,
 } from './config.js'
-export type { LoadedConfig, Style } from './config.js'
+export type { LoadedConfig, Serve, Style } from './config.js'
 
 export {
   Macro,
@@ -47,4 +47,6 @@ export { runSteps } from './steps.js'
 export type { RunContext } from './steps.js'
 export { check } from './check.js'
 export type { CheckResult } from './check.js'
+export { startServer, tokenize, withServer } from './serve.js'
+export type { Server } from './serve.js'
 export { run } from './cli.js'

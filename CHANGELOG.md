@@ -12,6 +12,20 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`site.serve`, so a run can start the site it shoots.** Until now `site.url` had to be
+  answering already, and nothing said whose job that was — which is fine at a desk with
+  the dev server in another tab, and is the whole problem in CI. `serve: npm run dev`
+  starts it, waits until it is genuinely up, and stops it afterwards. It probes
+  `site.url` first and starts nothing when something already answers, so it can stay in
+  the config permanently rather than being a thing CI turns on: while you are writing
+  recipes it uses the server you already have. `ready:` says what counts as up — a
+  http(s) URL, a port, or `{ log: <pattern> }` — and defaults to fetching `site.url`. The
+  command runs in its own process group and is stopped through it, including on Ctrl-C,
+  because `npm run dev` is npm spawning the server and signalling only the process
+  shotlist launched leaves the one holding the port. There is no shell: `&&`, `|`, `>`
+  and a `VAR=value` prefix are refused with what to write instead, so a config file
+  cannot become a way to run arbitrary shell in somebody else's checkout.
+
 - **`retries:` on a recipe, for a shot that is flaky rather than wrong.** A capture drives
   a real application, and some of what it trips over — an element that had not rendered
   yet, a request that had not landed — is gone on the next attempt. `retries: 2` shoots

@@ -54,8 +54,38 @@ const Viewport = z.object({
   height: z.number().int().positive(),
 })
 
+/** How to start the site, for a run that cannot assume somebody already has. */
+const ServeOptions = z
+  .object({
+    /**
+     * Run directly, without a shell: `npm run dev`, not `PORT=3000 npm run dev && …`.
+     * Environment goes under `env`, and anything needing a shell goes in a script.
+     */
+    command: z.string(),
+    /**
+     * What proves it is up: a http(s) URL to fetch, a port to connect to, or a pattern
+     * to wait for in its output. Defaults to fetching `site.url`.
+     */
+    ready: z
+      .union([z.string(), z.int().positive(), z.object({ log: z.string() }).strict()])
+      .optional(),
+    /** Where to run it. A relative path resolves from the config file's directory. */
+    cwd: z.string().optional(),
+    env: z.record(z.string(), z.string()).default({}),
+    timeout: z.number().positive().default(30000),
+  })
+  .strict()
+
+/** `serve: npm run dev` is the whole of it for most projects; the mapping is the rest. */
+const Serve = z.union([
+  z.string().transform((command) => ServeOptions.parse({ command })),
+  ServeOptions,
+])
+
 const Site = z.object({
   url: z.string(),
+  /** Started before the first shot and stopped after the last, unless already running. */
+  serve: Serve.optional(),
   viewport: Viewport.default({ width: 1280, height: 800 }),
   scale: z.number().positive().default(2),
   theme: z.enum(['light', 'dark', 'no-preference']).default('light'),
@@ -94,6 +124,7 @@ export const Config = z.object({
 
 export type Config = z.infer<typeof Config>
 export type Style = z.infer<typeof Style>
+export type Serve = z.infer<typeof Serve>
 
 const FILENAMES = ['shotlist.config.yaml', 'shotlist.config.yml', 'shotlist.config.json']
 
