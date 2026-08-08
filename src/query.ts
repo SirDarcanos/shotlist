@@ -13,6 +13,18 @@ const Dimension = z.union([z.number(), z.string().regex(/^-?\d+(\.\d+)?(px|vw|vh
 /** A whole number, or a `$name` standing in for one until the step runs. */
 export const NumberOrRef = z.union([z.int(), z.string().regex(/^\$\{?[A-Za-z_]/)])
 
+/**
+ * A position in a list of candidates, counted from the front.
+ *
+ * Not from the back: `pick: last` already says that, and `{ children: true, pick: last }`
+ * says it for a child. Two ways to say the same thing is the thing to avoid, and
+ * "second from the end" has not come up.
+ */
+const Index = z.union([
+  z.int().nonnegative({ message: 'counts from 0 — for the end of the list, use `pick: last`' }),
+  z.string().regex(/^\$\{?[A-Za-z_]/),
+])
+
 const Filters = z.object({
   contains: z.string().optional(),
   containingAll: z.array(z.string()).optional(),
@@ -41,12 +53,17 @@ const Ancestor = Filters.extend({
   pick: z.enum(['nearest', 'outermost']).default('nearest'),
 })
 
+/** Room added on a side. Not taken away: `pad: -8` is not padding, it is a smaller query. */
+const Room = z
+  .number()
+  .nonnegative({ message: 'is room added around a box, so it cannot be negative' })
+
 const Grow = z
   .object({
-    top: z.number().optional(),
-    right: z.number().optional(),
-    bottom: z.number().optional(),
-    left: z.number().optional(),
+    top: Room.optional(),
+    right: Room.optional(),
+    bottom: Room.optional(),
+    left: Room.optional(),
   })
   .strict()
 
@@ -71,13 +88,13 @@ export const ElementQuery = Filters.extend({
   // Traversal, applied in this order.
   ancestor: Ancestor.optional(),
   parent: z.boolean().optional(),
-  child: NumberOrRef.optional(),
+  child: Index.optional(),
   children: z.boolean().optional(),
 
   pick: z.enum(['first', 'last', 'smallest', 'largest']).optional(),
-  nth: NumberOrRef.optional(),
+  nth: Index.optional(),
 
-  pad: z.number().optional(),
+  pad: Room.optional(),
   grow: Grow.optional(),
 }).strict()
 
@@ -85,7 +102,7 @@ export const ElementQuery = Filters.extend({
 export const SpanQuery = z
   .object({
     span: z.array(z.lazy(() => Query)),
-    pad: z.number().optional(),
+    pad: Room.optional(),
     grow: Grow.optional(),
   })
   .strict()
@@ -93,8 +110,10 @@ export const SpanQuery = z
 /** A literal box in image pixels, for a recipe annotating a PNG with no DOM to query. */
 export const RectQuery = z
   .object({
-    rect: z.tuple([z.number(), z.number(), z.number(), z.number()]),
-    pad: z.number().optional(),
+    // x and y may be anywhere, including off the top-left; a width or a height that is
+    // not there is not a box.
+    rect: z.tuple([z.number(), z.number(), z.number().nonnegative(), z.number().nonnegative()]),
+    pad: Room.optional(),
     grow: Grow.optional(),
   })
   .strict()
@@ -135,6 +154,9 @@ export function aliasKeyOf(node: unknown): string | null {
   )
   return foreign.length === 1 ? foreign[0]! : null
 }
+
+/** Keys whose value is never a query, so nothing inside them is a call to a finder. */
+const NOT_A_QUERY: ReadonlySet<string> = new Set(['grow', 'rect'])
 
 /** Whether a node calls a finder — `{ trackerRow: "Zara" }` — rather than being a query. */
 export function isAliasCall(node: unknown): node is Record<string, unknown> {
@@ -191,7 +213,12 @@ export function resolveAliases(
   }
 
   return Object.fromEntries(
-    Object.entries(node).map(([key, value]) => [key, resolveAliases(value, aliases, seen)]),
+    Object.entries(node).map(([key, value]) =>
+      // `grow` holds sides, not a query. Its keys are not query keys, so a single-sided
+      // one — `grow: { left: 4 }` — read as a call to a finder named `left`, and the
+      // documented form has never worked with fewer than two sides.
+      NOT_A_QUERY.has(key) ? [key, value] : [key, resolveAliases(value, aliases, seen)],
+    ),
   )
 }
 
@@ -302,12 +329,21 @@ export function resolveQuery(context: QueryContext): Resolved {
     const right = (grow?.right ?? 0) + p
     const bottom = (grow?.bottom ?? 0) + p
     const left = (grow?.left ?? 0) + p
-    return {
+    const box = {
       x: rect.x - left,
       y: rect.y - top,
       width: rect.width + left + right,
       height: rect.height + top + bottom,
     }
+    // A box with no area is not one, and the screenshot's complaint about the clip it
+    // becomes says nothing about the query that produced it. `visible: true` is the
+    // filter for skipping these rather than resolving to one.
+    if (box.width <= 0 || box.height <= 0) {
+      throw new Error(
+        `${describe} resolved to a box of ${box.width}×${box.height}, which has no area`,
+      )
+    }
+    return box
   }
 
   if ('rect' in spec) {

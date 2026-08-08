@@ -145,3 +145,49 @@ describe('a recipe name that is not a name', () => {
     }
   })
 })
+
+// A query says where a box is. Several ways of writing one described a box that could
+// not exist, and were carried until something further down complained about the result.
+describe('a number that describes no box', () => {
+  const refused = (query: unknown) => expect(() => parseQuery(query))
+
+  it('counts positions from the front, and says what says "last"', () => {
+    refused({ css: 'div', nth: -1 }).toThrow(/counts from 0 — for the end of the list/)
+    refused({ css: 'div', child: -5 }).toThrow(/counts from 0/)
+    expect(() => parseQuery({ css: 'div', nth: 0 })).not.toThrow()
+  })
+
+  it('refuses padding that is not padding', () => {
+    refused({ css: 'div', pad: -8 }).toThrow(/room added around a box/)
+    refused({ css: 'div', grow: { left: -4 } }).toThrow(/room added around a box/)
+    refused({ span: [{ css: 'a' }, { css: 'b' }], pad: -1 }).toThrow(/room added around a box/)
+  })
+
+  it('refuses a literal box with no width or height', () => {
+    refused({ rect: [0, 0, -5, 10] }).toThrow()
+    refused({ rect: [0, 0, 10, -5] }).toThrow()
+    // Off the top-left is a place; a negative size is not a size.
+    expect(() => parseQuery({ rect: [-20, -20, 10, 10] })).not.toThrow()
+  })
+})
+
+// `grow` holds sides, and its keys are not query keys — so a single-sided one read as a
+// call to a finder of that name, and the documented form never worked with one side.
+describe('a grow with one side', () => {
+  it('is a grow, not a call to a finder called left', () => {
+    expect(parseQuery({ css: 'div', grow: { left: 4 } })).toEqual({
+      css: 'div',
+      grow: { left: 4 },
+    })
+    expect(parseQuery({ css: 'div', grow: { top: 20 } })).toEqual({
+      css: 'div',
+      grow: { top: 20 },
+    })
+  })
+
+  it('still expands a finder written alongside one', () => {
+    expect(
+      parseQuery({ listRow: 'Acme', grow: { top: 8 } }, { listRow: { css: 'li', contains: '$1' } }),
+    ).toEqual({ css: 'li', contains: 'Acme', grow: { top: 8 } })
+  })
+})

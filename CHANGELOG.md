@@ -169,6 +169,17 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Fixed
 
+- **`grow` with a single side never worked.** `grow: { left: 4 }` was read as a call to a
+  finder named `left`, because `grow`'s keys are sides rather than query keys and a
+  one-key object with a foreign key is how a finder call is spelled. Two sides happened to
+  work, which is why it went unnoticed. Nothing inside a `grow` is a finder call now.
+- **A negative `pad`, `grow`, `nth`, `child` or `rect` size was carried until something
+  further down complained.** Padding is what is added around a box, positions count from
+  the front — `pick: last` is how the end of a list is said — and a box with no width is
+  not a box. Each is refused where it is written, naming the key.
+- **A query resolving to a box with no area** reported the clip that box became rather
+  than the query that produced it. `visible: true` is the filter for skipping those.
+
 - **A name hidden behind a null byte got past every path check.** `.env\0.png` is `.env`
   to the filesystem and something else to a comparison, so a forbidden name could be
   written with one appended and slip through — on disk and in a URL path alike. A path or
