@@ -55,20 +55,36 @@ describe('sources and filters', () => {
 
 describe('traversal', () => {
   it('climbs to the nearest matching ancestor', () => {
-    expect(find({ heading: 'Edit order', ancestor: { narrowerThan: '95vw' } })).toEqual({
+    // The select sits in a label, which is the first box around it under 95vw.
+    expect(find({ css: 'select', ancestor: { narrowerThan: '95vw' } })).toEqual({
       x: 260,
-      y: 220,
-      width: 300,
-      height: 28,
+      y: 260,
+      width: 480,
+      height: 32,
     })
   })
 
   it('climbs past it to the outermost one, which is the modal card', () => {
-    // The whole reason `outermost` exists: `nearest` stops at the heading itself, and
-    // the shot wants the card the heading sits in — but not the full-screen overlay.
-    expect(
-      find({ heading: 'Edit order', ancestor: { narrowerThan: '95vw', pick: 'outermost' } }),
-    ).toEqual({ x: 240, y: 200, width: 520, height: 300 })
+    // The whole reason `outermost` exists: `nearest` stops at the label, and the shot
+    // wants the card that holds it — but not the full-screen overlay outside that.
+    expect(find({ css: 'select', ancestor: { narrowerThan: '95vw', pick: 'outermost' } })).toEqual({
+      x: 240,
+      y: 200,
+      width: 520,
+      height: 300,
+    })
+  })
+
+  // An element is not its own ancestor. Starting the climb at it returned the element
+  // whenever the filters happened to fit, and a heading is as wide as the column it is
+  // in — so climbing out of one by width found the heading and boxed that instead.
+  it('never answers with the element it started from', () => {
+    expect(find({ heading: 'Edit order', ancestor: { narrowerThan: '95vw' } })).toEqual({
+      x: 240,
+      y: 200,
+      width: 520,
+      height: 300,
+    })
   })
 
   it('takes the children of a container, then one of them', () => {

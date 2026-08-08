@@ -10,6 +10,18 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Changed
+
+- **`ancestor` climbs from the element's parent, not from the element.** It started at the
+  element itself, so whenever the filters happened to fit the element it answered with
+  that — `{ heading: …, ancestor: { widerThan: 400, narrowerThan: 700 } }`, meant to climb
+  out of a heading to the column holding it, matched the heading, because a heading is a
+  block as wide as its column. The result was a box drawn round the wrong thing with
+  nothing to say so. An element is not its own ancestor, which is what the README always
+  said. **If a query of yours relied on the element matching itself, drop the `ancestor`
+  key** — that is what it was doing. `pick: outermost` is unaffected in practice, since
+  it climbed past the element anyway.
+
 ### Added
 
 - **`--check --json`**, so a pipeline can act on a run rather than parse it. The report

@@ -310,8 +310,9 @@ Sizes take pixels (`400`) or viewport units (`95vw`, `50vh`).
 | `child: n` | The nth child                                 |
 | `children` | All children                                  |
 
-`ancestor` takes `pick: nearest` (default) or `pick: outermost`. `outermost` keeps
-climbing while the parent also matches — this is how you reach a modal's card rather
+`ancestor` climbs from the element's parent — an element is never its own ancestor, so a
+box that already fits the filters is not the answer. It takes `pick: nearest` (default) or
+`pick: outermost`; `outermost` keeps climbing while the parent also matches — this is how you reach a modal's card rather
 than stopping at the heading inside it.
 
 ### Selection and shape

@@ -390,7 +390,11 @@ export function resolveQuery(context: QueryContext): Resolved {
     const spec = query.ancestor
     const climbed: Element[] = []
     for (const start of candidates) {
-      let el: Element | null = start
+      // From the parent up. An element is not its own ancestor, and starting at it
+      // silently returned the element itself whenever the filters happened to fit —
+      // a heading is as wide as its column, so climbing out of one by width found the
+      // heading and drew a box round that instead.
+      let el: Element | null = start.parentElement
       while (el && !matchesFilters(el, spec)) el = el.parentElement
       if (!el) continue
       if (spec.pick === 'outermost') {
