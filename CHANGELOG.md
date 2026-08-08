@@ -10,6 +10,8 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-08
+
 ### Changed
 
 - **`place` on a callout defaults to `auto`.** It weighs what a side costs the canvas
@@ -315,7 +317,8 @@ The layers that turn a validated recipe into a PNG — running steps against Pla
 drawing the callouts, capturing and installing, and `--check` for staleness — plus the
 `shotlist` CLI itself. The README documents them; nothing in 0.0.1 runs them.
 
-[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.2.3...HEAD
+[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/SirDarcanos/shotlist/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/SirDarcanos/shotlist/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/SirDarcanos/shotlist/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/SirDarcanos/shotlist/compare/v0.2.0...v0.2.1
