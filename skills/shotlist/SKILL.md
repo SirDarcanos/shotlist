@@ -79,6 +79,34 @@ product, not like CSS.
 box on the mark and no label, then look at the image. Guessing at a selector and shipping
 it untested is the main way recipes rot.
 
+**`role`, `label`, `placeholder` and `testid` do not work inside `span:` or `within:`.**
+The browser resolves those before the page is searched, so a nested one has nothing to
+narrow. Use `css`, `text`, `startsWith` or `contains` in those positions.
+
+## Masking what the shot must not check
+
+A shot holding a clock, a live total or a face differs on every re-shoot, so `--check` on
+it cries wolf and gets switched off. `mask` covers the part that moves and leaves the rest
+checkable — better than `check: false`, which gives up the whole image.
+
+The one rule: **a mask must key on something that survives the value changing.** This is
+the mistake to avoid, and it is an easy one to make because it works the first time:
+
+```yaml
+# Wrong. Matches the figure today; matches nothing tomorrow, when it reads $51.00.
+mask: [{ within: clip, text: $42.00 }]
+
+# Right: a class, a test id, or a position — none of them the content.
+mask: [{ within: clip, css: '.amount' }]
+mask: [{ within: clip, testid: order-total }]
+mask: [{ within: clip, css: span, nth: 2 }] # the third span, whatever it says
+mask: [{ rect: [172, 84, 52, 20] }] # a literal box, measured once
+```
+
+`nth` and `child` count from zero. A mask that matches nothing stops the run rather than
+producing an unmasked shot, so getting this wrong breaks the build — which is the right
+way round, but it is still worth getting right the first time.
+
 ## Placing callouts
 
 shotlist decides the geometry: it grows the canvas when a label needs room, and moves a

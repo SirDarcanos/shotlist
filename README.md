@@ -280,6 +280,11 @@ candidates, filters narrow them, traversal moves from them, and selection picks 
 `role`+`name`, `label` and `placeholder` match the whole string, case-sensitively, instead
 of a substring.
 
+**`role`, `label`, `placeholder` and `testid` cannot be used inside `span:` or `within:`.**
+The browser resolves them before the page is searched, so there is nothing for a nested
+one to narrow. Use `css`, `text`, `startsWith` or `contains` there; the error says so if
+you forget.
+
 ### Filters
 
 | Key                           | Keeps elements that…                       |
@@ -479,9 +484,9 @@ more slowly.
 
 ## Masking what the recipe does not decide
 
-A shot holding a clock, a live total or a face differs on every re-shoot, and
-`--check` on it only ever cries wolf. `check: false` turns the check off for the whole
-image; `mask` covers just the part that moves, and leaves the rest checkable:
+A shot holding a clock, a live total or a face differs on every re-shoot, and `--check` on
+it only ever cries wolf. `check: false` turns the check off for the whole image; `mask`
+covers just the part that moves and leaves the rest checkable:
 
 ```yaml
 name: dashboard
@@ -491,9 +496,27 @@ mask:
   - { css: '.avatar' }
 ```
 
-Each entry is an ordinary query, so everything that resolves a mark resolves a mask —
-including a finder. The regions are painted before the callouts are drawn, so a callout
-may still point at a masked box.
+**Key a mask on something that survives the value changing.** A class, a test id, a
+position — never the content itself. `{ text: $42.00 }` matches the figure you are hiding
+today and nothing at all tomorrow, when it reads `$51.00`. That failure is loud rather
+than silent: a mask matching nothing stops the run with
+`recipe "…": mask[0] — no element matched`, so you get a broken build instead of an
+unmasked screenshot quietly reporting drift for ever. Loud is the right way round, but it
+does mean a mask written against the content breaks the run rather than degrading.
+
+Any query works, so an element with no class and no test id is still reachable:
+
+```yaml
+mask:
+  - { within: clip, css: span, nth: 2 } # the third span, whatever it says
+  - { within: clip, child: 2 } # the third child of the clip
+  - { rect: [172, 84, 52, 20] } # a literal box, measured once
+  - { span: [{ css: '.total' }, { css: '.row button' }] } # between two anchors
+```
+
+`nth` and `child` count from zero. The regions are painted before the callouts are drawn,
+so a callout may still point at, and outline, a masked box — you can label a field whose
+value you are hiding.
 
 With `source: file` there is no page to query, so a mask is a literal
 `rect: [x, y, width, height]`, the same as a mark.

@@ -45,9 +45,14 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   holding a clock, a live total or a face differs on every re-shoot, and until now the
   only answer was `check: false` — giving up drift detection on the whole image to
   tolerate one corner of it, which makes the check something nobody reads. `mask` takes
-  the same queries as everything else, so a finder works, and paints each region before
-  the callouts are drawn. `style.mask.fill` sets the colour; it is neutral rather than
-  the callout colour, because a mask is not pointing anything out.
+  the same queries as everything else, so a finder works and an element carrying neither
+  a class nor a test id is still reachable — by position, or by a literal box. It has to
+  be keyed on something that survives the value changing: `{ text: $42.00 }` matches the
+  figure being hidden today and nothing at all tomorrow. A mask that matches nothing
+  stops the run rather than quietly producing an unmasked shot that then reports drift
+  for ever. Regions are painted before the callouts, so a callout may still outline a
+  masked box. `style.mask.fill` sets the colour; it is neutral rather than the callout
+  colour, because a mask is not pointing anything out.
 
 - **A skill for coding agents**, at `skills/shotlist/SKILL.md` in the package. The README
   is reference — what every key does — and an agent writing its first recipe needs the

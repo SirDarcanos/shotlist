@@ -155,6 +155,36 @@ describe('mask', () => {
     expect(percent).toBeLessThan(9.5)
   }, 120_000)
 
+  it('reaches a region with no class or test id, by position and by literal box', async () => {
+    const root = project()
+    const file = join(root, 'recipes/row.yaml')
+    // Clipped to the row, so the amount is a large enough share of the shot to read as
+    // drift at all — across the whole viewport it falls under the default threshold.
+    const row = 'name: row\ninstall: guide\nclip: { listRow: Acme Corp, pad: 16 }\n'
+    writeFileSync(file, row)
+    await cli(root, ['row', '--install'])
+
+    /** How much of the shot a mask written this way covers. */
+    async function covered(mask: string): Promise<number> {
+      writeFileSync(file, `${row}mask: [${mask}]\n`)
+      const { out } = await cli(root, ['--check', 'row', '--json'])
+      return JSON.parse(out).results[0].ratio
+    }
+
+    // The fixture's amount span carries neither a class nor a test id. It is the third
+    // span in its row and the third child of it, and those are the same element, so the
+    // two ways of saying so cover exactly the same pixels.
+    const byPosition = await covered('{ within: clip, css: span, nth: 2 }')
+    expect(byPosition).toBeGreaterThan(0.02)
+    expect(await covered('{ within: clip, child: 2 }')).toBe(byPosition)
+
+    // A literal box covers the same region approximately: the fixture's `data-rect` is
+    // the text's box, and an element's layout box is a little larger than its text.
+    const byRect = await covered('{ rect: [172, 84, 52, 20] }')
+    expect(byRect).toBeGreaterThan(byPosition * 0.8)
+    expect(byRect).toBeLessThan(byPosition * 1.2)
+  }, 120_000)
+
   it('names the mask that matched nothing', async () => {
     const root = project()
     writeFileSync(join(root, 'recipes/plain.yaml'), recipe('mask: [{ css: .nowhere }]\n'))
@@ -216,7 +246,7 @@ describe('--diff', () => {
       // Same size, different pixels: mask a region of the committed image.
       writeFileSync(
         join(root, 'recipes/order-row.yaml'),
-        `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, text: $42.00 }]\n`,
+        `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, css: span, nth: 2 }]\n`,
       )
     }
     return root
@@ -284,7 +314,7 @@ describe('--check --json', () => {
     writeFileSync(file, JSON.stringify({ ...recorded, platform: 'aix' }))
     writeFileSync(
       join(root, 'recipes/order-row.yaml'),
-      `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, text: $42.00 }]\n`,
+      `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, css: span, nth: 2 }]\n`,
     )
 
     const { code, out } = await cli(root, ['--check', 'order-row', '--json', '--diff'])
