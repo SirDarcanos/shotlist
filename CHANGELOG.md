@@ -12,6 +12,14 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`mask` on a recipe**, for the part of a shot the recipe does not decide. A frame
+  holding a clock, a live total or a face differs on every re-shoot, and until now the
+  only answer was `check: false` — giving up drift detection on the whole image to
+  tolerate one corner of it, which makes the check something nobody reads. `mask` takes
+  the same queries as everything else, so a finder works, and paints each region before
+  the callouts are drawn. `style.mask.fill` sets the colour; it is neutral rather than
+  the callout colour, because a mask is not pointing anything out.
+
 - **A skill for coding agents**, at `skills/shotlist/SKILL.md` in the package. The README
   is reference — what every key does — and an agent writing its first recipe needs the
   other half: that a query should key on what a person can see rather than on a generated

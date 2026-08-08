@@ -158,6 +158,8 @@ style:
     size: 40
     fill: '#DC2626' # the disc; defaults to `color`
     text: '#FFFFFF' # the numeral
+  mask:
+    fill: '#94A3B8' # what a masked region is painted with
 ```
 
 Sizes are in image pixels, so they do not change when `scale` does.
@@ -211,6 +213,7 @@ number here to match.
 | `setup`    | `[]`       | Steps that drive the site into the state to capture       |
 | `clip`     | `viewport` | The region to capture: `viewport`, `full`, or a query     |
 | `marks`    | `{}`       | Named regions, resolved after `setup` runs                |
+| `mask`     | `[]`       | Regions painted over before the callouts are drawn        |
 | `callouts` | `[]`       | What to draw on those marks                               |
 | `numbered` | —          | Marks to number 1…n with a disc, in the order given       |
 | `retries`  | `0`        | How many times to shoot this again if it fails, up to 5   |
@@ -466,6 +469,27 @@ Each attempt is a fresh browser context, and the run reports the ones that faile
 it is still going rather than after the fact. A `source: file` recipe never retries: it
 has no page to be flaky about, so shooting it again would only report the same mistake
 more slowly.
+
+## Masking what the recipe does not decide
+
+A shot holding a clock, a live total or a face differs on every re-shoot, and
+`--check` on it only ever cries wolf. `check: false` turns the check off for the whole
+image; `mask` covers just the part that moves, and leaves the rest checkable:
+
+```yaml
+name: dashboard
+clip: { css: '.panel' }
+mask:
+  - { within: clip, css: '.updated-at' }
+  - { css: '.avatar' }
+```
+
+Each entry is an ordinary query, so everything that resolves a mark resolves a mask —
+including a finder. The regions are painted before the callouts are drawn, so a callout
+may still point at a masked box.
+
+With `source: file` there is no page to query, so a mask is a literal
+`rect: [x, y, width, height]`, the same as a mark.
 
 ## Checking for stale screenshots
 

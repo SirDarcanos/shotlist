@@ -46,6 +46,11 @@ const Style = z
         text: z.string().default('#FFFFFF'),
       })
       .prefault({}),
+    /**
+     * What a masked region is painted with. Neutral rather than the callout colour: a
+     * mask is not pointing anything out, and a white one would vanish on a light UI.
+     */
+    mask: z.object({ fill: z.string().default('#94A3B8') }).prefault({}),
   })
   .prefault({})
 

@@ -42,6 +42,7 @@ export interface DrawStyle {
     gap: number
   }
   number: { radius: number; size: number; fill?: string; text: string }
+  mask: { fill: string }
 }
 
 export interface AnnotationSpec {
@@ -51,6 +52,8 @@ export interface AnnotationSpec {
   style: DrawStyle
   /** Rects are relative to the image's top-left corner, in CSS pixels. */
   marks: Mark[]
+  /** Regions to paint over before anything is drawn, in the same coordinates. */
+  masks?: Rect[]
 }
 
 /**
@@ -342,6 +345,20 @@ export function drawAnnotations(spec: AnnotationSpec): {
       right: b.right + margin.left,
       bottom: b.bottom + margin.top,
     }
+  }
+
+  // Masks first, so a callout drawn over one is still legible. A mask never grows the
+  // canvas: it covers part of the shot, so it is always inside it already.
+  for (const rect of spec.masks ?? []) {
+    svg.append(
+      el('rect', {
+        x: rect.x + margin.left,
+        y: rect.y + margin.top,
+        width: rect.width,
+        height: rect.height,
+        fill: style.mask.fill,
+      }),
+    )
   }
 
   for (const mark of marks) {

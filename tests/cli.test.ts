@@ -121,6 +121,37 @@ describe('--keep-going', () => {
   })
 })
 
+// The point of a mask: a shot holding one thing the recipe does not decide stays
+// checkable, instead of having to opt out of `--check` altogether.
+describe('mask', () => {
+  const recipe = (extra = '') => `name: plain\ninstall: guide\nclip: viewport\n${extra}`
+
+  it('covers the region it names, and no more of the shot than that', async () => {
+    const root = project()
+    const file = join(root, 'recipes/plain.yaml')
+    writeFileSync(file, recipe())
+    await cli(root, ['plain', '--install'])
+
+    writeFileSync(file, recipe('mask: [{ css: .bar }]\n'))
+    const { code, out } = await cli(root, ['--check', 'plain'])
+
+    expect(code).toBe(1)
+    // `.bar` is 1000×60 of a 1000×700 viewport — 8.6% of the pixels. A mask that painted
+    // more than it was given, or landed in the wrong place, would not land in this range.
+    const percent = Number(/([\d.]+)% of pixels differ/.exec(out)![1])
+    expect(percent).toBeGreaterThan(7.5)
+    expect(percent).toBeLessThan(9.5)
+  }, 120_000)
+
+  it('names the mask that matched nothing', async () => {
+    const root = project()
+    writeFileSync(join(root, 'recipes/plain.yaml'), recipe('mask: [{ css: .nowhere }]\n'))
+    const { code, err } = await cli(root, ['plain'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/recipe "plain": mask\[0\] — no element matched/)
+  }, 120_000)
+})
+
 describe('--check', () => {
   it('reports a recipe with nothing committed as new, and exits non-zero', async () => {
     const root = project()

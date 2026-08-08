@@ -94,6 +94,7 @@ async function annotate(
   scale: number,
   style: Style,
   marks: Mark[],
+  masks: Rect[],
 ): Promise<{ png: Buffer; size: { width: number; height: number }; warnings: string[] }> {
   const context = await browser.newContext({
     viewport: { width: Math.ceil(size.width), height: Math.ceil(size.height) },
@@ -127,6 +128,7 @@ async function annotate(
       scale,
       style: style as unknown as DrawStyle,
       marks,
+      masks,
     })
     await page.setViewportSize({
       width: Math.ceil(canvas.width),
@@ -213,6 +215,7 @@ export async function shoot(
     let image: Buffer
     let size: { width: number; height: number }
     let marks: Mark[]
+    let masks: Rect[]
 
     if (source) {
       image = source.image
@@ -236,6 +239,22 @@ export async function shoot(
         }
       }
       marks = marksFor(recipe, rects, { x: 0, y: 0, width: 0, height: 0 })
+      masks = recipe.mask.map((query, i) => {
+        if (!('rect' in (query as object))) {
+          throw inRecipe(
+            recipe,
+            `mask[${i}]`,
+            'queries the page, but `source: file` has no page — give it a `rect: [x, y, width, height]`',
+          )
+        }
+        const [x, y, width, height] = (query as { rect: [number, number, number, number] }).rect
+        return {
+          x: x / settings.scale,
+          y: y / settings.scale,
+          width: width / settings.scale,
+          height: height / settings.scale,
+        }
+      })
     } else {
       const context = await browser.newContext({
         viewport: settings.viewport,
@@ -299,6 +318,16 @@ export async function shoot(
           }
         }
 
+        masks = []
+        for (const [i, query] of recipe.mask.entries()) {
+          try {
+            const { rect } = await resolveInPage(ctx.page, query, ctx)
+            masks.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+          } catch (error) {
+            throw inRecipe(recipe, `mask[${i}]`, pageMessage(error))
+          }
+        }
+
         image = await ctx.page.screenshot({ clip, animations: 'disabled' })
         size = { width: clip.width, height: clip.height }
         marks = marksFor(recipe, ctx.rects, clip)
@@ -307,9 +336,12 @@ export async function shoot(
       }
     }
 
-    const drawn = marks.length
-      ? await annotate(browser, image, size, settings.scale, style, marks)
-      : { png: image, size: { width: size.width, height: size.height }, warnings: [] }
+    // A mask is drawn in the same pass as the callouts, so a shot with nothing to point
+    // out but something to hide still goes through it.
+    const drawn =
+      marks.length || masks.length
+        ? await annotate(browser, image, size, settings.scale, style, marks, masks)
+        : { png: image, size: { width: size.width, height: size.height }, warnings: [] }
 
     writeFileSync(file, drawn.png)
     const destination = destinationFor(recipe, loaded)

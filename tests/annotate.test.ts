@@ -20,6 +20,7 @@ const STYLE: DrawStyle = {
     gap: 40,
   },
   number: { radius: 26, size: 40, text: '#FFFFFF' },
+  mask: { fill: '#94A3B8' },
 }
 
 const IMAGE = { width: 400, height: 300 }
@@ -37,8 +38,20 @@ function mark(over: Partial<Mark> = {}): Mark {
 }
 
 /** Draw against a 400×300 image at 2×, the scale most captures use. */
-function draw(marks: Mark[], scale = 2) {
-  return drawAnnotations({ image: IMAGE, scale, style: STYLE, marks })
+function draw(
+  marks: Mark[],
+  scale = 2,
+  masks?: { x: number; y: number; width: number; height: number }[],
+) {
+  return drawAnnotations({ image: IMAGE, scale, style: STYLE, marks, ...(masks ? { masks } : {}) })
+}
+
+/** Every rect the layer holds, as `x,y,width,height`, with its fill. */
+function rects() {
+  return [...document.querySelectorAll('#shotlist-layer rect')].map((node) => ({
+    at: ['x', 'y', 'width', 'height'].map((key) => node.getAttribute(key)).join(','),
+    fill: node.getAttribute('fill'),
+  }))
 }
 
 beforeEach(() => {
@@ -446,5 +459,36 @@ describe('drawing', () => {
     ])
     const [first, second] = [...document.querySelectorAll('#shotlist-layer text')]
     expect(Number(second!.getAttribute('y'))).toBeGreaterThan(Number(first!.getAttribute('y')))
+  })
+})
+
+// A shot can hold one thing the recipe does not decide — a clock, a live total. Without a
+// mask the whole image has to give up `--check`, which is the check nobody then reads.
+describe('masks', () => {
+  const region = { x: 10, y: 20, width: 60, height: 30 }
+
+  it('paints the region, before any callout is drawn over it', () => {
+    draw([mark({ box: true, text: undefined })], 2, [region])
+    const painted = rects()
+    expect(painted[0]).toEqual({ at: '10,20,60,30', fill: STYLE.mask.fill })
+    // The callout's own outline comes after, so it stays legible over a mask.
+    expect(painted[1]?.fill).toBe('none')
+  })
+
+  it('draws over the shot without growing the canvas', () => {
+    const plain = draw([], 2)
+    const masked = draw([], 2, [region])
+    expect(masked.width).toBe(plain.width)
+    expect(masked.height).toBe(plain.height)
+    expect(rects()).toHaveLength(1)
+  })
+
+  it('moves the region by the margin a label claimed', () => {
+    // A label placed left grows the canvas on that side, and the shot moves with it —
+    // a mask is in image coordinates, so it has to move by the same amount.
+    draw([mark({ place: 'left', text: 'Some label' })], 2, [region])
+    const [painted] = rects()
+    const x = Number(painted!.at.split(',')[0])
+    expect(x).toBeGreaterThan(region.x)
   })
 })

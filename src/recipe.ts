@@ -156,6 +156,13 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
       setup: z.array(makeStep(aliases)).default([]),
       clip: z.union([z.literal('viewport'), z.literal('full'), Query]).default('viewport'),
       marks: z.record(z.string(), Query).default({}),
+      /**
+       * Regions painted over before the callouts are drawn, for what the recipe does not
+       * decide: a clock, a live total, a face. Without them a shot holding one thing that
+       * changes has to give up `--check` entirely, and a staleness check that always
+       * reports a change is one nobody reads.
+       */
+      mask: z.array(Query).default([]),
       callouts: z.array(Callout).default([]),
       /** Shorthand: number these marks 1..n, in order, with a disc on each box. */
       numbered: Numbered.optional(),
