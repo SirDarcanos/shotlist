@@ -135,7 +135,16 @@ describe('a page shaped like a real one', () => {
     },
     async () => {
       const root = project({
-        events: ['name: events', 'install: guide', 'clip: { css: table, pad: 8 }', ''].join('\n'),
+        // Any difference at all counts here. The cell is three digits in a fixed-width
+        // column, so two loads can differ by one glyph — under the default threshold,
+        // which would make this pass or fail on which numbers came up.
+        events: [
+          'name: events',
+          'install: guide',
+          'clip: { css: table, pad: 8 }',
+          'check: { threshold: 0, tolerance: 0 }',
+          '',
+        ].join('\n'),
       })
       await cli(root, ['events', '--install'])
       const { code, out } = await cli(root, ['--check', 'events'])
