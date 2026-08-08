@@ -143,8 +143,8 @@ describe('what is never read or written, in any mode', () => {
 
   it('names the part of the path that stopped it, wherever it sits', () => {
     for (const part of named) {
-      expect(secretIn(`/project/${part}`), part).toEqual({ part, by: 'shotlist' })
-      expect(secretIn(`/project/${part}/nested/shot.png`), part).toEqual({ part, by: 'shotlist' })
+      expect(secretIn(`/project/${part}`), part).toBe(part)
+      expect(secretIn(`/project/${part}/nested/shot.png`), part).toBe(part)
     }
   })
 
@@ -159,7 +159,7 @@ describe('what is never read or written, in any mode', () => {
   })
 
   it('refuses them with the config trusted, which is the point', () => {
-    expect(() => checkPath(own(), '/project/.env', '`file:`')).toThrow(/never read or written/)
+    expect(() => checkPath(own(), '/project/.env', '`file:`')).toThrow(/is a forbidden path/)
     expect(() => checkPath(own(), '/project/.git/objects', 'install."x"')).toThrow(/"\.git"/)
   })
 })
@@ -221,12 +221,15 @@ describe('a name the project put out of bounds', () => {
     expect(() => checkPath(policy(['*.sqlite']), '/project/db/notes.md', 'x')).not.toThrow()
   })
 
-  it('says it is a decision, and whose, rather than reading as a bug', () => {
+  it('says the same thing whoever forbade it, and who to take it up with', () => {
+    // The same sentence whoever set it: nothing here is actionable by the reader beyond
+    // knowing who to take it up with.
     expect(() => checkPath(policy(['fake-secret']), '/project/fake-secret/a', 'x')).toThrow(
-      /ask your administrator/,
+      /"fake-secret" is a forbidden path — contact the administrator/,
     )
-    // The built-in list is not the project's doing, and does not claim to be.
-    expect(() => checkPath(policy([]), '/project/.env', 'x')).toThrow(/never read or written/)
+    expect(() => checkPath(policy([]), '/project/.env', 'x')).toThrow(
+      /"\.env" is a forbidden path — contact the administrator/,
+    )
   })
 
   it('holds when the config is not trusted, because it can only refuse more', () => {

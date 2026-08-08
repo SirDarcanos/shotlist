@@ -761,11 +761,12 @@ deny:
 Someone who later writes a recipe for it is told, and told who to ask:
 
 ```
-recipe "reports": `url`: "fake-secret" is a forbidden path — ask your administrator
+recipe "reports": `url`: "fake-secret" is a forbidden path — contact the administrator
 ```
 
-It does not say which of the three set it. Whoever hits this cannot act on that, and
-naming the config key mostly invites editing it out.
+It does not say which of the three set it, and the built-in names above refuse with the
+same sentence. Whoever hits this cannot act on either, and naming the config key mostly
+invites editing it out.
 
 Each entry matches **one segment of a path**, with `*` standing for any run of characters
 — so a folder name stops everything under it, and `*.sqlite` stops a file wherever it

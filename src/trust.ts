@@ -69,13 +69,6 @@ function segmentPattern(glob: string): RegExp {
   return new RegExp(`^${escaped.replace(/\u0000/g, '[^/\\\\]*')}$`, 'i')
 }
 
-/** A name that may not be touched, and who said so. */
-export interface Forbidden {
-  part: string
-  /** `shotlist` is the built-in list; `project` is a `deny:` entry or a `--deny` flag. */
-  by: 'shotlist' | 'project'
-}
-
 /**
  * The part of a path that may not be touched, or null when none of it may not be.
  *
@@ -85,11 +78,10 @@ export interface Forbidden {
  * which is why, unlike `site.allow`, they are honoured even when the config is not
  * trusted. A config widening its reach is a claim; a config narrowing it is not.
  */
-export function secretIn(path: string, also: readonly string[] = []): Forbidden | null {
-  const extra = also.map(segmentPattern)
+export function secretIn(path: string, also: readonly string[] = []): string | null {
+  const patterns = [...SECRET, ...also.map(segmentPattern)]
   for (const part of path.split(/[\\/]+/).filter(Boolean)) {
-    if (SECRET.some((pattern) => pattern.test(part))) return { part, by: 'shotlist' }
-    if (extra.some((pattern) => pattern.test(part))) return { part, by: 'project' }
+    if (patterns.some((pattern) => pattern.test(part))) return part
   }
   return null
 }
@@ -97,16 +89,12 @@ export function secretIn(path: string, also: readonly string[] = []): Forbidden 
 /**
  * Say a name is off limits, and stop.
  *
- * Not where it was set: whoever reads this cannot act on that, and naming the config key
- * mostly invites editing it out, which is the opposite of the point. Somebody decided
- * this, and the person who hit it needs to know who to ask rather than how to undo it.
+ * Not where it was set, and not whether shotlist or the project set it: whoever reads
+ * this cannot act on either, and naming the config key mostly invites editing it out —
+ * which is the opposite of the point. One sentence, and who to take it up with.
  */
-function refuse(where: string, found: Forbidden): ShotlistError {
-  return new ShotlistError(
-    found.by === 'shotlist'
-      ? `${where}: "${found.part}" is never read or written by shotlist`
-      : `${where}: "${found.part}" is a forbidden path — ask your administrator`,
-  )
+function refuse(where: string, part: string): ShotlistError {
+  return new ShotlistError(`${where}: "${part}" is a forbidden path — contact the administrator`)
 }
 
 /** Whether a host is the one named, or something under it. */

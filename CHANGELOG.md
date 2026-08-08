@@ -52,12 +52,13 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   touches. One path segment each, with `*` for any run of characters, so `fake-secret`
   stops a folder and everything under it and `*.sqlite` stops a file. Checked against
   filesystem paths and URL paths alike — `/fake-secret` is out of bounds whether a recipe
-  reaches it through the disk or through the site. The refusal is one line — `"fake-secret"
-is a forbidden path — ask your administrator` — and deliberately does not say which of
-  the three set it: whoever hits it cannot act on that, and naming the config key mostly
-  invites editing it out. All three add up and none
-  can subtract, so a `deny` holds even under `--untrusted`: unlike `site.allow` it can
-  only ever refuse more. The environment is the one a recipe author cannot edit their way
+  reaches it through the disk or through the site. The refusal is one line —
+  `"fake-secret" is a forbidden path — contact the administrator` — and is the same
+  sentence for a name shotlist forbids and one the project does. It says neither which of
+  the three set it nor which list it came from: whoever hits it cannot act on either, and
+  naming the config key mostly invites editing it out. All three add up and none can
+  subtract, so a `deny` holds even under `--untrusted`: unlike `site.allow` it can only
+  ever refuse more. The environment is the one a recipe author cannot edit their way
   out of, which is what an administrator setting up a machine wants.
 - **`--allow <host>` and `--allow-path <dir>`**, repeatable, for what the operator wants
   reachable. Unlike `site.allow` they come from the command line, so they still mean
