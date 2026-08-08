@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
+import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
 import type { Config, LoadedConfig, Style } from './config.js'
 import { expandSteps } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
@@ -50,12 +50,25 @@ function inRecipe(recipe: Recipe, path: string, cause: string): ShotlistError {
 
 /** The viewport, scale and theme this recipe runs at: the site's, with its own on top. */
 function settingsFor(recipe: Recipe, config: Config) {
-  return {
+  const settings = {
     url: recipe.url ?? config.site.url,
     viewport: recipe.viewport ?? config.site.viewport,
     scale: recipe.scale ?? config.site.scale,
     theme: recipe.theme ?? config.site.theme,
   }
+  // Each is in range on its own; it is the product the browser has to paint, and past
+  // what it can the tab dies with a protocol error rather than anything to act on.
+  for (const side of ['width', 'height'] as const) {
+    const pixels = settings.viewport[side] * settings.scale
+    if (pixels > MAX_PIXELS) {
+      throw inRecipe(
+        recipe,
+        `viewport.${side} × scale`,
+        `is ${pixels} device pixels, and a browser cannot paint past ${MAX_PIXELS}`,
+      )
+    }
+  }
+  return settings
 }
 
 /** Where a recipe's image is installed, refusing a destination the config never named. */
@@ -113,7 +126,10 @@ async function annotate(
   })
   try {
     const page = await context.newPage()
-    const sheet = style.label.fontUrl ? `<link rel="stylesheet" href="${style.label.fontUrl}">` : ''
+    // Escaped even though the schema holds it to a URL: this is markup, and the two
+    // checks fail independently.
+    const href = style.label.fontUrl?.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+    const sheet = href ? `<link rel="stylesheet" href="${href}">` : ''
     await page.setContent(
       sheet +
         `<style>html,body{margin:0}img{display:block}</style>` +

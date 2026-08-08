@@ -192,3 +192,19 @@ describe('interpolate', () => {
     expect(interpolate('costs $5', {})).toBe('costs $5')
   })
 })
+
+describe('what a recipe is not allowed to be', () => {
+  it('refuses a name that is a path, since it names an image in the out directory', () => {
+    expect(() => parseRecipe({ name: '../../escaped' }, { name: 'x' })).toThrow(
+      /name: is the name of an image, so it cannot contain a path/,
+    )
+    expect(() => parseRecipe({ name: '..' }, { name: 'x' })).toThrow(/cannot contain a path/)
+  })
+
+  it('refuses a viewport or scale past what a browser can paint', () => {
+    expect(() => parseRecipe({ viewport: { width: 99999, height: 10 } }, { name: 'x' })).toThrow(
+      /viewport.width/,
+    )
+    expect(() => parseRecipe({ scale: 500 }, { name: 'x' })).toThrow(/scale/)
+  })
+})

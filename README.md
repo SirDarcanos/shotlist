@@ -710,6 +710,33 @@ cp -R node_modules/shotlist/skills/shotlist .claude/skills/
 It is Markdown with YAML frontmatter and nothing else, so any agent that reads instruction
 files can use it — point yours at `node_modules/shotlist/skills/shotlist/SKILL.md`.
 
+## What a config can do to the machine that runs it
+
+A `shotlist.config.yaml` is a file in a repository, and running shotlist is not meant to
+be a decision about what that repository may do to your machine. It is worth knowing
+exactly where the line is before running it in a checkout you did not write.
+
+**A config cannot run code.** There is no `eval:` step and no way to reach one. Queries
+travel into the page as data, never as source: a malformed selector is a `SyntaxError`
+from `querySelectorAll`, not an execution. `site.serve` runs a program directly with no
+shell, so `&&`, `|`, `>` and a `VAR=value` prefix are refused rather than interpreted.
+
+**A config can do these, by design:**
+
+- **start a process** — `site.serve` runs the command it names, with the arguments it
+  names. Read it before running a strange project;
+- **fetch what it names** — `site.url`, a recipe's `url`, `openPage` and
+  `style.label.fontUrl` are all fetched from the machine doing the shooting, which may be
+  inside a network the author is not;
+- **write images where it says** — an `install` destination may be absolute or climb out
+  of the project, and the directories are created. The contents are always a PNG, and a
+  recipe's `name` cannot contain a path, so what can be written is `<destination>/<name>.png`
+  and nothing else.
+
+**A run is bounded.** `site.timeout` limits how long a query may take to resolve, so a
+`matching` pattern that backtracks fails with a message instead of hanging the build; a
+viewport and scale are held to what a browser can actually paint; and `retries` is capped.
+
 ## License
 
 MIT © Nicola Mustone — see [LICENSE](./LICENSE).

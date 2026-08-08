@@ -131,6 +131,23 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Fixed
 
+- **A `fontUrl` could put script into the page the callouts are drawn in.** It was
+  interpolated straight into a `<link href>`, so a value carrying a quote closed the
+  attribute and opened a tag — in the page holding the screenshot. It is now held to a
+  http(s), `data:` or `file:` URL _and_ escaped where it is written; the two checks fail
+  independently.
+- **A `matching` pattern could hang a run for ever.** It is a regular expression run
+  inside the page against the text of every candidate, and one with nested quantifiers
+  backtracks exponentially — 34 characters of the wrong text took 90 seconds here, and 40
+  would have taken an hour. Resolving a query is now bounded by `site.timeout` and fails
+  naming the query and the limit.
+- **A viewport or scale past what a browser can paint crashed it.** `viewport: { width:
+200000 }` took the tab down and reported a Playwright protocol error with the whole
+  Chromium command line in it. Both are now bounded, separately and as the product they
+  make: `4000 × scale 8` is refused for being 32000 device pixels rather than dying.
+- **A recipe's `name` could climb out of the out directory.** `name: ../../elsewhere`
+  wrote there. It names an image, so it may no longer contain a path.
+
 - **A bad value in a union said `Invalid input` and stopped there.** Several keys accept
   more than one shape — `clip`, `numbered` and `check` — and a mistake inside one was
   reported as the union as a whole not matching, naming neither the key that was wrong nor

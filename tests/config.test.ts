@@ -120,3 +120,33 @@ describe('loading', () => {
     expect(() => readDocument(join(root, 'shotlist.config.yaml'))).toThrow(/shotlist.config.yaml/)
   })
 })
+
+// A config is a file in a repository, and running shotlist in one is not meant to be a
+// decision about what that repository may do to the machine.
+describe('what a config is not allowed to be', () => {
+  const site = { url: 'http://x' }
+
+  it('keeps a finder named __proto__ off Object.prototype', () => {
+    const config = parseConfig({ site, finders: JSON.parse('{"__proto__":{"polluted":true}}') })
+    expect(Object.keys(config.finders)).toEqual([])
+    expect(({} as { polluted?: unknown }).polluted).toBeUndefined()
+  })
+
+  it('refuses a fontUrl that is not a URL, since it is put into markup', () => {
+    // A quote in it used to close the attribute and open a script tag in the page the
+    // callouts are drawn in — the page holding the screenshot.
+    expect(() =>
+      parseConfig({ site, style: { label: { fontUrl: '"><script>x</script>' } } }),
+    ).toThrow(/fontUrl: must be a http\(s\), data: or file: URL/)
+    expect(() =>
+      parseConfig({ site, style: { label: { fontUrl: 'https://fonts.example/x.css' } } }),
+    ).not.toThrow()
+  })
+
+  it('refuses a viewport or scale past what a browser can paint', () => {
+    expect(() =>
+      parseConfig({ site: { ...site, viewport: { width: 200000, height: 10 } } }),
+    ).toThrow(/viewport.width: Too big/)
+    expect(() => parseConfig({ site: { ...site, scale: 500 } })).toThrow(/scale: Too big/)
+  })
+})

@@ -44,22 +44,43 @@ async function seedsFor(page: Page, query: QueryInput): Promise<ElementHandle[] 
 export async function resolve(
   page: Page,
   query: QueryInput,
-  ctx: Pick<RunContext, 'rects' | 'viewport'>,
+  ctx: Pick<RunContext, 'rects' | 'viewport'> & { timeout?: number },
 ): Promise<{ rect: Rect; element: ElementHandle | null }> {
+  // A query is evaluated inside the page, and the page's one thread runs it to
+  // completion — `matching` with nested quantifiers against the wrong text backtracks
+  // for longer than anyone will wait, and nothing else here would ever come back.
+  const budget = ctx.timeout ?? 15000
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const seeds = await seedsFor(page, query)
-    const handle = await page.evaluateHandle(resolveQuery, {
-      spec: query,
-      viewport: ctx.viewport,
-      rects: ctx.rects,
-      ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
+    const overran = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new ShotlistError(
+            `gave up after ${budget}ms resolving ${JSON.stringify(query)} — a \`matching\` ` +
+              'pattern that has to backtrack can take effectively forever on the wrong text. ' +
+              '`site.timeout` is the limit.',
+          ),
+        )
+      }, budget)
     })
+    const handle = await Promise.race([
+      page.evaluateHandle(resolveQuery, {
+        spec: query,
+        viewport: ctx.viewport,
+        rects: ctx.rects,
+        ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
+      }),
+      overran,
+    ])
     const rect = await handle.evaluate((r) => r.rect)
     const element = (await handle.getProperty('element')).asElement()
     await handle.dispose()
     return { rect, element }
   } catch (error) {
     throw error instanceof ShotlistError ? error : new ShotlistError(pageMessage(error))
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }
 

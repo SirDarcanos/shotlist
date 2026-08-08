@@ -34,8 +34,23 @@ const Style = z
          * A stylesheet to load before drawing — a Google Fonts URL, or any @font-face
          * sheet. Without it a family has to be installed on the machine that shoots.
          * Needs network access at shoot time.
+         *
+         * Held to a URL because it is put into the drawing page's markup: a value with a
+         * quote in it used to close the attribute and open a script tag.
          */
-        fontUrl: z.string().optional(),
+        fontUrl: z
+          .string()
+          .refine(
+            (value) => {
+              try {
+                return ['http:', 'https:', 'data:', 'file:'].includes(new URL(value).protocol)
+              } catch {
+                return false
+              }
+            },
+            { message: 'must be a http(s), data: or file: URL' },
+          )
+          .optional(),
       })
       .prefault({}),
     number: z
@@ -54,9 +69,12 @@ const Style = z
   })
   .prefault({})
 
+/** What a browser can actually paint; past it the tab dies rather than reporting. */
+export const MAX_PIXELS = 16384
+
 const Viewport = z.object({
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  width: z.number().int().positive().max(MAX_PIXELS),
+  height: z.number().int().positive().max(MAX_PIXELS),
 })
 
 /** How to start the site, for a run that cannot assume somebody already has. */
@@ -92,7 +110,7 @@ const Site = z.object({
   /** Started before the first shot and stopped after the last, unless already running. */
   serve: Serve.optional(),
   viewport: Viewport.default({ width: 1280, height: 800 }),
-  scale: z.number().positive().default(2),
+  scale: z.number().positive().max(64).default(2),
   theme: z.enum(['light', 'dark', 'no-preference']).default('light'),
   reducedMotion: z.boolean().default(true),
   /** A selector proving the app has booted — waited for after every navigation. */

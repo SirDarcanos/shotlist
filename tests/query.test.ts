@@ -53,6 +53,21 @@ describe('sources and filters', () => {
   })
 })
 
+// The engine that answers `role`/`label`/`placeholder`/`testid` runs before this one.
+// Absent seeds mean it never ran — the query is nested somewhere it cannot be. Empty
+// seeds mean it ran and found nothing, which is an ordinary no-match.
+describe('a source Playwright resolves', () => {
+  it('says nothing matched when the engine ran and came back empty', () => {
+    expect(() =>
+      evaluateQuery({ spec: { placeholder: 'Search packages' }, viewport: VIEWPORT, seeds: [] }),
+    ).toThrow(/^no element matched /)
+  })
+
+  it('says it cannot be nested when the engine never ran at all', () => {
+    expect(() => find({ placeholder: 'Search packages' })).toThrow(/cannot be used inside/)
+  })
+})
+
 describe('traversal', () => {
   it('climbs to the nearest matching ancestor', () => {
     // The select sits in a label, which is the first box around it under 95vw.

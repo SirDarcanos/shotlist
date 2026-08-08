@@ -1,7 +1,7 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
-import { ShotlistError, formatIssues, readDocument } from './config.js'
+import { MAX_PIXELS, ShotlistError, formatIssues, readDocument } from './config.js'
 import { makeQuery } from './query.js'
 import type { QueryInput } from './query.js'
 
@@ -145,14 +145,25 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
   const Query = makeQuery(aliases)
   return z
     .object({
-      name: z.string().optional(),
+      /** A filename, not a path: it names the image written into `paths.out`. */
+      name: z
+        .string()
+        .refine((value) => !/[\\/]|^\.\.?$/.test(value), {
+          message: 'is the name of an image, so it cannot contain a path',
+        })
+        .optional(),
       source: z.enum(['app', 'file']).default('app'),
       /** With `source: file`, the PNG to annotate instead of driving the site. */
       file: z.string().optional(),
       install: z.string().optional(),
       url: z.string().optional(),
-      viewport: z.object({ width: z.number(), height: z.number() }).optional(),
-      scale: z.number().positive().optional(),
+      viewport: z
+        .object({
+          width: z.number().int().positive().max(MAX_PIXELS),
+          height: z.number().int().positive().max(MAX_PIXELS),
+        })
+        .optional(),
+      scale: z.number().positive().max(64).optional(),
       theme: z.enum(['light', 'dark', 'no-preference']).optional(),
       style: StylePatch.optional(),
       setup: z.array(makeStep(aliases)).default([]),
