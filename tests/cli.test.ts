@@ -257,6 +257,51 @@ describe('--diff', () => {
   }, 120_000)
 })
 
+// A CI job wants to branch on what a check found, not parse the lines a person reads.
+describe('--check --json', () => {
+  it('puts the report on stdout and everything else on stderr', async () => {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    const { code, out, err } = await cli(root, ['--check', 'order-row', '--json'])
+
+    expect(code).toBe(0)
+    // stdout has to be a usable file on its own: `--check --json > report.json`.
+    const report = JSON.parse(out)
+    expect(report).toMatchObject({ changed: 0, total: 1 })
+    expect(report.results[0]).toMatchObject({ name: 'order-row', status: 'same' })
+    expect(typeof report.results[0].ratio).toBe('number')
+
+    // The human report moved aside rather than being dropped.
+    expect(err).toContain('same     order-row')
+    expect(out).not.toContain('same     order-row')
+  }, 120_000)
+
+  it('carries the drift and the diff a run found', async () => {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    const file = join(root, 'shotlist.baseline.json')
+    const recorded = JSON.parse(readFileSync(file, 'utf8'))
+    writeFileSync(file, JSON.stringify({ ...recorded, platform: 'aix' }))
+    writeFileSync(
+      join(root, 'recipes/order-row.yaml'),
+      `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, text: $42.00 }]\n`,
+    )
+
+    const { code, out } = await cli(root, ['--check', 'order-row', '--json', '--diff'])
+    expect(code).toBe(1)
+    const report = JSON.parse(out)
+    expect(report.changed).toBe(1)
+    expect(report.drift).toContainEqual({ field: 'platform', was: 'aix', now: process.platform })
+    expect(report.results[0].diff).toBe(join(root, 'out/diff/order-row.png'))
+  }, 120_000)
+
+  it('refuses to be asked for a report of a run that takes screenshots', async () => {
+    const { code, err } = await cli(project(), ['order-row', '--json'])
+    expect(code).toBe(1)
+    expect(err).toContain('--json reports a --check run')
+  })
+})
+
 describe('the machine a baseline was taken on', () => {
   it('is recorded when images are installed, and read back on a check', async () => {
     const root = project()

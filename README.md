@@ -525,6 +525,35 @@ npx shotlist --check --diff
 When the two are different sizes there is nothing to overlay, so the image is the two
 panels and the size change is the whole story.
 
+`--json` reports the run on stdout instead, with everything written for a person moved to
+stderr, so the redirect is a usable file:
+
+```bash
+npx shotlist --check --json > report.json
+```
+
+```json
+{
+  "changed": 1,
+  "total": 2,
+  "drift": [{ "field": "chromium", "was": "141.0.0.0", "now": "139.0.0.0" }],
+  "results": [
+    {
+      "name": "order-row",
+      "status": "changed",
+      "ratio": 0.0213,
+      "shot": "screenshots/out/order-row.png",
+      "against": "content/guide/images/order-row.png",
+      "diff": "screenshots/out/diff/order-row.png"
+    }
+  ]
+}
+```
+
+`status` is one of `same`, `changed`, `new`, `skipped` or `failed`, and `drift` is what
+the machine-mismatch warning would have said — a CI job can tell a re-render apart from a
+regression without parsing prose.
+
 ### What the images were taken with
 
 `--install` also writes `shotlist.baseline.json` beside the config, recording the
@@ -557,6 +586,7 @@ npx shotlist --all --keep-going   # …carrying on past a recipe that fails
 npx shotlist --check              # compare against committed images
 npx shotlist --check <name>       # …just these ones
 npx shotlist --check --diff       # …and write a before/after/changed image
+npx shotlist --check --json       # …and report it as JSON on stdout
 npx shotlist --config <file>      # use a specific config
 npx shotlist --help               # the same list, from the tool
 npx shotlist --version            # print the version

@@ -30,6 +30,7 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   shotlist --all --install       shoot everything
   shotlist --check [<name>...]   re-shoot and compare against the committed images
   shotlist --check --diff        …and write a before/after/changed image for each
+  shotlist --check --json        …and report it as JSON on stdout
 
   --config <file>   use this config instead of the nearest one
   --keep-going      carry on past a recipe that fails, and report them at the end
@@ -91,6 +92,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         config: { type: 'string' },
         'keep-going': { type: 'boolean', default: false },
         diff: { type: 'boolean', default: false },
+        json: { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
       },
@@ -110,6 +112,11 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     const pkg = createRequire(import.meta.url)('../package.json') as { version: string }
     io.out(pkg.version)
     return 0
+  }
+
+  if (values.json && !values.check) {
+    io.err('--json reports a --check run, and there is nothing else for it to report')
+    return 1
   }
 
   // Before anything is loaded: this is the command for a project that has no config.
@@ -152,16 +159,20 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     /** Everything that wants the site up, so the server's lifetime is exactly this. */
     const work = async (): Promise<number> => {
       if (values.check) {
+        // With `--json` the report is stdout, so everything written for a person moves
+        // aside — `shotlist --check --json > report.json` has to leave a usable file.
+        const say = values.json ? io.err : io.out
         const browser = await loadPlaywright().chromium.launch()
         let results
+        let drift
         try {
           // Said before the results, so they are read in the light of it: a different
           // Chromium rasterises text differently, and that is not the site changing.
-          const drift = environmentDrift(readBaseline(loaded), describeEnvironment(browser))
+          drift = environmentDrift(readBaseline(loaded), describeEnvironment(browser))
           if (drift.length) {
-            io.out('! this is not the machine the committed images were taken on:')
-            for (const { field, was, now } of drift) io.out(`    ${field}: ${was} → ${now}`)
-            io.out('  Differences below may be that, rather than the site.')
+            say('! this is not the machine the committed images were taken on:')
+            for (const { field, was, now } of drift) say(`    ${field}: ${was} → ${now}`)
+            say('  Differences below may be that, rather than the site.')
           }
           results = await check(recipes, library, loaded, {
             browser,
@@ -177,30 +188,33 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         let changed = 0
         for (const result of results) {
           if (result.status === 'same') {
-            io.out(`  same     ${result.name}`)
+            say(`  same     ${result.name}`)
           } else if (result.status === 'changed') {
             changed++
             const why =
               result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
-            io.out(`  CHANGED  ${result.name} — ${why}`)
-            io.out(`           committed: ${result.against}`)
-            io.out(`           re-shot:   ${result.shot}`)
-            if (result.diff) io.out(`           diff:      ${result.diff}`)
+            say(`  CHANGED  ${result.name} — ${why}`)
+            say(`           committed: ${result.against}`)
+            say(`           re-shot:   ${result.shot}`)
+            if (result.diff) say(`           diff:      ${result.diff}`)
           } else if (result.status === 'new') {
             changed++
-            io.out(`  NEW      ${result.name} — nothing committed at ${result.against}`)
+            say(`  NEW      ${result.name} — nothing committed at ${result.against}`)
           } else if (result.status === 'failed') {
             changed++
-            io.out(`  FAILED   ${result.name} — ${result.reason}`)
+            say(`  FAILED   ${result.name} — ${result.reason}`)
           } else {
-            io.out(`  skipped  ${result.name} — ${result.reason}`)
+            say(`  skipped  ${result.name} — ${result.reason}`)
           }
         }
-        io.out(
+        say(
           changed
             ? `${changed} of ${results.length} need attention`
             : 'every screenshot is current',
         )
+        if (values.json) {
+          io.out(JSON.stringify({ changed, total: results.length, drift, results }, null, 2))
+        }
         return changed ? 1 : 0
       }
 

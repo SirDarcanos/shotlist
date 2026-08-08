@@ -12,6 +12,12 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`--check --json`**, so a pipeline can act on a run rather than parse it. The report
+  goes to stdout and everything written for a person moves to stderr, which is what makes
+  `--check --json > report.json` leave a usable file. It carries each recipe's status and
+  ratio, the diff written for it, and the environment drift — so a job can tell a
+  re-render on a different Chromium apart from a regression without reading prose.
+
 - **`--init`**, writing a commented `shotlist.config.yaml` and a first recipe. Starting a
   project meant copying two files out of the README into an empty directory and finding
   out which keys were required by being told. The scaffold parses, so `npx shotlist`
