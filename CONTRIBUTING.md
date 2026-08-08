@@ -64,12 +64,13 @@ every load on purpose: it is what `mask` and `check.ignore` are tested against.
 
 Two constraints:
 
-- **Every element carries `data-rect="x,y,width,height"`.** jsdom has no layout engine,
-  so rects would all be zero. A real browser ignores the attribute and measures the page.
-  When you change the CSS, update the attributes to match, or the jsdom tests pass
-  against numbers the page no longer has.
-- **Nothing in it comes from a real product.** The fixture exercises query primitives. If
-  you need a new shape to test against, add a neutral one.
+- **In `index.html`, every element carries `data-rect="x,y,width,height"`.** jsdom has no
+  layout engine, so rects would all be zero. A real browser ignores the attribute and
+  measures the page. When you change that file's CSS, update the attributes to match, or
+  the jsdom tests pass against numbers the page no longer has. `site.html` has none of
+  this, and must not grow any: nothing measures it except a browser.
+- **Nothing in either comes from a real product.** If you need a new shape to test
+  against, add a neutral one.
 
 ## Before opening a pull request
 
