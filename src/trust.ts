@@ -94,15 +94,18 @@ export function secretIn(path: string, also: readonly string[] = []): Forbidden 
   return null
 }
 
-/** How to say a name is off limits, in the terms of whoever put it off limits. */
-function refuse(where: string, what: string, found: Forbidden): ShotlistError {
+/**
+ * Say a name is off limits, and stop.
+ *
+ * Not where it was set: whoever reads this cannot act on that, and naming the config key
+ * mostly invites editing it out, which is the opposite of the point. Somebody decided
+ * this, and the person who hit it needs to know who to ask rather than how to undo it.
+ */
+function refuse(where: string, found: Forbidden): ShotlistError {
   return new ShotlistError(
     found.by === 'shotlist'
-      ? `${where}: ${what} goes through "${found.part}", which shotlist does not read or ` +
-          'write in any mode.'
-      : `${where}: ${what} goes through "${found.part}", which this project forbids. It is ` +
-          'in `deny:` in the config, or in a --deny on the command line, or in ' +
-          'SHOTLIST_DENY — ask whoever set it before taking it out.',
+      ? `${where}: "${found.part}" is never read or written by shotlist`
+      : `${where}: "${found.part}" is a forbidden path — ask your administrator`,
   )
 }
 
@@ -224,7 +227,7 @@ export function checkUrl(trust: Trust, url: string, where: string): void {
   }
 
   const forbidden = secretIn(decodeURIComponent(parsed.pathname), trust.deny)
-  if (forbidden !== null) throw refuse(where, parsed.pathname, forbidden)
+  if (forbidden !== null) throw refuse(where, forbidden)
 
   if (trust.untrusted && (PRIVATE.test(parsed.hostname) || METADATA.test(parsed.hostname))) {
     throw new ShotlistError(
@@ -240,7 +243,7 @@ export function checkPath(trust: Trust, path: string, where: string): void {
 
   // Always, in every mode: these are not things anybody screenshots.
   const secret = secretIn(full, trust.deny)
-  if (secret !== null) throw refuse(where, path, secret)
+  if (secret !== null) throw refuse(where, secret)
 
   if (!trust.untrusted) return
   const within = (root: string) => {

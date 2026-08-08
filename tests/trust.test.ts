@@ -159,7 +159,7 @@ describe('what is never read or written, in any mode', () => {
   })
 
   it('refuses them with the config trusted, which is the point', () => {
-    expect(() => checkPath(own(), '/project/.env', '`file:`')).toThrow(/does not read or write/)
+    expect(() => checkPath(own(), '/project/.env', '`file:`')).toThrow(/never read or written/)
     expect(() => checkPath(own(), '/project/.git/objects', 'install."x"')).toThrow(/"\.git"/)
   })
 })
@@ -197,7 +197,7 @@ describe('a name the project put out of bounds', () => {
 
   it('stops a folder, and everything under it, on the disk', () => {
     expect(() => checkPath(policy(['fake-secret']), '/project/fake-secret/a.png', 'i')).toThrow(
-      /this project forbids/,
+      /forbidden path/,
     )
     expect(() => checkPath(policy(['fake-secret']), '/project/public/a.png', 'i')).not.toThrow()
   })
@@ -209,32 +209,30 @@ describe('a name the project put out of bounds', () => {
       'https://rollful.dev/fake-secret/reports/q3',
       'https://api.rollful.dev/fake-secret',
     ]) {
-      expect(() => checkUrl(policy(['fake-secret']), url, '`url`'), url).toThrow(
-        /this project forbids/,
-      )
+      expect(() => checkUrl(policy(['fake-secret']), url, '`url`'), url).toThrow(/forbidden path/)
     }
     expect(() => checkUrl(policy(['fake-secret']), 'https://rollful.dev/public', 'x')).not.toThrow()
   })
 
   it('stops a name written as a glob, for files as well as folders', () => {
     expect(() => checkPath(policy(['*.sqlite']), '/project/db/customers.sqlite', 'x')).toThrow(
-      /this project forbids/,
+      /forbidden path/,
     )
     expect(() => checkPath(policy(['*.sqlite']), '/project/db/notes.md', 'x')).not.toThrow()
   })
 
   it('says it is a decision, and whose, rather than reading as a bug', () => {
     expect(() => checkPath(policy(['fake-secret']), '/project/fake-secret/a', 'x')).toThrow(
-      /ask whoever set it before taking it out/,
+      /ask your administrator/,
     )
     // The built-in list is not the project's doing, and does not claim to be.
-    expect(() => checkPath(policy([]), '/project/.env', 'x')).toThrow(/shotlist does not read/)
+    expect(() => checkPath(policy([]), '/project/.env', 'x')).toThrow(/never read or written/)
   })
 
   it('holds when the config is not trusted, because it can only refuse more', () => {
     const strict = trustFrom({ root: '/project', siteUrl: SITE, deny: ['fake-secret'] }, true)
     expect(() => checkUrl(strict, 'https://rollful.dev/fake-secret/', 'x')).toThrow(
-      /this project forbids/,
+      /forbidden path/,
     )
   })
 
@@ -246,9 +244,9 @@ describe('a name the project put out of bounds', () => {
       process.env['SHOTLIST_DENY'] = '/fake-secret, *.pdf'
       const fromEnv = trustFrom({ root: '/project', siteUrl: SITE }, false)
       expect(() => checkUrl(fromEnv, 'https://rollful.dev/fake-secret/x', 'x')).toThrow(
-        /this project forbids/,
+        /forbidden path/,
       )
-      expect(() => checkPath(fromEnv, '/project/docs/report.pdf', 'x')).toThrow(/forbids/)
+      expect(() => checkPath(fromEnv, '/project/docs/report.pdf', 'x')).toThrow(/forbidden path/)
       expect(() => checkPath(fromEnv, '/project/docs/report.png', 'x')).not.toThrow()
     } finally {
       if (before === undefined) delete process.env['SHOTLIST_DENY']
