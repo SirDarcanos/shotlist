@@ -529,6 +529,21 @@ validation:
 
 `dist/schema.json` is the config, `dist/macro.schema.json` is a macro.
 
+## Agent support
+
+A skill for coding agents ships with the package. It covers what this README deliberately
+does not: how to choose a query that survives a redesign, which side of a mark a label
+belongs on, and what each error means. Copy it into a project and an agent will pick it
+up:
+
+```bash
+mkdir -p .claude/skills
+cp -R node_modules/shotlist/skills/shotlist .claude/skills/
+```
+
+It is Markdown with YAML frontmatter and nothing else, so any agent that reads instruction
+files can use it — point yours at `node_modules/shotlist/skills/shotlist/SKILL.md`.
+
 ## License
 
 MIT © Nicola Mustone — see [LICENSE](./LICENSE).

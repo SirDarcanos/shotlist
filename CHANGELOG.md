@@ -12,6 +12,15 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **A skill for coding agents**, at `skills/shotlist/SKILL.md` in the package. The README
+  is reference — what every key does — and an agent writing its first recipe needs the
+  other half: that a query should key on what a person can see rather than on a generated
+  class name, that `pick: smallest` is what makes "the row containing X" resolve to the row
+  and not to `<body>`, that `ancestor: { pick: outermost }` is how you reach a dialog's
+  card out of its backdrop, and that shotlist places a label but cannot know which pixels
+  it must not point across. Copy it to `.claude/skills/`; it is Markdown with frontmatter,
+  so anything that reads instruction files can use it.
+
 - **`site.serve`, so a run can start the site it shoots.** Until now `site.url` had to be
   answering already, and nothing said whose job that was — which is fine at a desk with
   the dev server in another tab, and is the whole problem in CI. `serve: npm run dev`
