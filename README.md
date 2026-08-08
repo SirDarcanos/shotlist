@@ -93,6 +93,7 @@ The image is written to `screenshots/out/order-row.png`, and `--install` copies 
 | `paths.data`         | `screenshots/data`    | Where data files live                                                        |
 | `paths.out`          | `screenshots/out`     | Where images are written                                                     |
 | `install`            | `{}`                  | Named destinations you refer to by name in a recipe                          |
+| `deny`               | `[]`                  | File or folder names this project will not have read, written or opened      |
 | `finders`            | `{}`                  | Named query aliases (see [Finders](#finders))                                |
 | `check.threshold`    | `0.002`               | Fraction of pixels that may differ before `--check` calls a shot changed     |
 | `check.tolerance`    | `8`                   | How far one channel may move, out of 255, before a pixel counts as differing |
@@ -731,7 +732,7 @@ site:
   allow: [accounts.google.com] # a sign-in the flow passes through
 ```
 
-### Some paths are never touched — always
+### Some names are never touched — always
 
 Whatever the mode, shotlist will not read or write a path that goes through any of these:
 
@@ -744,7 +745,39 @@ Whatever the mode, shotlist will not read or write a path that goes through any 
 
 This is not about trust: a config you wrote has no reason to read your keys either, and a
 typo in an `install` destination should not be able to write into `.git`. There is no flag
-to turn it off.
+to turn it off. It applies to a URL's path too, so a recipe pointed at
+`https://your.site/.env` is refused for the same reason.
+
+### Names your project puts out of bounds
+
+Set up shotlist, decide `/fake-secret` is nobody's screenshot, and say so once:
+
+```yaml
+deny:
+  - fake-secret # a folder, and everything under it
+  - '*.sqlite' # a file
+```
+
+Someone who later writes a recipe for it gets told, in terms that say it was a decision:
+
+```
+recipe "reports": `url` — /fake-secret/reports goes through "fake-secret", which this
+project forbids. It is in `deny:` in the config, or in a --deny on the command line, or
+in SHOTLIST_DENY — ask whoever set it before taking it out.
+```
+
+Each entry matches **one segment of a path**, with `*` standing for any run of characters
+— so a folder name stops everything under it, and `*.sqlite` stops a file wherever it
+sits. It is checked against filesystem paths and URL paths alike: `/fake-secret` is out of
+bounds whether a recipe reaches it through the disk or through the site.
+
+**Three places can set it, and they are not equivalent.** `deny:` in the config is the
+project's own declaration — visible to everyone, and editable by anyone who can edit the
+config. `--deny` belongs to whoever runs the command. **`SHOTLIST_DENY`** — a list
+separated by commas or colons — belongs to whoever set the machine or the CI image up, and
+is the one a recipe author cannot edit their way out of. All three add up, and none of
+them can subtract: a `deny` is honoured even under `--untrusted`, because unlike
+`site.allow` it can only ever refuse more.
 
 ### `--untrusted`, for a config you did not write
 

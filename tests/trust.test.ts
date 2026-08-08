@@ -143,8 +143,8 @@ describe('what is never read or written, in any mode', () => {
 
   it('names the part of the path that stopped it, wherever it sits', () => {
     for (const part of named) {
-      expect(secretIn(`/project/${part}`), part).toBe(part)
-      expect(secretIn(`/project/${part}/nested/shot.png`), part).toBe(part)
+      expect(secretIn(`/project/${part}`), part).toEqual({ part, by: 'shotlist' })
+      expect(secretIn(`/project/${part}/nested/shot.png`), part).toEqual({ part, by: 'shotlist' })
     }
   })
 
@@ -184,5 +184,75 @@ describe('what the operator grants', () => {
     expect(() => checkPath(granted([], ['/shared/docs']), '/elsewhere/x.png', 'i')).toThrow(
       /--allow-path/,
     )
+  })
+})
+
+/**
+ * The case this exists for. An administrator sets shotlist up and puts `/fake-secret`
+ * out of bounds. Later somebody writes a recipe that shoots it, not knowing. They should
+ * be told, in terms that say it is a decision rather than a bug.
+ */
+describe('a name the project put out of bounds', () => {
+  const policy = (deny: string[]) => trustFrom({ root: '/project', siteUrl: SITE, deny }, false)
+
+  it('stops a folder, and everything under it, on the disk', () => {
+    expect(() => checkPath(policy(['fake-secret']), '/project/fake-secret/a.png', 'i')).toThrow(
+      /this project forbids/,
+    )
+    expect(() => checkPath(policy(['fake-secret']), '/project/public/a.png', 'i')).not.toThrow()
+  })
+
+  // "That folder" is as likely to mean a path on the site as one on the disk.
+  it('stops the same name served over http', () => {
+    for (const url of [
+      'https://rollful.dev/fake-secret/',
+      'https://rollful.dev/fake-secret/reports/q3',
+      'https://api.rollful.dev/fake-secret',
+    ]) {
+      expect(() => checkUrl(policy(['fake-secret']), url, '`url`'), url).toThrow(
+        /this project forbids/,
+      )
+    }
+    expect(() => checkUrl(policy(['fake-secret']), 'https://rollful.dev/public', 'x')).not.toThrow()
+  })
+
+  it('stops a name written as a glob, for files as well as folders', () => {
+    expect(() => checkPath(policy(['*.sqlite']), '/project/db/customers.sqlite', 'x')).toThrow(
+      /this project forbids/,
+    )
+    expect(() => checkPath(policy(['*.sqlite']), '/project/db/notes.md', 'x')).not.toThrow()
+  })
+
+  it('says it is a decision, and whose, rather than reading as a bug', () => {
+    expect(() => checkPath(policy(['fake-secret']), '/project/fake-secret/a', 'x')).toThrow(
+      /ask whoever set it before taking it out/,
+    )
+    // The built-in list is not the project's doing, and does not claim to be.
+    expect(() => checkPath(policy([]), '/project/.env', 'x')).toThrow(/shotlist does not read/)
+  })
+
+  it('holds when the config is not trusted, because it can only refuse more', () => {
+    const strict = trustFrom({ root: '/project', siteUrl: SITE, deny: ['fake-secret'] }, true)
+    expect(() => checkUrl(strict, 'https://rollful.dev/fake-secret/', 'x')).toThrow(
+      /this project forbids/,
+    )
+  })
+
+  // The config and the flags are both things a recipe author can edit. Whoever set the
+  // machine up can set this, and nothing in the project takes it back out.
+  it('can come from the environment, which a recipe cannot edit', () => {
+    const before = process.env['SHOTLIST_DENY']
+    try {
+      process.env['SHOTLIST_DENY'] = '/fake-secret, *.pdf'
+      const fromEnv = trustFrom({ root: '/project', siteUrl: SITE }, false)
+      expect(() => checkUrl(fromEnv, 'https://rollful.dev/fake-secret/x', 'x')).toThrow(
+        /this project forbids/,
+      )
+      expect(() => checkPath(fromEnv, '/project/docs/report.pdf', 'x')).toThrow(/forbids/)
+      expect(() => checkPath(fromEnv, '/project/docs/report.png', 'x')).not.toThrow()
+    } finally {
+      if (before === undefined) delete process.env['SHOTLIST_DENY']
+      else process.env['SHOTLIST_DENY'] = before
+    }
   })
 })

@@ -141,6 +141,14 @@ export const Config = z.object({
   install: z.record(z.string(), z.string()).default({}),
   /** Project-defined query aliases: `trackerRow: { css: …, contains: $1 }`. */
   finders: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Names this project will not have read or written, on top of the ones shotlist never
+   * touches. One path segment each, with `*` for any run of characters — so `*.sqlite`
+   * is a file and `fixtures` is a folder and everything under it.
+   *
+   * Honoured whether the config is trusted or not, because it can only ever refuse more.
+   */
+  deny: z.array(z.string()).default([]),
   check: z
     .object({
       /** The fraction of differing pixels a shot may have before it counts as changed. */

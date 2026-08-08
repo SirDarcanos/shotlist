@@ -39,6 +39,7 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
                     and nothing opened on the network this machine sits in
   --allow <host>    also open this host and anything under it; repeatable
   --allow-path <p>  also read and write under this directory; repeatable
+  --deny <name>     never read or write this file or folder name; repeatable
   --help            this
   --version         print the version`
 
@@ -101,6 +102,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         untrusted: { type: 'boolean', default: false },
         allow: { type: 'string', multiple: true },
         'allow-path': { type: 'string', multiple: true },
+        deny: { type: 'string', multiple: true },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
       },
@@ -150,7 +152,12 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         root: loaded.root,
         siteUrl: loaded.config.site.url,
         allow: loaded.config.site.allow,
-        granted: { hosts: values.allow ?? [], paths: values['allow-path'] ?? [] },
+        deny: loaded.config.deny,
+        granted: {
+          hosts: values.allow ?? [],
+          paths: values['allow-path'] ?? [],
+          deny: values.deny ?? [],
+        },
       },
       values.untrusted,
     )

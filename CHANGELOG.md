@@ -47,6 +47,16 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   keys, and `.pem` / `.key` / `.p12` / `.pfx` / `.keystore` / `.jks` files. Not about
   trust: a config you wrote has no reason to read your keys, and a typo in an `install`
   destination should not be able to write into `.git`.
+- **`deny:` in the config, `--deny` on the command line, and `SHOTLIST_DENY` in the
+  environment**, for names a project puts out of bounds on top of the ones shotlist never
+  touches. One path segment each, with `*` for any run of characters, so `fake-secret`
+  stops a folder and everything under it and `*.sqlite` stops a file. Checked against
+  filesystem paths and URL paths alike — `/fake-secret` is out of bounds whether a recipe
+  reaches it through the disk or through the site — and the refusal says it was a
+  decision and where it was made, rather than reading as a bug. All three add up and none
+  can subtract, so a `deny` holds even under `--untrusted`: unlike `site.allow` it can
+  only ever refuse more. The environment is the one a recipe author cannot edit their way
+  out of, which is what an administrator setting up a machine wants.
 - **`--allow <host>` and `--allow-path <dir>`**, repeatable, for what the operator wants
   reachable. Unlike `site.allow` they come from the command line, so they still mean
   something under `--untrusted`.

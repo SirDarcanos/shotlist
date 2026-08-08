@@ -30,6 +30,8 @@ export interface Trust {
    * config does not get a say.
    */
   paths: readonly string[]
+  /** What this project forbids on top of the names shotlist never touches. */
+  deny: readonly string[]
 }
 
 /**
@@ -53,12 +55,55 @@ const SECRET = [
   /\.(pem|key|p12|pfx|keystore|jks)$/i,
 ]
 
-/** The part of a path that is never allowed, or null when none of it is. */
-export function secretIn(path: string): string | null {
+/**
+ * A pattern for one segment of a path, where `*` stands for any run of characters.
+ *
+ * A glob rather than a regular expression on purpose: this is matched against every
+ * segment of every path a run touches, and a config supplying its own regex is a config
+ * supplying its own backtracking.
+ */
+function segmentPattern(glob: string): RegExp {
+  const escaped = glob.replace(/[.*+?^${}()|[\]\\]/g, (char) =>
+    char === '*' ? '\u0000' : `\\${char}`,
+  )
+  return new RegExp(`^${escaped.replace(/\u0000/g, '[^/\\\\]*')}$`, 'i')
+}
+
+/** A name that may not be touched, and who said so. */
+export interface Forbidden {
+  part: string
+  /** `shotlist` is the built-in list; `project` is a `deny:` entry or a `--deny` flag. */
+  by: 'shotlist' | 'project'
+}
+
+/**
+ * The part of a path that may not be touched, or null when none of it may not be.
+ *
+ * Works on a filesystem path and on the path of a URL alike: an administrator saying
+ * `/fake-secret` means it whether a recipe reaches it through the disk or through the
+ * site. `also` are the project's own additions, which can only ever make this stricter —
+ * which is why, unlike `site.allow`, they are honoured even when the config is not
+ * trusted. A config widening its reach is a claim; a config narrowing it is not.
+ */
+export function secretIn(path: string, also: readonly string[] = []): Forbidden | null {
+  const extra = also.map(segmentPattern)
   for (const part of path.split(/[\\/]+/).filter(Boolean)) {
-    if (SECRET.some((pattern) => pattern.test(part))) return part
+    if (SECRET.some((pattern) => pattern.test(part))) return { part, by: 'shotlist' }
+    if (extra.some((pattern) => pattern.test(part))) return { part, by: 'project' }
   }
   return null
+}
+
+/** How to say a name is off limits, in the terms of whoever put it off limits. */
+function refuse(where: string, what: string, found: Forbidden): ShotlistError {
+  return new ShotlistError(
+    found.by === 'shotlist'
+      ? `${where}: ${what} goes through "${found.part}", which shotlist does not read or ` +
+          'write in any mode.'
+      : `${where}: ${what} goes through "${found.part}", which this project forbids. It is ` +
+          'in `deny:` in the config, or in a --deny on the command line, or in ' +
+          'SHOTLIST_DENY — ask whoever set it before taking it out.',
+  )
 }
 
 /** Whether a host is the one named, or something under it. */
@@ -94,14 +139,30 @@ const PRIVATE =
 /** Hostnames the big clouds answer credentials on. */
 const METADATA = /^(metadata\.google\.internal|metadata\.goog|instance-data)$/i
 
+/**
+ * Names forbidden by the environment the run happens in.
+ *
+ * The config and the command line are both things a recipe author can edit. An
+ * administrator setting up a machine or a CI image can set this, and no recipe, config
+ * or flag can take it back out.
+ */
+function denyFromEnv(): string[] {
+  return (process.env['SHOTLIST_DENY'] ?? '')
+    .split(/[,:]/)
+    .map((name) => name.trim().replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+}
+
 /** Whether the operator asked for the untrusted rules, from the flag or the environment. */
 export function trustFrom(
   where: {
     root: string
     siteUrl: string
     allow?: readonly string[]
-    /** Hosts and directories the operator granted, which outlive `--untrusted`. */
-    granted?: { hosts?: readonly string[]; paths?: readonly string[] }
+    /** The project's own forbidden names, which hold whether it is trusted or not. */
+    deny?: readonly string[]
+    /** What the operator granted or forbade, which outlives `--untrusted`. */
+    granted?: { hosts?: readonly string[]; paths?: readonly string[]; deny?: readonly string[] }
   },
   flag: boolean,
 ): Trust {
@@ -118,6 +179,8 @@ export function trustFrom(
       ...(granted.hosts ?? []),
     ]),
     paths: (granted.paths ?? []).map((path) => resolve(where.root, path)),
+    // Both, always: neither can do anything but refuse more.
+    deny: [...(where.deny ?? []), ...(granted.deny ?? []), ...denyFromEnv()],
   }
 }
 
@@ -160,6 +223,9 @@ export function checkUrl(trust: Trust, url: string, where: string): void {
     )
   }
 
+  const forbidden = secretIn(decodeURIComponent(parsed.pathname), trust.deny)
+  if (forbidden !== null) throw refuse(where, parsed.pathname, forbidden)
+
   if (trust.untrusted && (PRIVATE.test(parsed.hostname) || METADATA.test(parsed.hostname))) {
     throw new ShotlistError(
       `${where}: ${parsed.hostname} is on the network the runner sits in, and this run is ` +
@@ -173,13 +239,8 @@ export function checkPath(trust: Trust, path: string, where: string): void {
   const full = isAbsolute(path) ? path : resolve(trust.root, path)
 
   // Always, in every mode: these are not things anybody screenshots.
-  const secret = secretIn(full)
-  if (secret !== null) {
-    throw new ShotlistError(
-      `${where}: ${path} goes through "${secret}", which shotlist does not read or write ` +
-        'in any mode.',
-    )
-  }
+  const secret = secretIn(full, trust.deny)
+  if (secret !== null) throw refuse(where, path, secret)
 
   if (!trust.untrusted) return
   const within = (root: string) => {
