@@ -1,6 +1,8 @@
 import type { Rect } from './query.js'
 
-export type Place = 'left' | 'right' | 'top' | 'bottom' | 'corner'
+export type Place = 'left' | 'right' | 'top' | 'bottom' | 'corner' | 'auto'
+/** The sides a label can actually be drawn on, once `auto` has been decided. */
+export type Side = 'left' | 'right' | 'top' | 'bottom'
 /** Eight anchor points on a box: the corners, and the middle of each edge. */
 export type Badge = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br'
 
@@ -239,13 +241,125 @@ export function drawAnnotations(spec: AnnotationSpec): {
     }
   }
 
+  /**
+   * Which side an `auto` label goes on.
+   *
+   * Two things decide it. A label on the left or the right grows the canvas by its
+   * *width*, one above or below by its *height* — on a wide shot that is a difference of
+   * several hundred pixels, and the widest label on a side sets the margin for all of
+   * them. And the arrow runs from the margin to the box, so a side whose path crosses
+   * something the recipe already pointed at, or masked, is one to avoid.
+   *
+   * What it cannot know is which of the *unmarked* pixels matter. `place:` is still
+   * there for that, and still beats this.
+   */
+  const SIDES: Side[] = ['bottom', 'top', 'right', 'left']
+  const chosen = new Map<Mark, Side>()
+  const taken: Record<Side, { from: number; to: number; size: number }[]> = {
+    left: [],
+    right: [],
+    top: [],
+    bottom: [],
+  }
+
+  /** Boxes an arrow should not be drawn across: everything called out, and every mask. */
+  const obstacles = (self: Mark) => [
+    ...marks.filter((mark) => mark !== self).map(rawBox),
+    ...(spec.masks ?? []).map((rect) => ({
+      left: rect.x,
+      top: rect.y,
+      right: rect.x + rect.width,
+      bottom: rect.y + rect.height,
+    })),
+  ]
+
+  for (const mark of labelled) {
+    if (mark.place !== 'auto') {
+      if (!mark.inside) {
+        const side = mark.place as Side
+        const b = rawBox(mark)
+        const size = sizes.get(mark)!
+        const across = side === 'left' || side === 'right'
+        taken[side].push({
+          from: across ? b.top : b.left,
+          to: across ? b.bottom : b.right,
+          size: across ? size.width : size.height,
+        })
+      }
+      continue
+    }
+    const b = rawBox(mark)
+    const size = sizes.get(mark)!
+    const blockers = obstacles(mark)
+
+    let best: Side = 'right'
+    let bestScore = Infinity
+    for (const side of SIDES) {
+      const across = side === 'left' || side === 'right'
+      // The strip the arrow travels down, from the edge of the shot to the box.
+      const corridor =
+        side === 'left'
+          ? { left: 0, right: b.left, top: b.top, bottom: b.bottom }
+          : side === 'right'
+            ? { left: b.right, right: image.width, top: b.top, bottom: b.bottom }
+            : side === 'top'
+              ? { left: b.left, right: b.right, top: 0, bottom: b.top }
+              : { left: b.left, right: b.right, top: b.bottom, bottom: image.height }
+      const crossed = blockers.filter(
+        (o) =>
+          o.left < corridor.right &&
+          o.right > corridor.left &&
+          o.top < corridor.bottom &&
+          o.bottom > corridor.top,
+      ).length
+
+      // What this label adds to the canvas, plus what it adds again by having to clear
+      // one already on that side: two labels whose extents overlap end up stacked.
+      const grows = across ? size.width : size.height
+      const from = across ? b.top : b.left
+      const to = across ? b.bottom : b.right
+      const stacked = taken[side]
+        .filter((other) => other.from < to && other.to > from)
+        .reduce((sum, other) => sum + other.size, 0)
+      // How far the arrow has to travel: a label sits outside the shot, so this is the
+      // gap between the box and *this* edge. Taking the nearest edge on the axis, as
+      // this did at first, scored left and right identically and never told them apart.
+      const distance =
+        side === 'left'
+          ? b.left
+          : side === 'right'
+            ? image.width - b.right
+            : side === 'top'
+              ? b.top
+              : image.height - b.bottom
+
+      const score = crossed * 100000 + grows + stacked + distance * 0.5
+      if (score < bestScore) {
+        bestScore = score
+        best = side
+      }
+    }
+    chosen.set(mark, best)
+    if (!mark.inside) {
+      const across = best === 'left' || best === 'right'
+      taken[best].push({
+        from: across ? b.top : b.left,
+        to: across ? b.bottom : b.right,
+        size: across ? size.width : size.height,
+      })
+    }
+  }
+
+  /** The side a label is drawn on: the recipe's, or the one `auto` settled on. */
+  const sideOf = (mark: Mark): Side => chosen.get(mark) ?? (mark.place as Side)
+
   // Only a label placed outside claims a margin; one placed inside sits over the shot.
   const margin = { left: 0, right: 0, top: 0, bottom: 0 }
   for (const mark of labelled) {
     if (mark.inside) continue
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
-    const side = mark.place as Exclude<Place, 'corner'>
+    const side = sideOf(mark)
     const need = side === 'left' || side === 'right' ? size.width + gap * 2 : size.height + gap * 2
     margin[side] = Math.max(margin[side], need)
 
@@ -485,7 +599,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
     const b = boxOf(mark)
-    let side = mark.place as Exclude<Place, 'corner'>
+    let side = sideOf(mark)
 
     const dx = px(mark.dx ?? 0)
     const dy = px(mark.dy ?? 0)

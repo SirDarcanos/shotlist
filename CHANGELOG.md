@@ -12,6 +12,16 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Changed
 
+- **`place` on a callout defaults to `auto`, which was `right`.** A label to the left or
+  right grows the canvas by its _width_ and one above or below by its _height_, so on a
+  wide shot the default cost hundreds of pixels of margin for no reason — a real recipe
+  here went from 3782×1524 to 2880×1654 by moving two labels off the sides. `auto` weighs
+  that against how far the arrow has to travel and whether its path crosses another mark
+  or a masked region. **A callout that relied on the old default now has to say
+  `place: right`**; an explicit side is obeyed exactly as before, and `numbered` discs are
+  unaffected because they are placed `corner`. What `auto` cannot see is the pixels
+  nobody pointed at, so a shot whose arrow must miss a paragraph still wants a named side.
+
 - **`ancestor` climbs from the element's parent, not from the element.** It started at the
   element itself, so whenever the filters happened to fit the element it answered with
   that — `{ heading: …, ancestor: { widerThan: 400, narrowerThan: 700 } }`, meant to climb

@@ -492,3 +492,51 @@ describe('masks', () => {
     expect(x).toBeGreaterThan(region.x)
   })
 })
+
+// A label on the left or right grows the canvas by its width, one above or below by its
+// height — and the arrow runs from the margin to the box, so a side whose path crosses
+// something already pointed at is one to avoid. `place:` still beats all of it.
+describe('place: auto', () => {
+  /** Which side a label ended up on, read off the canvas it produced. */
+  function side(result: { width: number; height: number; margin: { left: number; top: number } }) {
+    const grewX = result.width - IMAGE.width
+    const grewY = result.height - IMAGE.height
+    if (grewX >= grewY) return result.margin.left > 0 ? 'left' : 'right'
+    return result.margin.top > 0 ? 'top' : 'bottom'
+  }
+
+  const label = { text: 'What they owe', place: 'auto' } as const
+
+  it('takes the cheap axis: a wide label costs its height, not its width', () => {
+    // 13 characters wide against 20 tall, so beside the mark costs three times as much
+    // canvas as above it. The nearer edge of the two settles which.
+    expect(side(draw([mark(label)]))).toBe('top')
+  })
+
+  it('goes the other way rather than cross another mark', () => {
+    const blocker = mark({ rect: { x: 100, y: 20, width: 80, height: 20 }, place: 'corner' })
+    expect(side(draw([mark(label), blocker]))).toBe('bottom')
+  })
+
+  it('goes the other way rather than cross a mask', () => {
+    expect(side(draw([mark(label)], 2, [{ x: 90, y: 10, width: 100, height: 40 }]))).toBe('bottom')
+  })
+
+  it('leaves a side the recipe named alone', () => {
+    expect(side(draw([mark({ ...label, place: 'left' })]))).toBe('left')
+    expect(side(draw([mark({ ...label, place: 'bottom' })]))).toBe('bottom')
+  })
+
+  it('spreads two labels that would otherwise stack on one side', () => {
+    // Both marks are cheapest above, and their widths overlap — so the second would have
+    // to clear the first. Paying for that is what sends it the other way instead.
+    const together = draw([
+      mark({ ...label, rect: { x: 100, y: 100, width: 80, height: 20 } }),
+      mark({ ...label, rect: { x: 110, y: 140, width: 80, height: 20 } }),
+    ])
+    const grewAbove = together.margin.top
+    const grewBelow = together.height - IMAGE.height - grewAbove
+    expect(grewAbove).toBeGreaterThan(0)
+    expect(grewBelow).toBeGreaterThan(0)
+  })
+})

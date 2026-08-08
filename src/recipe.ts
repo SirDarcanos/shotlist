@@ -99,7 +99,12 @@ const Callout = z
     /** One line, or several. */
     text: z.union([z.string(), z.array(z.string())]).optional(),
     n: z.int().positive().optional(),
-    place: z.enum(['left', 'right', 'top', 'bottom', 'corner']).default('right'),
+    /**
+     * Which side of the mark the label sits on. `auto` weighs what each side would cost
+     * the canvas against what its arrow would have to cross, and is right often enough
+     * to be the default; name a side when the shot needs one.
+     */
+    place: z.enum(['left', 'right', 'top', 'bottom', 'corner', 'auto']).default('auto'),
     /** One of eight anchors on the box: a corner, or the middle of an edge. */
     badge: z.enum(['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br']).default('tl'),
     box: z.boolean().default(true),

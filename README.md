@@ -363,17 +363,21 @@ Labels always sit outside the screenshot, never over it, with an arrow reaching 
 canvas also grows for a box or a numbered disc that would otherwise be cut by the edge of
 the shot.
 
-**Choose the side with clear space.** The arrow travels from the margin to the box, so a
-label placed on the far side of another element draws an arrow straight across it. That is
-the one part of the layout shotlist cannot decide for you: it knows where the box is, not
-which pixels matter.
+**`place` defaults to `auto`, which picks a side.** A label to the left or right grows the
+canvas by its _width_, one above or below by its _height_ — on a wide shot that is a
+difference of hundreds of pixels. `auto` weighs that against how far the arrow would have
+to travel, and against whether its path would cross another mark or a masked region.
+
+What it cannot see is the pixels nobody pointed at. An arrow drawn across a paragraph is
+not something it knows to avoid, so **name a side when the shot needs one** — an explicit
+`place` is always obeyed.
 
 | Field    | Default   | What it does                                                                |
 | -------- | --------- | --------------------------------------------------------------------------- |
 | `mark`   | required  | Which mark to draw on                                                       |
 | `text`   | —         | Label text: one string, or a list with a line each                          |
 | `n`      | —         | Number shown in a disc, for matching a numbered list in the prose           |
-| `place`  | `right`   | `left`, `right`, `top`, `bottom`, or `corner` for a disc inside             |
+| `place`  | `auto`    | `auto`, `left`, `right`, `top`, `bottom`, or `corner` for a disc inside     |
 | `badge`  | `tl`      | Which anchor, with `place: corner`: `tl` `tc` `tr` `ml` `mr` `bl` `bc` `br` |
 | `box`    | `true`    | Whether to draw the outline                                                 |
 | `inside` | see below | Whether the label or disc sits over the shot instead of in a margin         |
