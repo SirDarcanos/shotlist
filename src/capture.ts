@@ -1,6 +1,6 @@
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { ShotlistError, fromRoot, mergeStyle } from './config.js'
+import { ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
 import type { Config, LoadedConfig, Style } from './config.js'
 import { expandSteps } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
@@ -19,6 +19,17 @@ export interface ShotResult {
   size: { width: number; height: number }
   /** Things worth saying that did not stop the shot — a font that fell back, so far. */
   warnings?: string[]
+}
+
+/**
+ * A failure during a shot, addressed by the key in the recipe that caused it.
+ *
+ * A project shoots many recipes in one run, and a query resolves against a page rather
+ * than against the document being validated — so without this the author is told what
+ * went wrong and not where they wrote it.
+ */
+function inRecipe(recipe: Recipe, path: string, cause: string): ShotlistError {
+  return new ShotlistError(`recipe "${recipe.name}": ${path} — ${cause}`)
 }
 
 /** The viewport, scale and theme this recipe runs at: the site's, with its own on top. */
@@ -125,12 +136,40 @@ async function annotate(
   }
 }
 
-/** Read the pixel size of a PNG from its header, for a recipe annotating an existing image. */
-function pngSize(png: Buffer): { width: number; height: number } {
-  if (png.length < 24 || png.readUInt32BE(0) !== 0x89504e47) {
-    throw new ShotlistError('not a PNG')
-  }
+/** The pixel size in a PNG's header, or null for anything that is not one. */
+function pngSize(png: Buffer): { width: number; height: number } | null {
+  if (png.length < 24 || png.readUInt32BE(0) !== 0x89504e47) return null
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+}
+
+/**
+ * Read the image a `source: file` recipe annotates, before a browser is launched.
+ *
+ * A path typo and a JPEG are both mistakes a person makes while writing the recipe, and
+ * neither should cost the second it takes to start Chromium before being reported.
+ */
+function sourceImage(
+  recipe: Recipe,
+  loaded: LoadedConfig,
+): { image: Buffer; pixels: { width: number; height: number } } {
+  const path = fromRoot(loaded, recipe.file!)
+  if (!existsSync(path)) {
+    throw inRecipe(
+      recipe,
+      '`file:`',
+      `no file at ${path} — a relative path is resolved from the config file's directory`,
+    )
+  }
+  const image = readFileSync(path)
+  const pixels = pngSize(image)
+  if (!pixels) {
+    throw inRecipe(
+      recipe,
+      '`file:`',
+      `${recipe.file} is not a PNG — the image size is read from a PNG header, so convert it first`,
+    )
+  }
+  return { image, pixels }
 }
 
 /**
@@ -152,6 +191,7 @@ export async function shoot(
   const outDir = fromRoot(loaded, config.paths.out)
   mkdirSync(outDir, { recursive: true })
   const file = join(outDir, `${recipe.name}.png`)
+  const source = recipe.source === 'file' ? sourceImage(recipe, loaded) : undefined
 
   // A caller shooting a whole set passes its own browser: launching one per recipe costs
   // about a second each, which over a project's worth of recipes is most of the run.
@@ -163,15 +203,17 @@ export async function shoot(
     let size: { width: number; height: number }
     let marks: Mark[]
 
-    if (recipe.source === 'file') {
-      image = readFileSync(fromRoot(loaded, recipe.file!))
-      const pixels = pngSize(image)
+    if (source) {
+      image = source.image
+      const pixels = source.pixels
       size = { width: pixels.width / settings.scale, height: pixels.height / settings.scale }
       const rects: Record<string, Rect> = {}
       for (const [name, query] of Object.entries(recipe.marks)) {
         if (!('rect' in (query as object))) {
-          throw new ShotlistError(
-            `mark "${name}" queries the page, but \`source: file\` has no page — give it a \`rect: [x, y, width, height]\``,
+          throw inRecipe(
+            recipe,
+            `marks.${name}`,
+            'queries the page, but `source: file` has no page — give it a `rect: [x, y, width, height]`',
           )
         }
         const [x, y, width, height] = (query as { rect: [number, number, number, number] }).rect
@@ -192,9 +234,27 @@ export async function shoot(
       })
       try {
         const page = await context.newPage()
-        await page.goto(settings.url, { waitUntil: 'load' })
+        // The site not being up is the first thing a new project gets wrong, and
+        // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
+        try {
+          await page.goto(settings.url, { waitUntil: 'load' })
+        } catch (error) {
+          throw inRecipe(
+            recipe,
+            recipe.url ? '`url`' : '`site.url`',
+            `could not open ${settings.url} — ${pageMessage(error)}. Is the site running?`,
+          )
+        }
         if (config.site.ready) {
-          await page.waitForSelector(config.site.ready, { timeout: config.site.timeout })
+          try {
+            await page.waitForSelector(config.site.ready, { timeout: config.site.timeout })
+          } catch {
+            throw inRecipe(
+              recipe,
+              '`site.ready`',
+              `waited ${config.site.timeout}ms at ${settings.url} for "${config.site.ready}", which never appeared`,
+            )
+          }
         }
         if (config.site.settle) await page.waitForTimeout(config.site.settle)
 
@@ -207,12 +267,25 @@ export async function shoot(
           timeout: config.site.timeout,
           newPage: () => context.newPage(),
         }
-        await runSteps(expandSteps(recipe.setup, library.macros), ctx)
+        try {
+          await runSteps(expandSteps(recipe.setup, library.macros), ctx)
+        } catch (error) {
+          throw inRecipe(recipe, 'setup', pageMessage(error))
+        }
 
-        const clip = await clipRect(recipe.clip, ctx, settings.viewport)
+        let clip: Rect
+        try {
+          clip = await clipRect(recipe.clip, ctx, settings.viewport)
+        } catch (error) {
+          throw inRecipe(recipe, 'clip', pageMessage(error))
+        }
         ctx.rects['clip'] = clip
         for (const [name, query] of Object.entries(recipe.marks)) {
-          ctx.rects[name] = (await resolveInPage(ctx.page, query, ctx)).rect
+          try {
+            ctx.rects[name] = (await resolveInPage(ctx.page, query, ctx)).rect
+          } catch (error) {
+            throw inRecipe(recipe, `marks.${name}`, pageMessage(error))
+          }
         }
 
         image = await ctx.page.screenshot({ clip, animations: 'disabled' })

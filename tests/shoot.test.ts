@@ -82,6 +82,59 @@ describe('shoot', () => {
   })
 })
 
+// A query is resolved by a function serialized into the browser, so a failure arrives as
+// `page.evaluateHandle: Error: …` with a JavaScript stack through `UtilityScript`. The
+// person reading it is editing YAML: it has to say which recipe, and which key in it.
+describe('a query that matches nothing', () => {
+  /** Shoot `order-row` with one key replaced, and return the error it threw. */
+  async function failure(patch: Record<string, unknown>): Promise<Error> {
+    const { loaded, library } = project()
+    const recipe = { ...library.recipes.get('order-row')!, ...patch }
+    return shoot(recipe, library, loaded).then(
+      () => {
+        throw new Error('the shot was expected to fail')
+      },
+      (error: Error) => error,
+    )
+  }
+
+  const nowhere = { css: '.no-such-thing-anywhere' }
+
+  it('names the recipe and the mark', { timeout: 120_000 }, async () => {
+    const error = await failure({ marks: { amount: nowhere }, callouts: [] })
+    expect(error.message).toBe(
+      'recipe "order-row": marks.amount — no element matched {"css":".no-such-thing-anywhere"}',
+    )
+  })
+
+  it('names the clip', { timeout: 120_000 }, async () => {
+    const error = await failure({ clip: nowhere, marks: {}, callouts: [] })
+    expect(error.message).toMatch(/^recipe "order-row": clip — no element matched /)
+  })
+
+  it('names the step that could not find its element', { timeout: 120_000 }, async () => {
+    const error = await failure({ setup: [{ click: nowhere }], marks: {}, callouts: [] })
+    expect(error.message).toMatch(/^recipe "order-row": setup — `click`: no element matched /)
+  })
+
+  it("keeps Playwright's own wrapping out of it", { timeout: 120_000 }, async () => {
+    const error = await failure({ marks: { amount: nowhere }, callouts: [] })
+    expect(error.message).not.toMatch(/evaluateHandle|UtilityScript|\n\s+at /)
+  })
+})
+
+describe('a site that is not up', () => {
+  it('names the key holding the url, and asks whether it is running', async () => {
+    const { loaded, library } = project()
+    // Port 1 is reserved, so nothing can be listening on it and the connection is
+    // refused rather than left to time out.
+    const recipe = { ...library.recipes.get('order-row')!, url: 'http://127.0.0.1:1/' }
+    await expect(shoot(recipe, library, loaded)).rejects.toThrow(
+      /^recipe "order-row": `url` — could not open http:\/\/127\.0\.0\.1:1\/ — .*Is the site running\?$/s,
+    )
+  }, 120_000)
+})
+
 describe('source: file', () => {
   it(
     'annotates an image already on disk, with no page to query',
@@ -110,7 +163,31 @@ describe('source: file', () => {
       marks: { due: { css: '.card' } },
     }
     await expect(shoot(recipe, library, loaded)).rejects.toThrow(
-      /has no page — give it a `rect: \[x, y, width, height\]`/,
+      /^recipe "annotated": marks\.due — queries the page, but `source: file` has no page — give it a `rect: \[x, y, width, height\]`$/,
+    )
+  })
+
+  // Both are mistakes made while writing the recipe, so both are refused before a browser
+  // is needed at all. `unusable` fails the test if one is reached: without it, "reported
+  // early" is a claim no assertion here would notice being broken.
+  const unusable = {
+    newContext: () => Promise.reject(new Error('a browser was used')),
+    close: () => Promise.resolve(),
+  }
+
+  it('says where it looked for a file that is not there', async () => {
+    const { loaded, library } = project()
+    const recipe = { ...library.recipes.get('annotated')!, file: 'incoming/not-here.png' }
+    await expect(shoot(recipe, library, loaded, { browser: unusable })).rejects.toThrow(
+      /^recipe "annotated": `file:` — no file at .*incoming\/not-here\.png — a relative path is resolved from the config file's directory$/,
+    )
+  })
+
+  it('says a file that is not a PNG is not one, rather than failing on its header', async () => {
+    const { loaded, library } = project()
+    const recipe = { ...library.recipes.get('annotated')!, file: 'shotlist.config.yaml' }
+    await expect(shoot(recipe, library, loaded, { browser: unusable })).rejects.toThrow(
+      /^recipe "annotated": `file:` — shotlist\.config\.yaml is not a PNG — the image size is read from a PNG header, so convert it first$/,
     )
   })
 })

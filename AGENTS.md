@@ -1,4 +1,4 @@
-# Contributing to shotlist
+# Building shotlist
 
 Read this before writing code. It is how shotlist is built, and it is the source of
 truth for the rules. Setup, commands and releases are in [`CONTRIBUTING.md`](./CONTRIBUTING.md).

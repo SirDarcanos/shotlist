@@ -132,6 +132,19 @@ export function formatIssues(error: z.ZodError): string {
     .join('\n')
 }
 
+/**
+ * The page's own complaint, without Playwright's call prefix or the in-page stack.
+ *
+ * A query is resolved by a function serialized into the browser, so a failure arrives
+ * wrapped: `page.evaluateHandle: Error: no element matched {…}` followed by a JavaScript
+ * stack through `UtilityScript`. The person reading it is editing YAML, and none of that
+ * is about their recipe.
+ */
+export function pageMessage(error: unknown): string {
+  const [first = ''] = String((error as Error | undefined)?.message ?? error).split('\n')
+  return first.replace(/^page\.\w+:\s*/, '').replace(/^Error:\s*/, '')
+}
+
 /** Parse a YAML or JSON document, reporting the file and the parser's own line and column. */
 export function readDocument(file: string): unknown {
   const text = readFileSync(file, 'utf8')

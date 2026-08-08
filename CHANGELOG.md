@@ -6,9 +6,37 @@ Notable changes to shotlist. The format follows
 
 **The recipe format is public API.** Renaming a step verb, removing a query key, or
 changing what an existing key means is a breaking change, and says here exactly what to
-edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
+edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
+
+### Fixed
+
+- **A query that matched nothing reported itself in JavaScript.** The message was
+  `page.evaluateHandle: Error: no element matched {…}` followed by a stack through
+  `UtilityScript` — the query language is resolved by a function serialized into the
+  browser, and the wrapping came out with it. It is the failure a recipe hits most often,
+  and it named neither the recipe nor which of its keys was being resolved, so a project
+  shooting a set of recipes was told what went wrong and not where it was written. A
+  failure now reads `recipe "order-row": marks.amount — no element matched {…}`, and says
+  `clip`, or ``setup — `click`:``, when it was one of those instead.
+- **A site that was not running said `net::ERR_CONNECTION_REFUSED`.** The first thing a new
+  project gets wrong is the one error that did not say which key to look at. It now names
+  `site.url` — or the recipe's own `url` — and asks whether the site is up. A `site.ready`
+  selector that never appears is likewise reported against `site.ready`, with what it
+  waited for and for how long.
+- **`source: file` failed on the PNG header rather than on the file.** A path that did not
+  exist raised a bare `ENOENT` naming an absolute path nobody had written, and anything
+  that was not a PNG raised `not a PNG` — no recipe, no filename, no fix. Both now name
+  the recipe and `file:`, and both are checked before a browser is launched, since a typo
+  should not cost the second it takes to start one.
+
+- **The README's reference tables had fallen behind the schemas they describe.**
+  `startsWith` and `exact` on a query, `inside`, `dx` and `dy` on a callout, `comment` on
+  any step, and `viewport` on `openPage` all worked but appeared nowhere, and the CLI
+  section was missing `--check <name>`, `--help` and `--version`. `style.number.fill` is a
+  fallback to `color` rather than the fixed `#DC2626` the defaults block implied, so a
+  project changing `color` was told its discs would stay red.
 
 ## [0.2.3] — 2026-08-06
 

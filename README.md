@@ -107,7 +107,11 @@ style:
     strokeWidth: 6 # centred on the outline, so half of it is under the fill
     gap: 40 # distance from the box
     fontUrl: # optional stylesheet to load before drawing — see Fonts
-  number: { radius: 26, size: 40, fill: '#DC2626', text: '#FFFFFF' }
+  number:
+    radius: 26
+    size: 40
+    fill: '#DC2626' # the disc; defaults to `color`
+    text: '#FFFFFF' # the numeral
 ```
 
 Sizes are in image pixels, so they do not change when `scale` does.
@@ -188,8 +192,10 @@ Each step is a mapping led by one verb. Some verbs take extra keys.
 | `repeat: <n>` + `steps:`         | Run steps n times                                     |
 | `each: <list>` + `as:`, `steps:` | Run steps once per item                               |
 | `optional: [steps]`              | Run steps, ignoring failures                          |
-| `openPage: <url>` + `as:`        | Open a second page and name it                        |
+| `openPage: <url>` + `as:`        | Open a second page and name it; `viewport:` sizes it  |
 | `usePage: <name>`                | Switch which page later steps drive                   |
+
+Any step also takes `comment:`, for a note to the next person reading the recipe.
 
 There is no step that evaluates JavaScript. If a screenshot cannot be described with
 these, that is a missing verb — see
@@ -210,7 +216,12 @@ candidates, filters narrow them, traversal moves from them, and selection picks 
 | `placeholder` | Input by placeholder text                   |
 | `testid`      | `data-testid`                               |
 | `text`        | Element whose trimmed text equals the value |
+| `startsWith`  | Element whose trimmed text begins with it   |
 | `heading`     | `h1`–`h6` with this exact text              |
+
+`text` and `startsWith` also narrow a source written alongside them. `exact: true` makes
+`role`+`name`, `label` and `placeholder` match the whole string, case-sensitively, instead
+of a substring.
 
 ### Filters
 
@@ -294,16 +305,23 @@ label placed on the far side of another element draws an arrow straight across i
 the one part of the layout shotlist cannot decide for you: it knows where the box is, not
 which pixels matter.
 
-| Field   | Default  | What it does                                                      |
-| ------- | -------- | ----------------------------------------------------------------- |
-| `mark`  | required | Which mark to draw on                                             |
-| `text`  | —        | Label text                                                        |
-| `n`     | —        | Number shown in a disc, for matching a numbered list in the prose |
-| `place` | `right`  | `left`, `right`, `top`, `bottom`, or `corner` for a disc inside   |
-| `badge` | `tl`     | Which corner, with `place: corner`                                |
-| `box`   | `true`   | Whether to draw the outline                                       |
-| `pad`   | style's  | Distance between the outline and the element                      |
-| `gap`   | style's  | Distance between the label and the outline                        |
+| Field    | Default   | What it does                                                                |
+| -------- | --------- | --------------------------------------------------------------------------- |
+| `mark`   | required  | Which mark to draw on                                                       |
+| `text`   | —         | Label text: one string, or a list with a line each                          |
+| `n`      | —         | Number shown in a disc, for matching a numbered list in the prose           |
+| `place`  | `right`   | `left`, `right`, `top`, `bottom`, or `corner` for a disc inside             |
+| `badge`  | `tl`      | Which anchor, with `place: corner`: `tl` `tc` `tr` `ml` `mr` `bl` `bc` `br` |
+| `box`    | `true`    | Whether to draw the outline                                                 |
+| `inside` | see below | Whether the label or disc sits over the shot instead of in a margin         |
+| `dx`     | `0`       | Nudge across, in image pixels, for what geometry alone cannot place         |
+| `dy`     | `0`       | Nudge down, in image pixels                                                 |
+| `pad`    | style's   | Distance between the outline and the element                                |
+| `gap`    | style's   | Distance between the label and the outline                                  |
+
+A label defaults to `inside: false`, in a margin the canvas grows to make; a disc
+(`place: corner`) defaults to `inside: true`, on the box itself. Outside never covers the
+interface but costs width, so a shot with clear space beside the mark is worth `inside: true`.
 
 `numbered: [a, b, c]` is shorthand for one numbered disc per mark, in order. Give it the
 style every disc shares by writing it out:
@@ -385,7 +403,17 @@ npx shotlist <name> [<name>…]     # shoot into paths.out
 npx shotlist <name> --install     # …and copy to its install destination
 npx shotlist --all --install      # shoot everything
 npx shotlist --check              # compare against committed images
+npx shotlist --check <name>       # …just these ones
 npx shotlist --config <file>      # use a specific config
+npx shotlist --help               # the same list, from the tool
+npx shotlist --version            # print the version
+```
+
+It exits non-zero when anything failed, and names the recipe and the key inside it that
+could not be resolved:
+
+```
+recipe "order-row": marks.amount — no element matched {"css":".amount"}
 ```
 
 ## Using it from code

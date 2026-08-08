@@ -1,4 +1,4 @@
-import { ShotlistError } from './config.js'
+import { ShotlistError, pageMessage } from './config.js'
 import { interpolate } from './recipe.js'
 import { resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
@@ -46,17 +46,21 @@ export async function resolve(
   query: QueryInput,
   ctx: Pick<RunContext, 'rects' | 'viewport'>,
 ): Promise<{ rect: Rect; element: ElementHandle | null }> {
-  const seeds = await seedsFor(page, query)
-  const handle = await page.evaluateHandle(resolveQuery, {
-    spec: query,
-    viewport: ctx.viewport,
-    rects: ctx.rects,
-    ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
-  })
-  const rect = await handle.evaluate((r) => r.rect)
-  const element = (await handle.getProperty('element')).asElement()
-  await handle.dispose()
-  return { rect, element }
+  try {
+    const seeds = await seedsFor(page, query)
+    const handle = await page.evaluateHandle(resolveQuery, {
+      spec: query,
+      viewport: ctx.viewport,
+      rects: ctx.rects,
+      ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
+    })
+    const rect = await handle.evaluate((r) => r.rect)
+    const element = (await handle.getProperty('element')).asElement()
+    await handle.dispose()
+    return { rect, element }
+  } catch (error) {
+    throw error instanceof ShotlistError ? error : new ShotlistError(pageMessage(error))
+  }
 }
 
 /** Resolve a query to an element, failing with the query itself when nothing matched. */
@@ -66,11 +70,16 @@ async function elementFor(
   ctx: RunContext,
   verb: string,
 ): Promise<ElementHandle> {
-  const { element } = await resolve(page, query, ctx)
-  if (!element) {
+  let found: { element: ElementHandle | null }
+  try {
+    found = await resolve(page, query, ctx)
+  } catch (error) {
+    throw new ShotlistError(`\`${verb}\`: ${(error as Error).message}`)
+  }
+  if (!found.element) {
     throw new ShotlistError(`\`${verb}\` needs an element, and ${JSON.stringify(query)} is a box`)
   }
-  return element
+  return found.element
 }
 
 /**
