@@ -481,7 +481,17 @@ export async function shoot(
           }
         }
 
-        image = await ctx.page.screenshot({ clip, animations: 'disabled' })
+        // A clip is measured against the viewport, and so are the marks inside it — but a
+        // screenshot only reaches past the fold with `fullPage`, and then its clip is
+        // measured against the page. Without this, `clip: full` quietly returned one
+        // viewport: the tall half of the page was never in the picture.
+        const below = clip.y + clip.height > settings.viewport.height
+        const scrolled = below ? await ctx.page.evaluate(() => window.scrollY, undefined) : 0
+        image = await ctx.page.screenshot({
+          clip: below ? { ...clip, y: clip.y + scrolled } : clip,
+          ...(below ? { fullPage: true } : {}),
+          animations: 'disabled',
+        })
         size = { width: clip.width, height: clip.height }
         marks = marksFor(recipe, ctx.rects, clip)
       } finally {
@@ -565,14 +575,15 @@ async function clipRect(
     return { x: 0, y: 0, width: viewport.width, height }
   }
   const { rect } = await resolveInPage(ctx.page, clip as QueryInput, ctx)
-  // Whole pixels, and inside the viewport: a clip that runs past the edge is refused by
-  // the screenshot rather than trimmed.
+  // Whole pixels, and no wider than the viewport: a fractional clip comes back a pixel
+  // short, and nothing widens the page the way `fullPage` lengthens it. Height is left
+  // alone — a region taller than the fold is one of the ordinary things to shoot.
   const x = Math.max(0, Math.floor(rect.x))
   const y = Math.max(0, Math.floor(rect.y))
   return {
     x,
     y,
     width: Math.min(Math.ceil(rect.width), viewport.width - x),
-    height: Math.min(Math.ceil(rect.height), viewport.height - y),
+    height: Math.ceil(rect.height),
   }
 }

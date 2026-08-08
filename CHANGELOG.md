@@ -54,6 +54,12 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Fixed
 
+- **`clip: full` returned one viewport, not the page.** Playwright clamps a clip to the
+  viewport unless `fullPage` is set, so the documented way to shoot a whole page silently
+  gave back its top and nothing else. A clip that reaches past the fold is taken with
+  `fullPage` now — and a query clip is no longer trimmed to the viewport height either, so
+  a region taller than the fold is shot whole rather than cut off at it.
+
 - **`style.label.fontUrl` could not name a font the project ships.** A relative path was
   refused, and an absolute `file:` URL was accepted and then silently did nothing — the
   drawing page is built with `setContent`, so it has no file origin and a browser gives it

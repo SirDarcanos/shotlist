@@ -153,3 +153,51 @@ describe('a page shaped like a real one', () => {
     },
   )
 })
+
+// A screenshot only reaches past the fold with `fullPage`, and Playwright clamps a clip
+// to the viewport without it — so `clip: full` quietly returned one viewport, and the
+// tall half of every page was never in the picture.
+describe('a shot taller than the viewport', () => {
+  const size = (file: string) => {
+    const png = readFileSync(file)
+    return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+  }
+
+  it('reaches the bottom of the page with clip: full', { timeout: 120_000 }, async () => {
+    const root = project({ whole: 'name: whole\nclip: full\n' })
+    await cli(root, ['whole'])
+    // The page is a hero, a plans grid, a table and a footer: several viewports of it.
+    const shot = size(join(root, 'out/whole.png'))
+    expect(shot.height).toBeGreaterThan(850)
+  })
+
+  it(
+    'keeps a region that runs past the fold, rather than trimming it',
+    {
+      timeout: 120_000,
+    },
+    async () => {
+      // `.wrap` holds the whole page, so its box is far taller than the 850 it is shot at.
+      const root = project({ tall: 'name: tall\nclip: { css: .wrap }\n' })
+      await cli(root, ['tall'])
+      expect(size(join(root, 'out/tall.png')).height).toBeGreaterThan(850)
+    },
+  )
+
+  it('still marks the right region in one that does', { timeout: 120_000 }, async () => {
+    // Marks are measured against the viewport and the clip against the page, so a shot
+    // this tall is where the two disagree if the offset is wrong.
+    const root = project({
+      deep: [
+        'name: deep',
+        'clip: full',
+        'marks: { credits: { css: .credits } }',
+        'callouts: [{ mark: credits, text: Who made it }]',
+        '',
+      ].join('\n'),
+    })
+    const { code, err } = await cli(root, ['deep'])
+    expect(err).toBe('')
+    expect(code).toBe(0)
+  })
+})
