@@ -21,6 +21,13 @@ postinstall downloads browsers.
 
 ## Quick start
 
+```bash
+npx shotlist --init
+```
+
+writes a commented `shotlist.config.yaml` and a first recipe to edit. Or set the two up
+by hand:
+
 **1. Configure the project once** — `shotlist.config.yaml` in the project root:
 
 ```yaml
@@ -541,6 +548,7 @@ version because nothing wrote one.
 ## CLI
 
 ```bash
+npx shotlist --init               # write a starter config and recipe
 npx shotlist                      # list every recipe
 npx shotlist <name> [<name>…]     # shoot into paths.out
 npx shotlist <name> --install     # …and copy to its install destination
@@ -548,6 +556,7 @@ npx shotlist --all --install      # shoot everything
 npx shotlist --all --keep-going   # …carrying on past a recipe that fails
 npx shotlist --check              # compare against committed images
 npx shotlist --check <name>       # …just these ones
+npx shotlist --check --diff       # …and write a before/after/changed image
 npx shotlist --config <file>      # use a specific config
 npx shotlist --help               # the same list, from the tool
 npx shotlist --version            # print the version

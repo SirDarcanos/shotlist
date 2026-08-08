@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { ShotlistError, fromRoot, loadConfig } from './config.js'
 import { loadLibrary, withNumbering } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
@@ -12,6 +12,7 @@ import type { Retry } from './capture.js'
 import { check } from './check.js'
 import { loadPlaywright } from './playwright.js'
 import { withServer } from './serve.js'
+import { scaffold } from './init.js'
 import {
   BASELINE_FILE,
   describeEnvironment,
@@ -22,6 +23,7 @@ import {
 
 const USAGE = `shotlist — annotated UI screenshots from YAML recipes
 
+  shotlist --init                write a starter config and recipe
   shotlist                       list every recipe
   shotlist <name>...             shoot these recipes into the out directory
   shotlist <name>... --install   …and copy each to its install destination
@@ -82,6 +84,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
       args: [...argv],
       allowPositionals: true,
       options: {
+        init: { type: 'boolean', default: false },
         install: { type: 'boolean', default: false },
         all: { type: 'boolean', default: false },
         check: { type: 'boolean', default: false },
@@ -106,6 +109,19 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
   if (values.version) {
     const pkg = createRequire(import.meta.url)('../package.json') as { version: string }
     io.out(pkg.version)
+    return 0
+  }
+
+  // Before anything is loaded: this is the command for a project that has no config.
+  if (values.init) {
+    const target = resolve(values.config ?? 'shotlist.config.yaml')
+    const made = scaffold(target)
+    for (const { file, written } of made) {
+      io.out(written ? `  wrote ${file}` : `  left ${file} alone, it is already there`)
+    }
+    if (made.some((one) => one.written)) {
+      io.out('\nStart the site, then shoot it:\n  npx shotlist example')
+    }
     return 0
   }
 

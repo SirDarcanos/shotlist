@@ -12,6 +12,13 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`--init`**, writing a commented `shotlist.config.yaml` and a first recipe. Starting a
+  project meant copying two files out of the README into an empty directory and finding
+  out which keys were required by being told. The scaffold parses, so `npx shotlist`
+  lists `example` straight after it, and the recipe carries the `yaml-language-server`
+  line that turns on editor completion. Neither file is overwritten: run it in a project
+  that already has recipes and it writes only the half that was missing.
+
 - **`--check --diff`, so a drift report shows what moved.** `2.13% of pixels differ` says
   a shot changed and nothing about how, which is the thing you need before deciding
   whether to bless it or fix it. It now writes a three-up per changed shot into

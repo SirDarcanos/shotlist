@@ -1,4 +1,5 @@
-import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { run } from '../src/cli.js'
@@ -22,7 +23,12 @@ async function cli(root: string, args: string[]) {
   return { code, out: out.join('\n'), err: err.join('\n') }
 }
 
-afterEach(removeProjects)
+const made: string[] = []
+
+afterEach(() => {
+  removeProjects()
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
 
 describe('shotlist', () => {
   it('lists the recipes when given nothing to do', async () => {
@@ -160,6 +166,44 @@ describe('mask', () => {
 
 // A percentage says a shot moved. It does not say what moved, which is the thing you
 // actually need before deciding whether to bless it.
+// The first five minutes: a project with no config, and a README to copy from.
+describe('--init', () => {
+  /** An empty directory, and the CLI pointed at a config inside it. */
+  function blank() {
+    const root = mkdtempSync(join(tmpdir(), 'shotlist-init-'))
+    made.push(root)
+    return { root, config: join(root, 'shotlist.config.yaml') }
+  }
+
+  it('writes a config and a recipe that the tool can then read', async () => {
+    const { root, config } = blank()
+    const io = { out: (line: string) => lines.push(line), err: () => {} }
+    const lines: string[] = []
+    expect(await run(['--init', '--config', config], io)).toBe(0)
+
+    expect(existsSync(config)).toBe(true)
+    expect(existsSync(join(root, 'screenshots/recipes/example.yaml'))).toBe(true)
+
+    // The scaffold has to parse: one that does not is worse than none at all.
+    const listed = await cli(root, [])
+    expect(listed.code).toBe(0)
+    expect(listed.out).toBe('example')
+  })
+
+  it('leaves anything already there alone', async () => {
+    const { root, config } = blank()
+    writeFileSync(config, 'site: { url: http://example.test }\n')
+    const io = { out: (line: string) => lines.push(line), err: () => {} }
+    const lines: string[] = []
+    await run(['--init', '--config', config], io)
+
+    expect(readFileSync(config, 'utf8')).toBe('site: { url: http://example.test }\n')
+    expect(lines.join('\n')).toContain('already there')
+    // The half that was missing is still written.
+    expect(existsSync(join(root, 'screenshots/recipes/example.yaml'))).toBe(true)
+  })
+})
+
 describe('--diff', () => {
   /** Install order-row, then make what is committed for it a different picture. */
   async function drifted(width: 'same' | 'other') {
