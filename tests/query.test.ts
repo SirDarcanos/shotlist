@@ -68,34 +68,40 @@ describe('a source Playwright resolves', () => {
   })
 })
 
-// Negative counts from the end, the way `Array.at` does. `-1` is another way of saying
-// `pick: last`; `-2` is the only way of saying the one before it.
+// Negative counts from the end, the way `Array.at` does. Checked against a list of four,
+// so that no assertion here holds only because the list is as long as the index is deep:
+// in a list of two, `-2` and `0` are the same element, and that proves nothing.
 describe('a position counted from the end', () => {
-  const ROWS = [
-    { x: 12, y: 72, width: 376, height: 44 },
-    { x: 12, y: 124, width: 376, height: 44 },
+  // The bar, in order: New order, Import, Export, Settings.
+  const BAR = [
+    { x: 16, y: 14, width: 90, height: 32 },
+    { x: 118, y: 14, width: 80, height: 32 },
+    { x: 210, y: 14, width: 120, height: 32 },
+    { x: 342, y: 14, width: 64, height: 32 },
   ]
+  const button = (over: object) => find({ css: '.bar button', ...over })
 
-  it('reads nth: -1 as the last match and nth: -2 as the one before it', () => {
-    expect(find({ css: '.row', nth: -1 })).toEqual(ROWS[1])
-    expect(find({ css: '.row', nth: -2 })).toEqual(ROWS[0])
+  it('walks back from the last one, one at a time', () => {
+    expect(button({ nth: -1 })).toEqual(BAR[3])
+    expect(button({ nth: -2 })).toEqual(BAR[2])
+    expect(button({ nth: -3 })).toEqual(BAR[1])
+    expect(button({ nth: -4 })).toEqual(BAR[0])
   })
 
-  it('agrees with the ways already there of saying the same thing', () => {
-    expect(find({ css: '.row', nth: -1 })).toEqual(find({ css: '.row', pick: 'last' }))
-    expect(find({ css: '.row', nth: -2 })).toEqual(find({ css: '.row', nth: 0 }))
+  it('agrees with `pick: last`, which is true whatever the length', () => {
+    expect(button({ nth: -1 })).toEqual(button({ pick: 'last' }))
   })
 
-  it('reads child: -1 as the last child and child: -2 as the one before it', () => {
+  it('says nothing is there when it counts back past the start', () => {
+    expect(() => button({ nth: -5 })).toThrow(/no element at the requested position/)
+  })
+
+  it('reads child: -1 as the last child and -2 as the one before it', () => {
     // The row holds three spans and then the Edit button.
     const row = { css: '.row', contains: 'Acme Corp', pick: 'smallest' as const }
     expect(find({ ...row, child: -1 })).toEqual({ x: 300, y: 80, width: 76, height: 28 })
     expect(find({ ...row, child: -2 })).toEqual({ x: 172, y: 84, width: 52, height: 20 })
-    expect(find({ ...row, child: -1 })).toEqual(find({ ...row, child: 3 }))
-  })
-
-  it('says nothing is there when it counts back past the start', () => {
-    expect(() => find({ css: '.row', nth: -99 })).toThrow(/no element at the requested position/)
+    expect(find({ ...row, child: -3 })).toEqual({ x: 92, y: 84, width: 70, height: 20 })
   })
 })
 
