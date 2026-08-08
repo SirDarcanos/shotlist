@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseConfig } from '../src/config.js'
 import { drawAnnotations } from '../src/annotate.js'
 import type { DrawStyle, Mark } from '../src/annotate.js'
@@ -32,7 +32,6 @@ function mark(over: Partial<Mark> = {}): Mark {
     place: 'right',
     badge: 'tl',
     box: true,
-    inside: false,
     ...over,
   }
 }
@@ -538,5 +537,70 @@ describe('place: auto', () => {
     const grewBelow = together.height - IMAGE.height - grewAbove
     expect(grewAbove).toBeGreaterThan(0)
     expect(grewBelow).toBeGreaterThan(0)
+  })
+})
+
+// A label over the shot costs no canvas at all and needs only a stub of an arrow — but
+// only where it would cover nothing, which marks and masks cannot say. The pixels can.
+describe('place: auto, over the shot', () => {
+  const real = HTMLCanvasElement.prototype.getContext
+
+  /** Give the layer a shot to read: blank, or inked where `busy` says. */
+  function shotOf(busy?: (x: number, y: number) => boolean) {
+    const img = document.getElementById('shotlist-image')!
+    for (const [key, value] of [
+      ['naturalWidth', IMAGE.width * 2],
+      ['naturalHeight', IMAGE.height * 2],
+    ] as const) {
+      Object.defineProperty(img, key, { value, configurable: true })
+    }
+    HTMLCanvasElement.prototype.getContext = (() => ({
+      drawImage: () => {},
+      // The label measurer asks the same kind of context for text metrics; without this
+      // it falls over rather than falling back to the metric box as it does under jsdom.
+      font: '',
+      measureText: () => ({}),
+      getImageData: (_x: number, _y: number, width: number, height: number) => {
+        const data = new Uint8ClampedArray(width * height * 4).fill(255)
+        if (busy) {
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              if (!busy(x, y)) continue
+              const i = (y * width + x) * 4
+              data[i] = 0
+              data[i + 1] = 0
+              data[i + 2] = 0
+            }
+          }
+        }
+        return { data, width, height }
+      },
+    })) as unknown as typeof real
+  }
+
+  afterEach(() => {
+    HTMLCanvasElement.prototype.getContext = real
+  })
+
+  const label = { text: 'What they owe', place: 'auto' } as const
+
+  it('goes over the shot where the shot has nothing there', () => {
+    shotOf()
+    // No margin at all: the label sits in the empty space beside its mark.
+    expect(draw([mark(label)])).toMatchObject(IMAGE)
+  })
+
+  it('stays outside where it would cover something', () => {
+    // Detail, not darkness: a region of one flat colour has nothing to lose by being
+    // covered, and it is the variation in it that says something is there.
+    shotOf((x) => x % 6 < 2)
+    const canvas = draw([mark(label)])
+    expect(canvas.height).toBeGreaterThan(IMAGE.height)
+  })
+
+  it('still obeys a recipe that asked for one or the other', () => {
+    shotOf()
+    // Empty shot, so `auto` would go inside — but the callout said otherwise.
+    expect(draw([mark({ ...label, inside: false })]).height).toBeGreaterThan(IMAGE.height)
   })
 })

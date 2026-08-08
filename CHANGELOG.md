@@ -17,8 +17,11 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   wide shot the default cost hundreds of pixels of margin for no reason — a real recipe
   here went from 3782×1524 to 2880×1654 by moving two labels off the sides. `auto` weighs
   that against how far the arrow has to travel and whether its path crosses another mark
-  or a masked region. **A callout that relied on the old default now has to say
-  `place: right`**; an explicit side is obeyed exactly as before, and `numbered` discs are
+  or a masked region, and whether it can go over the shot rather than in a margin at all —
+  which it settles by reading the pixels it would cover, a region of one flat colour
+  counting as nothing worth keeping. On the recipe above that took the canvas to
+  2880×1524, the shot's own size, with no margin anywhere. **A callout that relied on the
+  old default now has to say `place: right`**; an explicit side is obeyed exactly as before, and `numbered` discs are
   unaffected because they are placed `corner`. What `auto` cannot see is the pixels
   nobody pointed at, so a shot whose arrow must miss a paragraph still wants a named side.
 

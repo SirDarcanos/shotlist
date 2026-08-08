@@ -109,8 +109,9 @@ const Callout = z
     badge: z.enum(['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br']).default('tl'),
     box: z.boolean().default(true),
     /**
-     * Whether the label or disc sits over the screenshot. A label defaults to outside,
-     * in a margin the canvas grows to make; a disc defaults to inside, on the box.
+     * Whether the label or disc sits over the screenshot rather than in a margin the
+     * canvas grows to make. Left unsaid, a disc goes inside and a label on a named side
+     * goes outside; with `place: auto` it is decided from what the shot has under it.
      */
     inside: z.boolean().optional(),
     /** Nudge, in image pixels, for what geometry alone cannot place. */
@@ -120,10 +121,6 @@ const Callout = z
     gap: z.number().optional(),
   })
   .strict()
-  .transform((callout) => ({
-    ...callout,
-    inside: callout.inside ?? callout.place === 'corner',
-  }))
 
 /** `numbered:` as a plain list, or as a list with the style every disc shares. */
 const Numbered = z.union([

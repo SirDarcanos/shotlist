@@ -368,9 +368,15 @@ canvas by its _width_, one above or below by its _height_ — on a wide shot tha
 difference of hundreds of pixels. `auto` weighs that against how far the arrow would have
 to travel, and against whether its path would cross another mark or a masked region.
 
-What it cannot see is the pixels nobody pointed at. An arrow drawn across a paragraph is
+`auto` also decides whether the label goes **over the shot or in a margin**. Over the shot
+costs no canvas at all and needs only a stub of an arrow, so it wins wherever the shot has
+nothing there — which it works out by reading the pixels the label would cover. A region
+of one flat colour counts as nothing: it is the detail in a region that is worth not
+covering, not its darkness.
+
+What it cannot judge is what that detail is _for_. An arrow drawn across a paragraph is
 not something it knows to avoid, so **name a side when the shot needs one** — an explicit
-`place` is always obeyed.
+`place` is obeyed exactly, and so is an explicit `inside`.
 
 | Field    | Default   | What it does                                                                |
 | -------- | --------- | --------------------------------------------------------------------------- |
@@ -386,9 +392,9 @@ not something it knows to avoid, so **name a side when the shot needs one** — 
 | `pad`    | style's   | Distance between the outline and the element                                |
 | `gap`    | style's   | Distance between the label and the outline                                  |
 
-A label defaults to `inside: false`, in a margin the canvas grows to make; a disc
-(`place: corner`) defaults to `inside: true`, on the box itself. Outside never covers the
-interface but costs width, so a shot with clear space beside the mark is worth `inside: true`.
+Left unsaid, a disc (`place: corner`) sits inside, on the box; a label on a named side
+sits outside, in a margin the canvas grows to make; and a label on `place: auto` goes
+wherever the shot has room for it. Saying `inside` either way settles it.
 
 `numbered: [a, b, c]` is shorthand for one numbered disc per mark, in order. Give it the
 style every disc shares by writing it out:
