@@ -122,14 +122,39 @@ export class ShotlistError extends Error {
   }
 }
 
+type Issue = z.ZodError['issues'][number]
+
+/** How far into nested unions to follow a failure before taking zod's own summary. */
+const UNION_DEPTH = 3
+
+/**
+ * One line per problem, following a union into the branch the author plainly meant.
+ *
+ * A union reports `Invalid input` and nothing else, which for `serve`, `clip`, `numbered`
+ * or `check` names neither the key that was wrong nor what it should have been. A branch
+ * that failed only because the value is the wrong type entirely is not the one being
+ * written — `serve: { command: …, reddy: … }` is not a failed attempt at a string.
+ * Whatever branches are left are the ones with something to say.
+ */
+function explain(issues: readonly Issue[], prefix: PropertyKey[] = [], depth = 0): string[] {
+  return issues.flatMap((issue) => {
+    const path = [...prefix, ...issue.path]
+    if (issue.code === 'invalid_union' && depth < UNION_DEPTH) {
+      const branches = issue.errors.filter(
+        (branch) => !branch.every((each) => each.code === 'invalid_type' && !each.path.length),
+      )
+      if (branches.length) {
+        return [...new Set(branches.flatMap((branch) => explain(branch, path, depth + 1)))]
+      }
+    }
+    const where = path.length ? path.join('.') : '(root)'
+    return [`  ${where}: ${issue.message}`]
+  })
+}
+
 /** Turn zod's issue list into one line per problem, addressed by its path in the document. */
 export function formatIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const where = issue.path.length ? issue.path.join('.') : '(root)'
-      return `  ${where}: ${issue.message}`
-    })
-    .join('\n')
+  return explain(error.issues).join('\n')
 }
 
 /**

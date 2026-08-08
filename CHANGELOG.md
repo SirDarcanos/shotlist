@@ -30,6 +30,15 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Fixed
 
+- **A bad value in a union said `Invalid input` and stopped there.** Several keys accept
+  more than one shape — `clip`, `numbered` and `check` — and a mistake inside one was
+  reported as the union as a whole not matching, naming neither the key that was wrong nor
+  what it should have been. The failure now follows the union into the branch that was
+  plainly being written, so a misspelled key reads `numbered: Unrecognized key: "badgee"`.
+  A branch that failed only because the value is the wrong type entirely is not one the
+  author was attempting, and is left out; when no branch got further than that, zod's own
+  summary stands.
+
 - **A query that matched nothing reported itself in JavaScript.** The message was
   `page.evaluateHandle: Error: no element matched {…}` followed by a stack through
   `UtilityScript` — the query language is resolved by a function serialized into the

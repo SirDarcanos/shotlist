@@ -58,6 +58,19 @@ describe('parseRecipe', () => {
     expect(() => parseRecipe({ source: 'file' }, { name: 'x' })).toThrow(/needs a `file:`/)
   })
 
+  // Several keys accept more than one shape, and a union reports only that none of them
+  // matched — naming neither the key that was wrong nor what it should have been.
+  it('names the key inside the branch the author was plainly writing', () => {
+    expect(() => parseRecipe({ numbered: { marks: ['a'], badgee: 'ml' } }, { name: 'x' })).toThrow(
+      /numbered: Unrecognized key: "badgee"/,
+    )
+  })
+
+  it('keeps zod’s own summary when no branch got any further than the type', () => {
+    // Neither a list nor a mapping: no branch has more to say than that.
+    expect(() => parseRecipe({ numbered: 5 }, { name: 'x' })).toThrow(/numbered: Invalid input/)
+  })
+
   it('shoots once unless the recipe asks for retries', () => {
     expect(parseRecipe({}, { name: 'x' }).retries).toBe(0)
     expect(parseRecipe({ retries: 3 }, { name: 'x' }).retries).toBe(3)
