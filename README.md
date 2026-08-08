@@ -208,25 +208,25 @@ number here to match.
 
 ## Recipes
 
-| Field      | Default    | What it does                                              |
-| ---------- | ---------- | --------------------------------------------------------- |
-| `name`     | filename   | Output filename, without the extension                    |
-| `source`   | `app`      | `app` drives the site; `file` annotates an existing PNG   |
-| `file`     | —          | The PNG to annotate, with `source: file`                  |
-| `install`  | —          | Which named destination to copy to                        |
-| `url`      | `site.url` | Page to open for this recipe                              |
-| `viewport` | site's     | Viewport for this recipe                                  |
-| `scale`    | site's     | Device pixel ratio for this recipe                        |
-| `theme`    | site's     | Colour scheme for this recipe                             |
-| `style`    | —          | Style overrides for this recipe                           |
-| `setup`    | `[]`       | Steps that drive the site into the state to capture       |
-| `clip`     | `viewport` | The region to capture: `viewport`, `full`, or a query     |
-| `marks`    | `{}`       | Named regions, resolved after `setup` runs                |
-| `mask`     | `[]`       | Regions painted over before the callouts are drawn        |
-| `callouts` | `[]`       | What to draw on those marks                               |
-| `numbered` | —          | Marks to number 1…n with a disc, in the order given       |
-| `retries`  | `0`        | How many times to shoot this again if it fails, up to 5   |
-| `check`    | project's  | This recipe's own `--check` limits, or `false` to skip it |
+| Field      | Default    | What it does                                            |
+| ---------- | ---------- | ------------------------------------------------------- |
+| `name`     | filename   | Output filename, without the extension                  |
+| `source`   | `app`      | `app` drives the site; `file` annotates an existing PNG |
+| `file`     | —          | The PNG to annotate, with `source: file`                |
+| `install`  | —          | Which named destination to copy to                      |
+| `url`      | `site.url` | Page to open for this recipe                            |
+| `viewport` | site's     | Viewport for this recipe                                |
+| `scale`    | site's     | Device pixel ratio for this recipe                      |
+| `theme`    | site's     | Colour scheme for this recipe                           |
+| `style`    | —          | Style overrides for this recipe                         |
+| `setup`    | `[]`       | Steps that drive the site into the state to capture     |
+| `clip`     | `viewport` | The region to capture: `viewport`, `full`, or a query   |
+| `marks`    | `{}`       | Named regions, resolved after `setup` runs              |
+| `mask`     | `[]`       | Regions painted over before the callouts are drawn      |
+| `callouts` | `[]`       | What to draw on those marks                             |
+| `numbered` | —          | Marks to number 1…n with a disc, in the order given     |
+| `retries`  | `0`        | How many times to shoot this again if it fails, up to 5 |
+| `check`    | project's  | This recipe's `--check` limits and `ignore`, or `false` |
 
 ## Steps
 
@@ -661,6 +661,17 @@ npx shotlist --check --json       # …and report it as JSON on stdout
 npx shotlist --config <file>      # use a specific config
 npx shotlist --help               # the same list, from the tool
 npx shotlist --version            # print the version
+```
+
+For a config that is not yours, and what an operator grants it — see
+[what a config can do](#what-a-config-can-do-to-the-machine-that-runs-it):
+
+```bash
+npx shotlist --check --untrusted        # no processes, no leaving the project,
+                                        # nothing on this machine's own network
+npx shotlist --allow docs.example.com   # …and this host too; repeatable
+npx shotlist --allow-path /srv/shared   # …and this directory too; repeatable
+npx shotlist --deny fixtures            # never touch this name; repeatable
 ```
 
 It exits non-zero when anything failed, and names the recipe and the key inside it that

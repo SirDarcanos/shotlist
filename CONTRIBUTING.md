@@ -78,8 +78,16 @@ Two constraints:
 npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+Run it unpiped. `npm test | grep …` reports grep's exit code, so a `&&` chain carries on
+past a suite that failed.
+
 The full list of what "finished" means is in
 [AGENTS.md → Definition of done](./AGENTS.md#definition-of-done).
+
+If your change opens a URL or reads or writes a path, it goes through `checkUrl` or
+`checkPath` in `src/trust.ts`. Those two are the whole of what keeps a run to the project
+and its own site when the config is one nobody vouched for, and a new caller that skips
+them fails no test.
 
 One concern per pull request. Commit subjects are `Area: what changed` — imperative,
 sentence case after the prefix. The body explains why.
@@ -132,6 +140,18 @@ what a key means breaks every recipe in every project using it.
 - Before 1.0: a **minor** bump, plus a `Changed` entry saying what to edit.
 - After 1.0: a **major** bump.
 - Adding a verb, primitive or config key: patch or minor.
+
+## Reporting something security-shaped
+
+shotlist runs other people's configs — in CI on a fork's pull request, or in a service
+shooting what somebody submitted. A way past `--untrusted`, a path or host check that can
+be walked around, or anything that gets a run to touch what it should not, is worth
+reporting privately first: use GitHub's **Report a vulnerability** on the Security tab
+rather than opening an issue.
+
+What is already known and deliberate is in the README under
+[what a config can do](./README.md#what-a-config-can-do-to-the-machine-that-runs-it) —
+including the two things the checks do not cover, DNS rebinding and rate limiting.
 
 ## Reporting a recipe that fails
 
