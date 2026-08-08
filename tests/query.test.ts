@@ -68,6 +68,37 @@ describe('a source Playwright resolves', () => {
   })
 })
 
+// Negative counts from the end, the way `Array.at` does. `-1` is another way of saying
+// `pick: last`; `-2` is the only way of saying the one before it.
+describe('a position counted from the end', () => {
+  const ROWS = [
+    { x: 12, y: 72, width: 376, height: 44 },
+    { x: 12, y: 124, width: 376, height: 44 },
+  ]
+
+  it('reads nth: -1 as the last match and nth: -2 as the one before it', () => {
+    expect(find({ css: '.row', nth: -1 })).toEqual(ROWS[1])
+    expect(find({ css: '.row', nth: -2 })).toEqual(ROWS[0])
+  })
+
+  it('agrees with the ways already there of saying the same thing', () => {
+    expect(find({ css: '.row', nth: -1 })).toEqual(find({ css: '.row', pick: 'last' }))
+    expect(find({ css: '.row', nth: -2 })).toEqual(find({ css: '.row', nth: 0 }))
+  })
+
+  it('reads child: -1 as the last child and child: -2 as the one before it', () => {
+    // The row holds three spans and then the Edit button.
+    const row = { css: '.row', contains: 'Acme Corp', pick: 'smallest' as const }
+    expect(find({ ...row, child: -1 })).toEqual({ x: 300, y: 80, width: 76, height: 28 })
+    expect(find({ ...row, child: -2 })).toEqual({ x: 172, y: 84, width: 52, height: 20 })
+    expect(find({ ...row, child: -1 })).toEqual(find({ ...row, child: 3 }))
+  })
+
+  it('says nothing is there when it counts back past the start', () => {
+    expect(() => find({ css: '.row', nth: -99 })).toThrow(/no element at the requested position/)
+  })
+})
+
 describe('traversal', () => {
   it('climbs to the nearest matching ancestor', () => {
     // The select sits in a label, which is the first box around it under 95vw.

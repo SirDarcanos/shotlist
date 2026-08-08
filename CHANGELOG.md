@@ -37,6 +37,10 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`nth` and `child` count from the end when the number is negative**, the way
+  `Array.at` does: `-1` is the last match, `-2` the one before it. `-1` says what
+  `pick: last` says; `-2` is the only way to say the one before the last.
+
 - **A shot list covers its own site.** `site.url` now decides what a run may open: that
   host and everything under it, so a config for `rollful.dev` shoots `api.rollful.dev` and
   is refused `google.com`. Wandering off the site is a mistake far more often than an
@@ -173,10 +177,9 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   finder named `left`, because `grow`'s keys are sides rather than query keys and a
   one-key object with a foreign key is how a finder call is spelled. Two sides happened to
   work, which is why it went unnoticed. Nothing inside a `grow` is a finder call now.
-- **A negative `pad`, `grow`, `nth`, `child` or `rect` size was carried until something
-  further down complained.** Padding is what is added around a box, positions count from
-  the front — `pick: last` is how the end of a list is said — and a box with no width is
-  not a box. Each is refused where it is written, naming the key.
+- **A negative `pad`, `grow` or `rect` size was carried until something further down
+  complained.** Padding is what is added around a box, and a box with no width is not a
+  box. Each is refused where it is written, naming the key.
 - **A query resolving to a box with no area** reported the clip that box became rather
   than the query that produced it. `visible: true` is the filter for skipping those.
 

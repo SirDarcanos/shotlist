@@ -309,8 +309,12 @@ Sizes take pixels (`400`) or viewport units (`95vw`, `50vh`).
 | ---------- | --------------------------------------------- |
 | `ancestor` | The first ancestor matching the filters given |
 | `parent`   | The parent element                            |
-| `child: n` | The nth child                                 |
+| `child: n` | The nth child; `-1` is the last one           |
 | `children` | All children                                  |
+
+`nth` and `child` count from the end when the number is negative, the way `Array.at` does:
+`-1` is the last, `-2` the one before it. `nth: -1` and `pick: last` are two ways of
+saying the same thing.
 
 `ancestor` climbs from the element's parent — an element is never its own ancestor, so a
 box that already fits the filters is not the answer. It takes `pick: nearest` (default) or
@@ -319,14 +323,14 @@ than stopping at the heading inside it.
 
 ### Selection and shape
 
-| Key                                          | Effect                                  |
-| -------------------------------------------- | --------------------------------------- |
-| `pick: first \| last \| smallest \| largest` | Which candidate to use                  |
-| `nth: n`                                     | The candidate at this position          |
-| `pad: n`                                     | Grow the resulting box on all sides     |
-| `grow: { top, right, bottom, left }`         | Grow it on specific sides               |
-| `span: [query, query]`                       | The bounding box of several queries     |
-| `rect: [x, y, width, height]`                | A literal box, for recipes with no page |
+| Key                                          | Effect                                           |
+| -------------------------------------------- | ------------------------------------------------ |
+| `pick: first \| last \| smallest \| largest` | Which candidate to use                           |
+| `nth: n`                                     | The candidate at this position; `-1` is the last |
+| `pad: n`                                     | Grow the resulting box on all sides              |
+| `grow: { top, right, bottom, left }`         | Grow it on specific sides                        |
+| `span: [query, query]`                       | The bounding box of several queries              |
+| `rect: [x, y, width, height]`                | A literal box, for recipes with no page          |
 
 ## Finders
 

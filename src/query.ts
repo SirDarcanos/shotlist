@@ -14,16 +14,13 @@ const Dimension = z.union([z.number(), z.string().regex(/^-?\d+(\.\d+)?(px|vw|vh
 export const NumberOrRef = z.union([z.int(), z.string().regex(/^\$\{?[A-Za-z_]/)])
 
 /**
- * A position in a list of candidates, counted from the front.
+ * A position in a list of candidates.
  *
- * Not from the back: `pick: last` already says that, and `{ children: true, pick: last }`
- * says it for a child. Two ways to say the same thing is the thing to avoid, and
- * "second from the end" has not come up.
+ * Negative counts from the end, the way `Array.at` does, so `-2` is the second from last
+ * — which nothing else in the language can say. `-1` is the last, which `pick: last` also
+ * says; a run that meets one says so rather than refusing it.
  */
-const Index = z.union([
-  z.int().nonnegative({ message: 'counts from 0 — for the end of the list, use `pick: last`' }),
-  z.string().regex(/^\$\{?[A-Za-z_]/),
-])
+const Index = NumberOrRef
 
 const Filters = z.object({
   contains: z.string().optional(),
@@ -487,7 +484,9 @@ export function resolveQuery(context: QueryContext): Resolved {
   }
   if (query.child !== undefined) {
     const index = Number(query.child)
-    candidates = candidates.map((el) => el.children[index]).filter((el): el is Element => !!el)
+    candidates = candidates
+      .map((el) => el.children[index < 0 ? el.children.length + index : index])
+      .filter((el): el is Element => !!el)
   }
   if (query.children === true) {
     candidates = candidates.flatMap((el) => [...el.children])
@@ -500,8 +499,10 @@ export function resolveQuery(context: QueryContext): Resolved {
     return r.width * r.height
   }
   let chosen: Element | undefined
-  if (query.nth !== undefined) chosen = candidates[Number(query.nth)]
-  else if (query.pick === 'last') chosen = candidates[candidates.length - 1]
+  if (query.nth !== undefined) {
+    const index = Number(query.nth)
+    chosen = candidates[index < 0 ? candidates.length + index : index]
+  } else if (query.pick === 'last') chosen = candidates[candidates.length - 1]
   else if (query.pick === 'smallest') chosen = [...candidates].sort((a, b) => area(a) - area(b))[0]
   else if (query.pick === 'largest') chosen = [...candidates].sort((a, b) => area(b) - area(a))[0]
   else chosen = candidates[0]

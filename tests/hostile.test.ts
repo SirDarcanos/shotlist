@@ -151,12 +151,6 @@ describe('a recipe name that is not a name', () => {
 describe('a number that describes no box', () => {
   const refused = (query: unknown) => expect(() => parseQuery(query))
 
-  it('counts positions from the front, and says what says "last"', () => {
-    refused({ css: 'div', nth: -1 }).toThrow(/counts from 0 — for the end of the list/)
-    refused({ css: 'div', child: -5 }).toThrow(/counts from 0/)
-    expect(() => parseQuery({ css: 'div', nth: 0 })).not.toThrow()
-  })
-
   it('refuses padding that is not padding', () => {
     refused({ css: 'div', pad: -8 }).toThrow(/room added around a box/)
     refused({ css: 'div', grow: { left: -4 } }).toThrow(/room added around a box/)
