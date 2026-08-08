@@ -1,6 +1,8 @@
 import type { Rect } from './query.js'
 
-export type Place = 'left' | 'right' | 'top' | 'bottom' | 'corner'
+export type Place = 'left' | 'right' | 'top' | 'bottom' | 'corner' | 'auto'
+/** The sides a label can actually be drawn on, once `auto` has been decided. */
+export type Side = 'left' | 'right' | 'top' | 'bottom'
 /** Eight anchor points on a box: the corners, and the middle of each edge. */
 export type Badge = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br'
 
@@ -17,8 +19,11 @@ export interface Mark {
    * Whether the label or disc sits over the screenshot. Outside means in a margin the
    * canvas grows to make, which never covers the interface but costs width; inside keeps
    * the shot its own size and is what suits a mark with empty space beside it.
+   *
+   * Unset, a disc goes inside and a label on a named side goes outside — and one on
+   * `place: auto` goes wherever the shot has room for it.
    */
-  inside: boolean
+  inside?: boolean
   /** Nudge, in image pixels, for what geometry alone cannot place. */
   dx?: number
   dy?: number
@@ -42,6 +47,7 @@ export interface DrawStyle {
     gap: number
   }
   number: { radius: number; size: number; fill?: string; text: string }
+  mask: { fill: string }
 }
 
 export interface AnnotationSpec {
@@ -51,6 +57,8 @@ export interface AnnotationSpec {
   style: DrawStyle
   /** Rects are relative to the image's top-left corner, in CSS pixels. */
   marks: Mark[]
+  /** Regions to paint over before anything is drawn, in the same coordinates. */
+  masks?: Rect[]
 }
 
 /**
@@ -67,6 +75,12 @@ export interface AnnotationSpec {
 export function drawAnnotations(spec: AnnotationSpec): {
   width: number
   height: number
+  /**
+   * How far the shot sits from the canvas's top-left, once labels have claimed their
+   * margins. A caller holding a rect in image coordinates needs this to find it again
+   * in the finished picture.
+   */
+  margin: { left: number; top: number }
   /** Set when no family named in `label.font` was available and the default was used. */
   fontWarning?: string
 } {
@@ -112,8 +126,15 @@ export function drawAnnotations(spec: AnnotationSpec): {
    * family that does not exist. Measuring can.
    */
   const fontInUse = (): string | undefined => {
+    // At the label's own weight: a webfont is usually declared at one weight, and a face
+    // that only exists at 700 does not resolve for a probe asking at 400 — so the family
+    // would read as missing on exactly the fonts a project goes to the trouble of loading.
     const probe = (family: string) => {
-      const node = el<SVGTextElement>('text', { 'font-family': family, 'font-size': 22 })
+      const node = el<SVGTextElement>('text', {
+        'font-family': family,
+        'font-weight': String(style.label.weight),
+        'font-size': 22,
+      })
       node.textContent = 'Handgloves 0123'
       svg.append(node)
       const width = node.getBBox().width
@@ -230,13 +251,205 @@ export function drawAnnotations(spec: AnnotationSpec): {
     }
   }
 
+  /**
+   * How much of a region of the shot is not blank, as a fraction of what was sampled.
+   *
+   * A label may sit over the screenshot instead of in a margin, which costs no canvas at
+   * all — but only where it would cover nothing. Marks and masks say where the things
+   * the recipe named are; this is the only way to ask about the rest.
+   *
+   * Null when the pixels cannot be read: jsdom has no 2D context, and a shot drawn from
+   * a `source: file` recipe may be tainted. Placement then falls back to the geometry.
+   */
+  const inkIn = (() => {
+    const shot = document.getElementById('shotlist-image') as HTMLImageElement | null
+    if (!shot?.naturalWidth) return null
+    let data: ImageData
+    try {
+      const sheet = document.createElement('canvas')
+      sheet.width = shot.naturalWidth
+      sheet.height = shot.naturalHeight
+      const context = sheet.getContext('2d')
+      if (!context) return null
+      context.drawImage(shot, 0, 0)
+      data = context.getImageData(0, 0, sheet.width, sheet.height)
+    } catch {
+      return null
+    }
+    // The shot is drawn at `scale` device pixels per CSS pixel; rects here are CSS.
+    const grid = (rect: { left: number; top: number; right: number; bottom: number }) => {
+      const step = Math.max(1, Math.round(scale * 2))
+      const x0 = Math.max(0, Math.round(rect.left * scale))
+      const y0 = Math.max(0, Math.round(rect.top * scale))
+      const x1 = Math.min(data.width, Math.round(rect.right * scale))
+      const y1 = Math.min(data.height, Math.round(rect.bottom * scale))
+      const points: number[][] = []
+      for (let y = y0; y < y1; y += step) {
+        for (let x = x0; x < x1; x += step) {
+          const i = (y * data.width + x) * 4
+          points.push([data.data[i]!, data.data[i + 1]!, data.data[i + 2]!])
+        }
+      }
+      return points
+    }
+    return (rect: { left: number; top: number; right: number; bottom: number }) => {
+      const points = grid(rect)
+      if (points.length < 4) return 0
+      // Against the region's own average, so a gradient or a tinted panel reads as empty
+      // while text over either does not.
+      const mean = [0, 1, 2].map(
+        (channel) => points.reduce((sum, p) => sum + p[channel]!, 0) / points.length,
+      )
+      const off = points.filter((p) =>
+        p.some((value, channel) => Math.abs(value - mean[channel]!) > 40),
+      ).length
+      return off / points.length
+    }
+  })()
+
+  /**
+   * Which side an `auto` label goes on.
+   *
+   * Two things decide it. A label on the left or the right grows the canvas by its
+   * *width*, one above or below by its *height* — on a wide shot that is a difference of
+   * several hundred pixels, and the widest label on a side sets the margin for all of
+   * them. And the arrow runs from the margin to the box, so a side whose path crosses
+   * something the recipe already pointed at, or masked, is one to avoid.
+   *
+   * What it cannot know is which of the *unmarked* pixels matter. `place:` is still
+   * there for that, and still beats this.
+   */
+  const SIDES: Side[] = ['bottom', 'top', 'right', 'left']
+  const chosen = new Map<Mark, { side: Side; inside: boolean }>()
+  const taken: Record<Side, { from: number; to: number; size: number }[]> = {
+    left: [],
+    right: [],
+    top: [],
+    bottom: [],
+  }
+
+  /** Boxes an arrow should not be drawn across: everything called out, and every mask. */
+  const obstacles = (self: Mark) => [
+    ...marks.filter((mark) => mark !== self).map(rawBox),
+    ...(spec.masks ?? []).map((rect) => ({
+      left: rect.x,
+      top: rect.y,
+      right: rect.x + rect.width,
+      bottom: rect.y + rect.height,
+    })),
+  ]
+
+  const overlaps = (
+    a: { left: number; top: number; right: number; bottom: number },
+    b: { left: number; top: number; right: number; bottom: number },
+  ) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+
+  /** Remember what a label claimed, so the next one pays for having to clear it. */
+  const claim = (mark: Mark, side: Side) => {
+    const b = rawBox(mark)
+    const size = sizes.get(mark)!
+    const across = side === 'left' || side === 'right'
+    taken[side].push({
+      from: across ? b.top : b.left,
+      to: across ? b.bottom : b.right,
+      size: across ? size.width : size.height,
+    })
+  }
+
+  for (const mark of labelled) {
+    if (mark.place !== 'auto') {
+      if (!(mark.inside ?? false)) claim(mark, mark.place as Side)
+      continue
+    }
+    const b = rawBox(mark)
+    const size = sizes.get(mark)!
+    const gap = px(mark.gap ?? style.label.gap)
+    const blockers = obstacles(mark)
+
+    let best = { side: 'right' as Side, inside: false }
+    let bestScore = Infinity
+    for (const side of SIDES) {
+      const across = side === 'left' || side === 'right'
+      const middle = across ? (b.top + b.bottom) / 2 : (b.left + b.right) / 2
+      const grows = across ? size.width : size.height
+      const room =
+        side === 'left'
+          ? b.left
+          : side === 'right'
+            ? image.width - b.right
+            : side === 'top'
+              ? b.top
+              : image.height - b.bottom
+
+      // The strip the arrow travels down, from the edge of the shot to the box.
+      const corridor =
+        side === 'left'
+          ? { left: 0, right: b.left, top: b.top, bottom: b.bottom }
+          : side === 'right'
+            ? { left: b.right, right: image.width, top: b.top, bottom: b.bottom }
+            : side === 'top'
+              ? { left: b.left, right: b.right, top: 0, bottom: b.top }
+              : { left: b.left, right: b.right, top: b.bottom, bottom: image.height }
+      const crossed = blockers.filter((o) => overlaps(o, corridor)).length
+
+      // Outside: in a margin the canvas grows to make, with the arrow reaching in from
+      // the edge of the shot however far that is.
+      const from = across ? b.top : b.left
+      const to = across ? b.bottom : b.right
+      const stacked = taken[side]
+        .filter((other) => other.from < to && other.to > from)
+        .reduce((sum, other) => sum + other.size, 0)
+      const outside = crossed * 100000 + grows + stacked + room * 0.5
+      if (outside < bestScore) {
+        bestScore = outside
+        best = { side, inside: false }
+      }
+
+      // Inside: no canvas at all and an arrow only a gap long, but it covers part of the
+      // shot — so it is only worth scoring where the shot has nothing there.
+      if (inkIn === null || room < grows + gap * 2) continue
+      const half = (across ? size.height : size.width) / 2
+      const box = across
+        ? {
+            left: side === 'left' ? b.left - gap - size.width : b.right + gap,
+            right: side === 'left' ? b.left - gap : b.right + gap + size.width,
+            top: middle - half,
+            bottom: middle + half,
+          }
+        : {
+            left: middle - half,
+            right: middle + half,
+            top: side === 'top' ? b.top - gap - size.height : b.bottom + gap,
+            bottom: side === 'top' ? b.top - gap : b.bottom + gap + size.height,
+          }
+      if (blockers.some((o) => overlaps(o, box))) continue
+      const inside = inkIn(box) * 400000 + gap * 0.5
+      if (inside < bestScore) {
+        bestScore = inside
+        best = { side, inside: true }
+      }
+    }
+    chosen.set(mark, best)
+    if (!best.inside) claim(mark, best.side)
+  }
+
+  /** The side a label is drawn on: the recipe's, or the one `auto` settled on. */
+  const sideOf = (mark: Mark): Side => chosen.get(mark)?.side ?? (mark.place as Side)
+
+  /**
+   * Whether a label sits over the shot. What the recipe said, or — unsaid — a disc goes
+   * inside, a label on a named side goes outside, and `auto` goes where there is room.
+   */
+  const insideOf = (mark: Mark): boolean =>
+    mark.inside ?? chosen.get(mark)?.inside ?? mark.place === 'corner'
+
   // Only a label placed outside claims a margin; one placed inside sits over the shot.
   const margin = { left: 0, right: 0, top: 0, bottom: 0 }
   for (const mark of labelled) {
-    if (mark.inside) continue
+    if (insideOf(mark)) continue
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
-    const side = mark.place as Exclude<Place, 'corner'>
+    const side = sideOf(mark)
     const need = side === 'left' || side === 'right' ? size.width + gap * 2 : size.height + gap * 2
     margin[side] = Math.max(margin[side], need)
 
@@ -266,7 +479,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
     mark: Mark,
     b: { left: number; top: number; right: number; bottom: number },
   ) => {
-    const out = mark.inside ? 0 : px(style.number.radius)
+    const out = insideOf(mark) ? 0 : px(style.number.radius)
     const x = mark.badge.endsWith('l')
       ? b.left - out
       : mark.badge.endsWith('r')
@@ -342,6 +555,20 @@ export function drawAnnotations(spec: AnnotationSpec): {
       right: b.right + margin.left,
       bottom: b.bottom + margin.top,
     }
+  }
+
+  // Masks first, so a callout drawn over one is still legible. A mask never grows the
+  // canvas: it covers part of the shot, so it is always inside it already.
+  for (const rect of spec.masks ?? []) {
+    svg.append(
+      el('rect', {
+        x: rect.x + margin.left,
+        y: rect.y + margin.top,
+        width: rect.width,
+        height: rect.height,
+        fill: style.mask.fill,
+      }),
+    )
   }
 
   for (const mark of marks) {
@@ -462,13 +689,13 @@ export function drawAnnotations(spec: AnnotationSpec): {
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
     const b = boxOf(mark)
-    let side = mark.place as Exclude<Place, 'corner'>
+    let side = sideOf(mark)
 
     const dx = px(mark.dx ?? 0)
     const dy = px(mark.dy ?? 0)
     let x: number
     let y: number
-    if (mark.inside) {
+    if (insideOf(mark)) {
       // The glyph outline is painted outside the measured box, so the edge a label must
       // stay inside of is half a stroke in from the canvas.
       const edge = px(style.label.strokeWidth) / 2
@@ -575,5 +802,6 @@ export function drawAnnotations(spec: AnnotationSpec): {
     })
   }
 
-  return fontWarning ? { ...canvas, fontWarning } : canvas
+  const drawn = { ...canvas, margin: { left: margin.left, top: margin.top } }
+  return fontWarning ? { ...drawn, fontWarning } : drawn
 }

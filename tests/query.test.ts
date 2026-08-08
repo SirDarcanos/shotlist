@@ -53,22 +53,128 @@ describe('sources and filters', () => {
   })
 })
 
+// The engine that answers `role`/`label`/`placeholder`/`testid` runs before this one.
+// Absent seeds mean it never ran — the query is nested somewhere it cannot be. Empty
+// seeds mean it ran and found nothing, which is an ordinary no-match.
+describe('a source Playwright resolves', () => {
+  it('says nothing matched when the engine ran and came back empty', () => {
+    expect(() =>
+      evaluateQuery({ spec: { placeholder: 'Search packages' }, viewport: VIEWPORT, seeds: [] }),
+    ).toThrow(/^no element matched /)
+  })
+
+  it('says it cannot be nested when the engine never ran at all', () => {
+    expect(() => find({ placeholder: 'Search packages' })).toThrow(/cannot be used inside/)
+  })
+})
+
+// Negative counts from the end, the way `Array.at` does. Checked against a list of four,
+// so that no assertion here holds only because the list is as long as the index is deep:
+// in a list of two, `-2` and `0` are the same element, and that proves nothing.
+describe('a position counted from the end', () => {
+  // The bar, in order: New order, Import, Export, Settings.
+  const BAR = [
+    { x: 16, y: 14, width: 90, height: 32 },
+    { x: 118, y: 14, width: 80, height: 32 },
+    { x: 210, y: 14, width: 120, height: 32 },
+    { x: 342, y: 14, width: 64, height: 32 },
+  ]
+  const button = (over: object) => find({ css: '.bar button', ...over })
+
+  it('walks back from the last one, one at a time', () => {
+    expect(button({ nth: -1 })).toEqual(BAR[3])
+    expect(button({ nth: -2 })).toEqual(BAR[2])
+    expect(button({ nth: -3 })).toEqual(BAR[1])
+    expect(button({ nth: -4 })).toEqual(BAR[0])
+  })
+
+  it('agrees with `pick: last`, which is true whatever the length', () => {
+    expect(button({ nth: -1 })).toEqual(button({ pick: 'last' }))
+  })
+
+  it('says nothing is there when it counts back past the start', () => {
+    expect(() => button({ nth: -5 })).toThrow(/no element at the requested position/)
+  })
+
+  it('reads child: -1 as the last child and -2 as the one before it', () => {
+    // The row holds three spans and then the Edit button.
+    const row = { css: '.row', contains: 'Acme Corp', pick: 'smallest' as const }
+    expect(find({ ...row, child: -1 })).toEqual({ x: 300, y: 80, width: 76, height: 28 })
+    expect(find({ ...row, child: -2 })).toEqual({ x: 172, y: 84, width: 52, height: 20 })
+    expect(find({ ...row, child: -3 })).toEqual({ x: 92, y: 84, width: 70, height: 20 })
+  })
+})
+
+// Twenty, so that no index coincides with any other and an off-by-one has nowhere to
+// hide. Each item's x is its position, so a rect names which one came back.
+describe('counting from the end of a long list', () => {
+  const LONG = 20
+
+  beforeEach(() => {
+    const items = Array.from(
+      { length: LONG },
+      (_, i) => `<li class="ledger" data-rect="${i},0,1,1"></li>`,
+    ).join('')
+    document.body.insertAdjacentHTML('beforeend', `<ul>${items}</ul>`)
+  })
+
+  /** Which item came back, read off the x that encodes its position. */
+  const at = (nth: number) => find({ css: '.ledger', nth }).x
+
+  it('reads -1 as the last and -2 as the one before it, not as the first', () => {
+    expect(at(-1)).toBe(19)
+    expect(at(-2)).toBe(18)
+    // The whole point: in a list this long, -2 and 0 are nineteen apart.
+    expect(at(0)).toBe(0)
+    expect(at(-2)).not.toBe(at(0))
+  })
+
+  it('walks back the whole way, one at a time', () => {
+    for (let back = 1; back <= LONG; back++) expect(at(-back), `nth: -${back}`).toBe(LONG - back)
+  })
+
+  it('still counts forward from the front', () => {
+    for (let forward = 0; forward < LONG; forward++) expect(at(forward)).toBe(forward)
+  })
+
+  it('has nothing one step past either end', () => {
+    expect(() => at(-(LONG + 1))).toThrow(/no element at the requested position/)
+    expect(() => at(LONG)).toThrow(/no element at the requested position/)
+  })
+})
+
 describe('traversal', () => {
   it('climbs to the nearest matching ancestor', () => {
-    expect(find({ heading: 'Edit order', ancestor: { narrowerThan: '95vw' } })).toEqual({
+    // The select sits in a label, which is the first box around it under 95vw.
+    expect(find({ css: 'select', ancestor: { narrowerThan: '95vw' } })).toEqual({
       x: 260,
-      y: 220,
-      width: 300,
-      height: 28,
+      y: 260,
+      width: 480,
+      height: 32,
     })
   })
 
   it('climbs past it to the outermost one, which is the modal card', () => {
-    // The whole reason `outermost` exists: `nearest` stops at the heading itself, and
-    // the shot wants the card the heading sits in — but not the full-screen overlay.
-    expect(
-      find({ heading: 'Edit order', ancestor: { narrowerThan: '95vw', pick: 'outermost' } }),
-    ).toEqual({ x: 240, y: 200, width: 520, height: 300 })
+    // The whole reason `outermost` exists: `nearest` stops at the label, and the shot
+    // wants the card that holds it — but not the full-screen overlay outside that.
+    expect(find({ css: 'select', ancestor: { narrowerThan: '95vw', pick: 'outermost' } })).toEqual({
+      x: 240,
+      y: 200,
+      width: 520,
+      height: 300,
+    })
+  })
+
+  // An element is not its own ancestor. Starting the climb at it returned the element
+  // whenever the filters happened to fit, and a heading is as wide as the column it is
+  // in — so climbing out of one by width found the heading and boxed that instead.
+  it('never answers with the element it started from', () => {
+    expect(find({ heading: 'Edit order', ancestor: { narrowerThan: '95vw' } })).toEqual({
+      x: 240,
+      y: 200,
+      width: 520,
+      height: 300,
+    })
   })
 
   it('takes the children of a container, then one of them', () => {

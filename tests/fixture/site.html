@@ -1,0 +1,228 @@
+<!doctype html>
+<!--
+  A product page, for the tests that need a page shaped like the ones recipes are
+  written against: a brand, a nav, a hero, cards, a table, a footer.
+
+  Nothing here comes from a real product. `index.html` is the other fixture — that one
+  exists to exercise query primitives and carries `data-rect` on everything so the jsdom
+  tests can measure it. This one is only ever shot in a real browser, so it has no
+  `data-rect` and is laid out by CSS like any page.
+
+  The timestamp in the table is redrawn on every load on purpose: it is what `mask` and
+  `check.ignore` are tested against.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Meridian — usage analytics</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font: 16px/1.5 system-ui, sans-serif;
+        color: #0f172a;
+        background: #fff;
+      }
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 0 32px;
+      }
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        padding: 18px 0;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 18px;
+      }
+      nav a {
+        color: #475569;
+        text-decoration: none;
+      }
+      nav .spacer {
+        flex: 1;
+      }
+      .button {
+        background: #0f766e;
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+        padding: 9px 16px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .hero {
+        padding: 72px 0 56px;
+      }
+      .hero h1 {
+        font-size: 44px;
+        line-height: 1.1;
+        margin: 0 0 16px;
+        letter-spacing: -0.02em;
+      }
+      .hero p {
+        font-size: 19px;
+        color: #475569;
+        margin: 0 0 28px;
+        max-width: 34em;
+      }
+      .plans {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+        padding-bottom: 56px;
+      }
+      .plan {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 22px;
+      }
+      .plan h3 {
+        margin: 0 0 4px;
+        font-size: 17px;
+      }
+      .plan .price {
+        font-size: 30px;
+        font-weight: 700;
+        margin: 8px 0 12px;
+      }
+      .plan p {
+        margin: 0;
+        color: #475569;
+        font-size: 14px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 56px;
+      }
+      caption {
+        text-align: left;
+        font-weight: 600;
+        padding-bottom: 10px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 11px 12px;
+        border-bottom: 1px solid #e2e8f0;
+        font-size: 15px;
+      }
+      th {
+        color: #64748b;
+        font-weight: 600;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      /* Fixed width and tabular figures, so the changing cell changes glyphs and not
+         the layout — a mask cannot help with a column that reflows. */
+      td.seen {
+        width: 130px;
+        font-variant-numeric: tabular-nums;
+      }
+      footer {
+        border-top: 1px solid #e2e8f0;
+        padding: 26px 0;
+        display: flex;
+        gap: 20px;
+        color: #64748b;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <nav>
+        <span class="brand">
+          <svg width="26" height="26" viewBox="0 0 26 26" aria-label="Meridian" role="img">
+            <circle cx="13" cy="13" r="12" fill="#0f766e" />
+            <path d="M7 17V9l6 5 6-5v8" fill="none" stroke="#fff" stroke-width="2.4" />
+          </svg>
+          Meridian
+        </span>
+        <a href="#product">Product</a>
+        <a href="#plans">Plans</a>
+        <a href="#docs">Docs</a>
+        <span class="spacer"></span>
+        <button class="button" data-testid="signup">Start free</button>
+      </nav>
+
+      <section class="hero">
+        <h1>Know what your product is doing.</h1>
+        <p>
+          Events in, answers out. Meridian keeps a week of raw data so a question you did
+          not plan for is still answerable on Monday.
+        </p>
+        <button class="button">Book a walkthrough</button>
+      </section>
+
+      <section class="plans" id="plans">
+        <div class="plan">
+          <h3>Starter</h3>
+          <div class="price">$0</div>
+          <p>One project, seven days of history, and every export format.</p>
+        </div>
+        <div class="plan">
+          <h3>Team</h3>
+          <div class="price">$49</div>
+          <p>Ten projects, a year of history, and shared dashboards.</p>
+        </div>
+        <div class="plan">
+          <h3>Company</h3>
+          <div class="price">$180</div>
+          <p>Everything in Team, with audit logs and a single sign-on.</p>
+        </div>
+      </section>
+
+      <table>
+        <caption>
+          Recent events
+        </caption>
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Events</th>
+            <th>Last seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Acme Corp</td>
+            <td>12,480</td>
+            <td class="seen">—</td>
+          </tr>
+          <tr>
+            <td>Northwind Ltd</td>
+            <td>3,912</td>
+            <td class="seen">—</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <footer>
+        <p class="credits">Built by a team of four in Turin. All figures are made up.</p>
+        <span class="spacer"></span>
+        <a href="#privacy">Privacy</a>
+      </footer>
+    </div>
+
+    <script>
+      // Redrawn on every load, so `mask` and `check.ignore` have something that genuinely
+      // differs between two shots of the same page.
+      for (const cell of document.querySelectorAll('.seen')) {
+        cell.textContent = `${String(Date.now() % 1000).padStart(3, '0')}ms ago`
+      }
+    </script>
+  </body>
+</html>

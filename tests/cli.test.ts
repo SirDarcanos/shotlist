@@ -1,4 +1,5 @@
-import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { run } from '../src/cli.js'
@@ -6,6 +7,12 @@ import type { Io } from '../src/cli.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 const project = tempProject
+
+/** A PNG's pixel size, read from its header. */
+function pngSize(file: string): { width: number; height: number } {
+  const png = readFileSync(file)
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+}
 
 /** Run the command line, collecting what it printed. */
 async function cli(root: string, args: string[]) {
@@ -16,7 +23,12 @@ async function cli(root: string, args: string[]) {
   return { code, out: out.join('\n'), err: err.join('\n') }
 }
 
-afterEach(removeProjects)
+const made: string[] = []
+
+afterEach(() => {
+  removeProjects()
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
 
 describe('shotlist', () => {
   it('lists the recipes when given nothing to do', async () => {
@@ -59,6 +71,361 @@ describe('shotlist', () => {
     expect(code).toBe(1)
     expect(err).toContain('--intsall')
   })
+})
+
+// A project shoots its whole set in one run, and one recipe that cannot be shot should
+// not decide whether the other thirty-nine get taken.
+describe('--keep-going', () => {
+  /** Add a recipe to a project that no page can satisfy. Sorts first, so it fails first. */
+  function withBroken(root: string): string {
+    writeFileSync(
+      join(root, 'recipes/broken.yaml'),
+      'name: broken\ninstall: guide\nmarks:\n  nowhere: { css: .no-such-element }\n',
+    )
+    return root
+  }
+
+  it('stops at the first failure without it', { timeout: 120_000 }, async () => {
+    const root = withBroken(project())
+    const { code, err } = await cli(root, ['--all'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/recipe "broken": marks\.nowhere/)
+    // order-row sorts after broken, so a run that stopped never reached it.
+    expect(existsSync(join(root, 'out/order-row.png'))).toBe(false)
+  })
+
+  it(
+    'shoots the rest, then names what failed and exits non-zero',
+    { timeout: 120_000 },
+    async () => {
+      const root = withBroken(project())
+      const { code, out, err } = await cli(root, ['--all', '--keep-going'])
+      expect(code).toBe(1)
+      expect(out).toContain('✓ order-row')
+      expect(existsSync(join(root, 'out/order-row.png'))).toBe(true)
+      expect(err).toContain('1 of 5 failed: broken')
+    },
+  )
+
+  it(
+    'carries a failure through --check as a result, not an abort',
+    { timeout: 120_000 },
+    async () => {
+      const root = withBroken(project())
+      await cli(root, ['order-row', '--install'])
+      const { code, out } = await cli(root, ['--check', '--all', '--keep-going'])
+      expect(code).toBe(1)
+      expect(out).toMatch(/FAILED {3}broken — recipe "broken": marks\.nowhere/)
+      expect(out).toContain('same     order-row')
+    },
+  )
+
+  it('says which attempt failed while a recipe is retrying', { timeout: 120_000 }, async () => {
+    const root = withBroken(project())
+    const file = join(root, 'recipes/broken.yaml')
+    writeFileSync(file, `${readFileSync(file, 'utf8')}retries: 2\n`)
+    const { code, out } = await cli(root, ['broken', '--keep-going'])
+    expect(code).toBe(1)
+    expect(out).toContain('↻ broken — attempt 1 of 3 failed: marks.nowhere')
+    expect(out).toContain('↻ broken — attempt 2 of 3 failed: marks.nowhere')
+    // Two retry lines for three attempts: the last is a failure, not a retry.
+    expect(out.match(/↻/g)).toHaveLength(2)
+  })
+})
+
+// The point of a mask: a shot holding one thing the recipe does not decide stays
+// checkable, instead of having to opt out of `--check` altogether.
+describe('mask', () => {
+  const recipe = (extra = '') => `name: plain\ninstall: guide\nclip: viewport\n${extra}`
+
+  it('covers the region it names, and no more of the shot than that', async () => {
+    const root = project()
+    const file = join(root, 'recipes/plain.yaml')
+    writeFileSync(file, recipe())
+    await cli(root, ['plain', '--install'])
+
+    writeFileSync(file, recipe('mask: [{ css: .bar }]\n'))
+    const { code, out } = await cli(root, ['--check', 'plain'])
+
+    expect(code).toBe(1)
+    // `.bar` is 1000×60 of a 1000×700 viewport — 8.6% of the pixels. A mask that painted
+    // more than it was given, or landed in the wrong place, would not land in this range.
+    const percent = Number(/([\d.]+)% of pixels differ/.exec(out)![1])
+    expect(percent).toBeGreaterThan(7.5)
+    expect(percent).toBeLessThan(9.5)
+  }, 120_000)
+
+  it('reaches a region with no class or test id, by position and by literal box', async () => {
+    const root = project()
+    const file = join(root, 'recipes/row.yaml')
+    // Clipped to the row, so the amount is a large enough share of the shot to read as
+    // drift at all — across the whole viewport it falls under the default threshold.
+    const row = 'name: row\ninstall: guide\nclip: { listRow: Acme Corp, pad: 16 }\n'
+    writeFileSync(file, row)
+    await cli(root, ['row', '--install'])
+
+    /** How much of the shot a mask written this way covers. */
+    async function covered(mask: string): Promise<number> {
+      writeFileSync(file, `${row}mask: [${mask}]\n`)
+      const { out } = await cli(root, ['--check', 'row', '--json'])
+      return JSON.parse(out).results[0].ratio
+    }
+
+    // The fixture's amount span carries neither a class nor a test id. It is the third
+    // span in its row and the third child of it, and those are the same element, so the
+    // two ways of saying so cover exactly the same pixels.
+    const byPosition = await covered('{ within: clip, css: span, nth: 2 }')
+    expect(byPosition).toBeGreaterThan(0.02)
+    expect(await covered('{ within: clip, child: 2 }')).toBe(byPosition)
+
+    // A literal box covers the same region approximately: the fixture's `data-rect` is
+    // the text's box, and an element's layout box is a little larger than its text.
+    const byRect = await covered('{ rect: [172, 84, 52, 20] }')
+    expect(byRect).toBeGreaterThan(byPosition * 0.8)
+    expect(byRect).toBeLessThan(byPosition * 1.2)
+  }, 120_000)
+
+  it('names the mask that matched nothing', async () => {
+    const root = project()
+    writeFileSync(join(root, 'recipes/plain.yaml'), recipe('mask: [{ css: .nowhere }]\n'))
+    const { code, err } = await cli(root, ['plain'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/recipe "plain": mask\[0\] — no element matched/)
+  }, 120_000)
+})
+
+// A percentage says a shot moved. It does not say what moved, which is the thing you
+// actually need before deciding whether to bless it.
+// The first five minutes: a project with no config, and a README to copy from.
+describe('--init', () => {
+  /** An empty directory, and the CLI pointed at a config inside it. */
+  function blank() {
+    const root = mkdtempSync(join(tmpdir(), 'shotlist-init-'))
+    made.push(root)
+    return { root, config: join(root, 'shotlist.config.yaml') }
+  }
+
+  it('writes a config and a recipe that the tool can then read', async () => {
+    const { root, config } = blank()
+    const io = { out: (line: string) => lines.push(line), err: () => {} }
+    const lines: string[] = []
+    expect(await run(['--init', '--config', config], io)).toBe(0)
+
+    expect(existsSync(config)).toBe(true)
+    expect(existsSync(join(root, 'screenshots/recipes/example.yaml'))).toBe(true)
+
+    // The scaffold has to parse: one that does not is worse than none at all.
+    const listed = await cli(root, [])
+    expect(listed.code).toBe(0)
+    expect(listed.out).toBe('example')
+  })
+
+  it('leaves anything already there alone', async () => {
+    const { root, config } = blank()
+    writeFileSync(config, 'site: { url: http://example.test }\n')
+    const io = { out: (line: string) => lines.push(line), err: () => {} }
+    const lines: string[] = []
+    await run(['--init', '--config', config], io)
+
+    expect(readFileSync(config, 'utf8')).toBe('site: { url: http://example.test }\n')
+    expect(lines.join('\n')).toContain('already there')
+    // The half that was missing is still written.
+    expect(existsSync(join(root, 'screenshots/recipes/example.yaml'))).toBe(true)
+  })
+})
+
+// A region the recipe does not decide should not cost the whole shot its check, but
+// excusing its contents must not excuse it moving: that is the shot breaking.
+describe('check.ignore', () => {
+  /** A page with one box, whose contents and position the test controls. */
+  function page(root: string, { text, top }: { text: string; top: number }) {
+    writeFileSync(
+      join(root, 'moving.html'),
+      `<html><body style="margin:0;background:#fff">
+         <div id="live" style="position:absolute;left:20px;top:${top}px;width:200px;height:40px;
+              background:#eee;font:16px sans-serif">${text}</div>
+       </body></html>`,
+    )
+  }
+
+  /** A recipe shooting that page, with the box's contents left out of the comparison. */
+  function recipe(root: string) {
+    writeFileSync(
+      join(root, 'recipes/live.yaml'),
+      `name: live\ninstall: guide\nurl: file://${join(root, 'moving.html')}\n` +
+        'viewport: { width: 320, height: 200 }\nclip: viewport\n' +
+        "check:\n  ignore:\n    - { css: '#live' }\n",
+    )
+  }
+
+  it('passes when only the contents of the region changed', async () => {
+    const root = project()
+    recipe(root)
+    page(root, { text: 'rolled 14', top: 20 })
+    await cli(root, ['live', '--install'])
+
+    page(root, { text: 'rolled 3', top: 20 })
+    const { code, out } = await cli(root, ['--check', 'live'])
+    expect(code).toBe(0)
+    expect(out).toContain('same     live  (1 region not compared)')
+  }, 120_000)
+
+  it('still reports the region moving, which is the shot breaking', async () => {
+    const root = project()
+    recipe(root)
+    page(root, { text: 'rolled 14', top: 20 })
+    await cli(root, ['live', '--install'])
+
+    // Same contents, 60px lower. Blanking happens where the box is now, so where it
+    // used to be is compared — and the committed image still has it there.
+    page(root, { text: 'rolled 14', top: 80 })
+    const { code, out } = await cli(root, ['--check', 'live'])
+    expect(code).toBe(1)
+    expect(out).toContain('CHANGED  live')
+  }, 120_000)
+
+  it('names the region that matched nothing rather than skipping the check', async () => {
+    const root = project()
+    writeFileSync(
+      join(root, 'recipes/live.yaml'),
+      `name: live\ninstall: guide\nurl: file://${join(root, 'moving.html')}\n` +
+        'viewport: { width: 320, height: 200 }\nclip: viewport\n' +
+        "check:\n  ignore:\n    - { css: '#nowhere' }\n",
+    )
+    page(root, { text: 'rolled 14', top: 20 })
+    const { code, err } = await cli(root, ['live'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/recipe "live": check\.ignore\[0\] — no element matched/)
+  }, 120_000)
+})
+
+describe('--diff', () => {
+  /** Install order-row, then make what is committed for it a different picture. */
+  async function drifted(width: 'same' | 'other') {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    await cli(root, [width === 'same' ? 'order-row' : 'modal'])
+    if (width === 'other') {
+      cpSync(join(root, 'out/modal.png'), join(root, 'installed/order-row.png'))
+    } else {
+      // Same size, different pixels: mask a region of the committed image.
+      writeFileSync(
+        join(root, 'recipes/order-row.yaml'),
+        `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, css: span, nth: 2 }]\n`,
+      )
+    }
+    return root
+  }
+
+  it('writes a before/after/changed image beside the shot, and names it', async () => {
+    const root = await drifted('same')
+    const { code, out } = await cli(root, ['--check', 'order-row', '--diff'])
+    expect(code).toBe(1)
+    const file = join(root, 'out/diff/order-row.png')
+    expect(out).toContain(`diff:      ${file}`)
+    expect(existsSync(file)).toBe(true)
+
+    // Three panels and two gaps across, one panel tall — the shot, twice over, plus
+    // the same again with the moved pixels tinted.
+    const shot = pngSize(join(root, 'out/order-row.png'))
+    const diff = pngSize(file)
+    expect(diff.width).toBe(shot.width * 3 + 12 * 2)
+    expect(diff.height).toBe(shot.height)
+  }, 120_000)
+
+  it('shows two panels when the sizes differ, since pixels cannot be overlaid', async () => {
+    const root = await drifted('other')
+    await cli(root, ['--check', 'order-row', '--diff'])
+    const committed = pngSize(join(root, 'installed/order-row.png'))
+    const reshot = pngSize(join(root, 'out/order-row.png'))
+    const diff = pngSize(join(root, 'out/diff/order-row.png'))
+    expect(diff.width).toBe(committed.width + reshot.width + 12)
+    expect(diff.height).toBe(Math.max(committed.height, reshot.height))
+  }, 120_000)
+
+  it('writes nothing for a shot that did not move', async () => {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    const { code } = await cli(root, ['--check', 'order-row', '--diff'])
+    expect(code).toBe(0)
+    expect(existsSync(join(root, 'out/diff/order-row.png'))).toBe(false)
+  }, 120_000)
+})
+
+// A CI job wants to branch on what a check found, not parse the lines a person reads.
+describe('--check --json', () => {
+  it('puts the report on stdout and everything else on stderr', async () => {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    const { code, out, err } = await cli(root, ['--check', 'order-row', '--json'])
+
+    expect(code).toBe(0)
+    // stdout has to be a usable file on its own: `--check --json > report.json`.
+    const report = JSON.parse(out)
+    expect(report).toMatchObject({ changed: 0, total: 1 })
+    expect(report.results[0]).toMatchObject({ name: 'order-row', status: 'same' })
+    expect(typeof report.results[0].ratio).toBe('number')
+
+    // The human report moved aside rather than being dropped.
+    expect(err).toContain('same     order-row')
+    expect(out).not.toContain('same     order-row')
+  }, 120_000)
+
+  it('carries the drift and the diff a run found', async () => {
+    const root = project()
+    await cli(root, ['order-row', '--install'])
+    const file = join(root, 'shotlist.baseline.json')
+    const recorded = JSON.parse(readFileSync(file, 'utf8'))
+    writeFileSync(file, JSON.stringify({ ...recorded, platform: 'aix' }))
+    writeFileSync(
+      join(root, 'recipes/order-row.yaml'),
+      `${readFileSync(join(root, 'recipes/order-row.yaml'), 'utf8')}mask: [{ within: clip, css: span, nth: 2 }]\n`,
+    )
+
+    const { code, out } = await cli(root, ['--check', 'order-row', '--json', '--diff'])
+    expect(code).toBe(1)
+    const report = JSON.parse(out)
+    expect(report.changed).toBe(1)
+    expect(report.drift).toContainEqual({ field: 'platform', was: 'aix', now: process.platform })
+    expect(report.results[0].diff).toBe(join(root, 'out/diff/order-row.png'))
+  }, 120_000)
+
+  it('refuses to be asked for a report of a run that takes screenshots', async () => {
+    const { code, err } = await cli(project(), ['order-row', '--json'])
+    expect(code).toBe(1)
+    expect(err).toContain('--json reports a --check run')
+  })
+})
+
+describe('the machine a baseline was taken on', () => {
+  it('is recorded when images are installed, and read back on a check', async () => {
+    const root = project()
+    const { out } = await cli(root, ['order-row', '--install'])
+    expect(out).toContain('recorded this machine in shotlist.baseline.json')
+
+    const file = join(root, 'shotlist.baseline.json')
+    const recorded = JSON.parse(readFileSync(file, 'utf8'))
+    expect(recorded.platform).toBe(process.platform)
+    expect(recorded.chromium).toMatch(/^\d+\./)
+
+    // The same machine: nothing to say.
+    const same = await cli(root, ['--check', 'order-row'])
+    expect(same.out).not.toContain('not the machine')
+
+    // A baseline from somewhere else: the drift is named before the results, so a
+    // moved pixel is not read as the site having changed.
+    writeFileSync(file, JSON.stringify({ ...recorded, chromium: '1.0.0', platform: 'aix' }))
+    const moved = await cli(root, ['--check', 'order-row'])
+    expect(moved.out).toContain('not the machine the committed images were taken on')
+    expect(moved.out).toMatch(/chromium: 1\.0\.0 → \d+\./)
+    expect(moved.out).toContain(`platform: aix → ${process.platform}`)
+  }, 120_000)
+
+  it('is not written by a run that installs nothing', async () => {
+    const root = project()
+    await cli(root, ['order-row'])
+    expect(existsSync(join(root, 'shotlist.baseline.json'))).toBe(false)
+  }, 120_000)
 })
 
 describe('--check', () => {

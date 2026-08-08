@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
+import { FORMATS } from './image.js'
 
 const Style = z
   .object({
@@ -34,6 +35,11 @@ const Style = z
          * A stylesheet to load before drawing — a Google Fonts URL, or any @font-face
          * sheet. Without it a family has to be installed on the machine that shoots.
          * Needs network access at shoot time.
+         *
+         * A http(s) or `data:` URL is linked and fetched. Anything else is a path — read
+         * from disk and inlined, along with the font files it points at, because the
+         * drawing page is built with `setContent` and a browser will not give a page
+         * with no file origin a `file:` subresource.
          */
         fontUrl: z.string().optional(),
       })
@@ -46,18 +52,62 @@ const Style = z
         text: z.string().default('#FFFFFF'),
       })
       .prefault({}),
+    /**
+     * What a masked region is painted with. Neutral rather than the callout colour: a
+     * mask is not pointing anything out, and a white one would vanish on a light UI.
+     */
+    mask: z.object({ fill: z.string().default('#94A3B8') }).prefault({}),
   })
   .prefault({})
 
+/** What a browser can actually paint; past it the tab dies rather than reporting. */
+export const MAX_PIXELS = 16384
+
 const Viewport = z.object({
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  width: z.number().int().positive().max(MAX_PIXELS),
+  height: z.number().int().positive().max(MAX_PIXELS),
 })
+
+/** How to start the site, for a run that cannot assume somebody already has. */
+const ServeOptions = z
+  .object({
+    /**
+     * Run directly, without a shell: `npm run dev`, not `PORT=3000 npm run dev && …`.
+     * Environment goes under `env`, and anything needing a shell goes in a script.
+     */
+    command: z.string(),
+    /**
+     * What proves it is up: a http(s) URL to fetch, a port to connect to, or a pattern
+     * to wait for in its output. Defaults to fetching `site.url`.
+     */
+    ready: z
+      .union([z.string(), z.int().positive(), z.object({ log: z.string() }).strict()])
+      .optional(),
+    /** Where to run it. A relative path resolves from the config file's directory. */
+    cwd: z.string().optional(),
+    env: z.record(z.string(), z.string()).default({}),
+    timeout: z.number().positive().default(30000),
+  })
+  .strict()
+
+/** `serve: npm run dev` is the whole of it for most projects; the mapping is the rest. */
+const Serve = z.union([
+  z.string().transform((command) => ServeOptions.parse({ command })),
+  ServeOptions,
+])
 
 const Site = z.object({
   url: z.string(),
+  /** Started before the first shot and stopped after the last, unless already running. */
+  serve: Serve.optional(),
+  /**
+   * Hosts a shot may open besides this site's own and everything under it — a sign-in
+   * provider a flow passes through, a docs domain, a third-party page worth shooting.
+   * Ignored by an `--untrusted` run, which is what makes that flag worth having.
+   */
+  allow: z.array(z.string()).default([]),
   viewport: Viewport.default({ width: 1280, height: 800 }),
-  scale: z.number().positive().default(2),
+  scale: z.number().positive().max(64).default(2),
   theme: z.enum(['light', 'dark', 'no-preference']).default('light'),
   reducedMotion: z.boolean().default(true),
   /** A selector proving the app has booted — waited for after every navigation. */
@@ -78,10 +128,34 @@ export const Config = z.object({
       out: z.string().default('screenshots/out'),
     })
     .prefault({}),
+  /**
+   * What images are written as. `png` keeps every pixel; `webp` is a good deal smaller
+   * for the same thing and is what a browser will be showing them in anyway. `jpeg` is
+   * lossy in the way that shows worst on the thing a UI screenshot is mostly made of,
+   * which is text.
+   *
+   * AVIF is not here: the encoder is a browser, and Chromium reads AVIF but will not
+   * write it.
+   */
+  image: z
+    .object({
+      format: z.enum(FORMATS).default('png'),
+      /** Ignored by `png`, which has nothing to trade. */
+      quality: z.int().min(1).max(100).default(90),
+    })
+    .prefault({}),
   /** Named install destinations a recipe selects with `install: <name>`. */
   install: z.record(z.string(), z.string()).default({}),
   /** Project-defined query aliases: `trackerRow: { css: …, contains: $1 }`. */
   finders: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Names this project will not have read or written, on top of the ones shotlist never
+   * touches. One path segment each, with `*` for any run of characters — so `*.sqlite`
+   * is a file and `fixtures` is a folder and everything under it.
+   *
+   * Honoured whether the config is trusted or not, because it can only ever refuse more.
+   */
+  deny: z.array(z.string()).default([]),
   check: z
     .object({
       /** The fraction of differing pixels a shot may have before it counts as changed. */
@@ -94,6 +168,7 @@ export const Config = z.object({
 
 export type Config = z.infer<typeof Config>
 export type Style = z.infer<typeof Style>
+export type Serve = z.infer<typeof Serve>
 
 const FILENAMES = ['shotlist.config.yaml', 'shotlist.config.yml', 'shotlist.config.json']
 
@@ -122,14 +197,52 @@ export class ShotlistError extends Error {
   }
 }
 
+type Issue = z.ZodError['issues'][number]
+
+/** How far into nested unions to follow a failure before taking zod's own summary. */
+const UNION_DEPTH = 3
+
+/**
+ * One line per problem, following a union into the branch the author plainly meant.
+ *
+ * A union reports `Invalid input` and nothing else, which for `serve`, `clip`, `numbered`
+ * or `check` names neither the key that was wrong nor what it should have been. A branch
+ * that failed only because the value is the wrong type entirely is not the one being
+ * written — `serve: { command: …, reddy: … }` is not a failed attempt at a string.
+ * Whatever branches are left are the ones with something to say.
+ */
+function explain(issues: readonly Issue[], prefix: PropertyKey[] = [], depth = 0): string[] {
+  return issues.flatMap((issue) => {
+    const path = [...prefix, ...issue.path]
+    if (issue.code === 'invalid_union' && depth < UNION_DEPTH) {
+      const branches = issue.errors.filter(
+        (branch) => !branch.every((each) => each.code === 'invalid_type' && !each.path.length),
+      )
+      if (branches.length) {
+        return [...new Set(branches.flatMap((branch) => explain(branch, path, depth + 1)))]
+      }
+    }
+    const where = path.length ? path.join('.') : '(root)'
+    return [`  ${where}: ${issue.message}`]
+  })
+}
+
 /** Turn zod's issue list into one line per problem, addressed by its path in the document. */
 export function formatIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const where = issue.path.length ? issue.path.join('.') : '(root)'
-      return `  ${where}: ${issue.message}`
-    })
-    .join('\n')
+  return explain(error.issues).join('\n')
+}
+
+/**
+ * The page's own complaint, without Playwright's call prefix or the in-page stack.
+ *
+ * A query is resolved by a function serialized into the browser, so a failure arrives
+ * wrapped: `page.evaluateHandle: Error: no element matched {…}` followed by a JavaScript
+ * stack through `UtilityScript`. The person reading it is editing YAML, and none of that
+ * is about their recipe.
+ */
+export function pageMessage(error: unknown): string {
+  const [first = ''] = String((error as Error | undefined)?.message ?? error).split('\n')
+  return first.replace(/^page\.\w+:\s*/, '').replace(/^Error:\s*/, '')
 }
 
 /** Parse a YAML or JSON document, reporting the file and the parser's own line and column. */
@@ -156,6 +269,11 @@ export interface LoadedConfig {
   /** The config file's own directory: every path in `paths` and `install` resolves from here. */
   root: string
   file: string
+  /**
+   * What this config is allowed to do to the machine running it, set by the operator.
+   * Absent means the config is the operator's own, which is what a desk looks like.
+   */
+  trust?: import('./trust.js').Trust
 }
 
 /** Load the nearest config file, or the one given, with its root directory. */

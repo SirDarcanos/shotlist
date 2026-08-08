@@ -1,7 +1,8 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
-import { ShotlistError, formatIssues, readDocument } from './config.js'
+import { MAX_PIXELS, ShotlistError, formatIssues, readDocument } from './config.js'
+import { FORMATS } from './image.js'
 import { makeQuery } from './query.js'
 import type { QueryInput } from './query.js'
 
@@ -43,7 +44,9 @@ function makeStep(aliases: Readonly<Record<string, unknown>>): z.ZodType<StepInp
           ...StepBase,
         })
         .strict(),
-      z.object({ repeat: z.number().int().positive(), steps: z.array(Step), ...StepBase }).strict(),
+      z
+        .object({ repeat: z.int().positive().max(1000), steps: z.array(Step), ...StepBase })
+        .strict(),
       z
         .object({
           each: z.union([z.string(), z.array(z.unknown())]),
@@ -99,13 +102,19 @@ const Callout = z
     /** One line, or several. */
     text: z.union([z.string(), z.array(z.string())]).optional(),
     n: z.int().positive().optional(),
-    place: z.enum(['left', 'right', 'top', 'bottom', 'corner']).default('right'),
+    /**
+     * Which side of the mark the label sits on. `auto` weighs what each side would cost
+     * the canvas against what its arrow would have to cross, and is right often enough
+     * to be the default; name a side when the shot needs one.
+     */
+    place: z.enum(['left', 'right', 'top', 'bottom', 'corner', 'auto']).default('auto'),
     /** One of eight anchors on the box: a corner, or the middle of an edge. */
     badge: z.enum(['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br']).default('tl'),
     box: z.boolean().default(true),
     /**
-     * Whether the label or disc sits over the screenshot. A label defaults to outside,
-     * in a margin the canvas grows to make; a disc defaults to inside, on the box.
+     * Whether the label or disc sits over the screenshot rather than in a margin the
+     * canvas grows to make. Left unsaid, a disc goes inside and a label on a named side
+     * goes outside; with `place: auto` it is decided from what the shot has under it.
      */
     inside: z.boolean().optional(),
     /** Nudge, in image pixels, for what geometry alone cannot place. */
@@ -115,10 +124,6 @@ const Callout = z
     gap: z.number().optional(),
   })
   .strict()
-  .transform((callout) => ({
-    ...callout,
-    inside: callout.inside ?? callout.place === 'corner',
-  }))
 
 /** `numbered:` as a plain list, or as a list with the style every disc shares. */
 const Numbered = z.union([
@@ -143,22 +148,55 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
   const Query = makeQuery(aliases)
   return z
     .object({
-      name: z.string().optional(),
+      /** A filename, not a path: it names the image written into `paths.out`. */
+      name: z
+        .string()
+        .refine((value) => !/[\\/]|^\.\.?$/.test(value), {
+          message: 'is the name of an image, so it cannot contain a path',
+        })
+        .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), {
+          message: 'is a filename, so it cannot hold control characters',
+        })
+        .optional(),
       source: z.enum(['app', 'file']).default('app'),
       /** With `source: file`, the PNG to annotate instead of driving the site. */
       file: z.string().optional(),
       install: z.string().optional(),
       url: z.string().optional(),
-      viewport: z.object({ width: z.number(), height: z.number() }).optional(),
-      scale: z.number().positive().optional(),
+      viewport: z
+        .object({
+          width: z.number().int().positive().max(MAX_PIXELS),
+          height: z.number().int().positive().max(MAX_PIXELS),
+        })
+        .optional(),
+      scale: z.number().positive().max(64).optional(),
+      /** What this shot is written as, when it differs from the project's. */
+      format: z.enum(FORMATS).optional(),
+      quality: z.int().min(1).max(100).optional(),
       theme: z.enum(['light', 'dark', 'no-preference']).optional(),
       style: StylePatch.optional(),
       setup: z.array(makeStep(aliases)).default([]),
       clip: z.union([z.literal('viewport'), z.literal('full'), Query]).default('viewport'),
       marks: z.record(z.string(), Query).default({}),
+      /**
+       * Regions painted over before the callouts are drawn, for what the recipe does not
+       * decide: a clock, a live total, a face. Without them a shot holding one thing that
+       * changes has to give up `--check` entirely, and a staleness check that always
+       * reports a change is one nobody reads.
+       */
+      mask: z.array(Query).default([]),
       callouts: z.array(Callout).default([]),
       /** Shorthand: number these marks 1..n, in order, with a disc on each box. */
       numbered: Numbered.optional(),
+      /**
+       * How many times to shoot this again if it fails. A capture drives a real
+       * application, and what it trips over — an element that had not rendered yet, a
+       * request that had not landed — is often gone on the next attempt.
+       *
+       * Capped, because a recipe whose query is simply wrong fails identically every
+       * time, and the only thing a large number buys is a slower way to be told so.
+       */
+      retries: z.int().min(0).max(5).default(0),
       /**
        * How `--check` treats this recipe. `false` never diffs it, for a shot whose
        * content the recipe does not control — live dice, a clock, anything the
@@ -171,6 +209,16 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
             .object({
               threshold: z.number().min(0).max(1).optional(),
               tolerance: z.number().min(0).max(255).optional(),
+              /**
+               * Regions whose contents are not compared, for a shot that is worth
+               * checking apart from the part of it the recipe does not decide.
+               *
+               * The region is shot as it is — unlike `mask`, nothing is painted over
+               * it — and blanked in both images before they are diffed. It is blanked
+               * at the place it resolves to now, so the box moving or changing size is
+               * still reported: what is excused is the content, not the geometry.
+               */
+              ignore: z.array(Query).default([]),
             })
             .strict(),
         ])
@@ -481,10 +529,20 @@ export function interpolate(
   return value
 }
 
-/** Read a dotted path out of the variable scope. */
+/**
+ * Keys that read the language rather than the data.
+ *
+ * `$__proto__` answered with `Object.prototype`, and a step is free to put whatever it
+ * resolves into a query — so a reference could reach out of the scope it was given into
+ * the shape of the interpreter. Data files hold data.
+ */
+const NOT_DATA = new Set(['__proto__', 'constructor', 'prototype'])
+
+/** Read a dotted path out of the variable scope, and out of nothing else. */
 function lookup(vars: Readonly<Record<string, unknown>>, path: string): unknown {
   return path.split('.').reduce<unknown>((current, key) => {
     if (current === null || typeof current !== 'object') return undefined
+    if (NOT_DATA.has(key) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined
     return (current as Record<string, unknown>)[key]
   }, vars)
 }

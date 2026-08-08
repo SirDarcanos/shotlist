@@ -1,4 +1,4 @@
-# Contributing to shotlist
+# Building shotlist
 
 Read this before writing code. It is how shotlist is built, and it is the source of
 truth for the rules. Setup, commands and releases are in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
@@ -48,6 +48,33 @@ with the shot that needs it as the evidence.
    other comments unless the code cannot say it: a non-obvious why, a gotcha, a workaround.
 8. **Everything testable has tests**, in `tests/` mirroring `src/`. The pure layers run in
    Node, the drawing layer in jsdom, the browser path against `tests/fixture/`.
+9. **Every path goes through `checkPath`, every URL through `checkUrl`.** A run may be
+   given a config nobody vouched for, and those two are the whole of what keeps it to the
+   project and its own site. A new place that opens or writes something and calls neither
+   is a hole, and nothing will fail to tell you.
+10. **A control never comes from the config.** `--untrusted`, `--allow`, `--allow-path`
+    and `SHOTLIST_*` are the operator's. A config may narrow what it is allowed — `deny:`
+    is honoured in every mode — and may only widen it when it is trusted, which is why
+    `site.allow` is ignored under `--untrusted`.
+
+## Traps this codebase has
+
+- **Prettier reformats between edits.** A search-and-replace written against what you last
+  read will miss silently once the file has been formatted. Check that the edit landed
+  rather than that the command exited.
+- **Piping the gate hides it.** `npm test | grep …` reports grep's exit code, so `&&`
+  carries on past a failing suite. Run the gate unpiped.
+- **A one-key object with a key the query language does not know is a call to a finder.**
+  That is how `{ listRow: 'Acme' }` works, and it is why `grow: { left: 4 }` was read as a
+  finder named `left`. A new query key whose value is an object of non-query keys belongs
+  in `NOT_A_QUERY` in `query.ts`.
+- **The browser is the only encoder, and it lies about the ones it cannot do.** A canvas
+  asked for a format it will not write answers with a PNG rather than an error — which is
+  how an `.avif` file full of PNG bytes gets written and installed. Every conversion checks
+  the mime it got back, and `FORMATS` is pinned by a test to what Chromium can really
+  encode. Adding a format means proving the browser writes it, not adding a string.
+- **`site.timeout` bounds a query because the page cannot be interrupted.** A `matching`
+  pattern runs inside the page on its one thread; nothing else can stop it.
 
 ## Layout
 
@@ -59,9 +86,14 @@ with the shot that needs it as the evidence.
 | `src/steps.ts`    | the step vocabulary, run against a Playwright page          |
 | `src/annotate.ts` | the drawing layer, injected into the page                   |
 | `src/capture.ts`  | clip, scale, canvas growth, write                           |
+| `src/image.ts`    | the formats a shot is written in, and reading one back      |
 | `src/check.ts`    | perceptual diff against the committed image                 |
+| `src/serve.ts`    | starting the site and stopping it again                     |
+| `src/trust.ts`    | what a config may reach: hosts, paths, forbidden names      |
+| `src/baseline.ts` | what the committed images were taken with                   |
+| `src/init.ts`     | the scaffold `--init` writes                                |
 | `src/cli.ts`      | the `shotlist` binary                                       |
-| `tests/fixture/`  | the static site the browser-driven tests shoot              |
+| `tests/fixture/`  | two pages the browser-driven tests shoot — see CONTRIBUTING |
 
 ## Definition of done
 
@@ -80,12 +112,16 @@ All of these, not most of them.
 - [ ] New or changed behaviour has a test. A bug fix has a test that failed before it.
 - [ ] A new query primitive has a shape in `tests/fixture/` and a test against it.
 - [ ] A new step verb is in `VERBS`, which is what gives a typo of it a suggestion.
+- [ ] Anything counting, indexing or measuring was checked by breaking it: change the
+      implementation, watch the test fail, put it back. A test that cannot fail is not
+      one, and a fixture the same length as the index under test will hide an off-by-one
+      — `nth: -2` and `nth: 0` are the same element in a list of two.
 
 ### Consistent
 
 - [ ] No second definition of any shape. Types are inferred, JSON Schemas are generated.
 - [ ] Nothing site-specific entered the package (rule 1).
-- [ ] The fixture's `data-rect` attributes still match its CSS.
+- [ ] `index.html`'s `data-rect` attributes still match its CSS. `site.html` has none.
 
 ### Documented
 

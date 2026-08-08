@@ -58,6 +58,30 @@ describe('parseRecipe', () => {
     expect(() => parseRecipe({ source: 'file' }, { name: 'x' })).toThrow(/needs a `file:`/)
   })
 
+  // Several keys accept more than one shape, and a union reports only that none of them
+  // matched — naming neither the key that was wrong nor what it should have been.
+  it('names the key inside the branch the author was plainly writing', () => {
+    expect(() => parseRecipe({ numbered: { marks: ['a'], badgee: 'ml' } }, { name: 'x' })).toThrow(
+      /numbered: Unrecognized key: "badgee"/,
+    )
+  })
+
+  it('keeps zod’s own summary when no branch got any further than the type', () => {
+    // Neither a list nor a mapping: no branch has more to say than that.
+    expect(() => parseRecipe({ numbered: 5 }, { name: 'x' })).toThrow(/numbered: Invalid input/)
+  })
+
+  it('shoots once unless the recipe asks for retries', () => {
+    expect(parseRecipe({}, { name: 'x' }).retries).toBe(0)
+    expect(parseRecipe({ retries: 3 }, { name: 'x' }).retries).toBe(3)
+  })
+
+  it('refuses a retry count that is negative, fractional, or past the cap', () => {
+    expect(() => parseRecipe({ retries: -1 }, { name: 'x' })).toThrow(/retries/)
+    expect(() => parseRecipe({ retries: 1.5 }, { name: 'x' })).toThrow(/retries/)
+    expect(() => parseRecipe({ retries: 6 }, { name: 'x' })).toThrow(/retries/)
+  })
+
   it('resolves aliases before validating, so an author sees their own query', () => {
     const recipe = parseRecipe(
       { marks: { row: { listRow: 'Acme Corp' } } },
@@ -166,5 +190,21 @@ describe('interpolate', () => {
   it('leaves an unresolved reference inside a longer string alone', () => {
     // A screenshot of literal text like "costs $5" must survive the interpolator.
     expect(interpolate('costs $5', {})).toBe('costs $5')
+  })
+})
+
+describe('what a recipe is not allowed to be', () => {
+  it('refuses a name that is a path, since it names an image in the out directory', () => {
+    expect(() => parseRecipe({ name: '../../escaped' }, { name: 'x' })).toThrow(
+      /name: is the name of an image, so it cannot contain a path/,
+    )
+    expect(() => parseRecipe({ name: '..' }, { name: 'x' })).toThrow(/cannot contain a path/)
+  })
+
+  it('refuses a viewport or scale past what a browser can paint', () => {
+    expect(() => parseRecipe({ viewport: { width: 99999, height: 10 } }, { name: 'x' })).toThrow(
+      /viewport.width/,
+    )
+    expect(() => parseRecipe({ scale: 500 }, { name: 'x' })).toThrow(/scale/)
   })
 })

@@ -48,19 +48,34 @@ Run `npm run build` after changing any schema. The JSON Schemas that drive edito
 autocomplete are generated from the zod schemas, so a new field only reaches editors once
 they are regenerated.
 
-## The fixture
+## The fixtures
+
+There are two, and they are for different things.
 
 `tests/fixture/index.html` is a three-column app with a list, a detail pane, a controls
-pane and a modal. The browser-driven tests shoot it; the jsdom tests query it.
+pane and a modal. It exists to exercise query primitives. The browser-driven tests shoot
+it; the jsdom tests query it.
+
+`tests/fixture/site.html` is a product page — a brand, a nav, a hero, pricing cards, a
+table and a footer — for the tests that need a page shaped like the ones recipes are
+really written against. It is only ever shot in a real browser, so it carries no
+`data-rect` and is laid out by CSS like any page. Its "last seen" column is redrawn on
+every load on purpose: it is what `mask` and `check.ignore` are tested against.
 
 Two constraints:
 
-- **Every element carries `data-rect="x,y,width,height"`.** jsdom has no layout engine,
-  so rects would all be zero. A real browser ignores the attribute and measures the page.
-  When you change the CSS, update the attributes to match, or the jsdom tests pass
-  against numbers the page no longer has.
-- **Nothing in it comes from a real product.** The fixture exercises query primitives. If
-  you need a new shape to test against, add a neutral one.
+- **In `index.html`, every element carries `data-rect="x,y,width,height"`.** jsdom has no
+  layout engine, so rects would all be zero. A real browser ignores the attribute and
+  measures the page. When you change that file's CSS, update the attributes to match, or
+  the jsdom tests pass against numbers the page no longer has. `site.html` has none of
+  this, and must not grow any: nothing measures it except a browser.
+- **Nothing in either comes from a real product.** If you need a new shape to test
+  against, add a neutral one.
+
+`tests/fixture/JetBrainsMono-Bold.woff2` is there for the tests that load a font from
+disk; it is SIL Open Font License 1.1, and `JetBrainsMono-OFL.txt` beside it is the
+licence. It is a test asset and is not published — `files` in `package.json` ships only
+`dist`, `skills`, the README and the licence.
 
 ## Before opening a pull request
 
@@ -68,8 +83,16 @@ Two constraints:
 npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+Run it unpiped. `npm test | grep …` reports grep's exit code, so a `&&` chain carries on
+past a suite that failed.
+
 The full list of what "finished" means is in
 [AGENTS.md → Definition of done](./AGENTS.md#definition-of-done).
+
+If your change opens a URL or reads or writes a path, it goes through `checkUrl` or
+`checkPath` in `src/trust.ts`. Those two are the whole of what keeps a run to the project
+and its own site when the config is one nobody vouched for, and a new caller that skips
+them fails no test.
 
 One concern per pull request. Commit subjects are `Area: what changed` — imperative,
 sentence case after the prefix. The body explains why.
@@ -122,6 +145,18 @@ what a key means breaks every recipe in every project using it.
 - Before 1.0: a **minor** bump, plus a `Changed` entry saying what to edit.
 - After 1.0: a **major** bump.
 - Adding a verb, primitive or config key: patch or minor.
+
+## Reporting something security-shaped
+
+shotlist runs other people's configs — in CI on a fork's pull request, or in a service
+shooting what somebody submitted. A way past `--untrusted`, a path or host check that can
+be walked around, or anything that gets a run to touch what it should not, is worth
+reporting privately first: use GitHub's **Report a vulnerability** on the Security tab
+rather than opening an issue.
+
+What is already known and deliberate is in the README under
+[what a config can do](./README.md#what-a-config-can-do-to-the-machine-that-runs-it) —
+including the two things the checks do not cover, DNS rebinding and rate limiting.
 
 ## Reporting a recipe that fails
 

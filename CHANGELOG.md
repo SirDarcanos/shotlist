@@ -6,9 +6,112 @@ Notable changes to shotlist. The format follows
 
 **The recipe format is public API.** Renaming a step verb, removing a query key, or
 changing what an existing key means is a breaking change, and says here exactly what to
-edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#what-counts-as-a-breaking-change).
+edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
+
+### Changed
+
+- **`place` on a callout defaults to `auto`.** It weighs what a side costs the canvas
+  against what its arrow would cross, and whether the label can sit over the shot at all.
+  A callout that relied on the old default has to say `place: right`.
+- **A shot list covers its own site.** `site.url` decides what a run may open: that host
+  and everything under it. A config that shot more than one site has to name the others in
+  `site.allow`.
+- **`ancestor` climbs from the element's parent**, not from the element — an element is
+  not its own ancestor. A query relying on the element matching itself should drop the key.
+
+### Added
+
+- **`image.format` — `png`, `jpeg` or `webp`**, with `quality` for the two that are lossy,
+  and a per-recipe `format`/`quality` to override it. The written file takes the
+  extension the format is known by, and `--check` compares against the same. `webp` is the
+  one worth reaching for: a shot of this site's homepage is 87 KB as PNG and 33 KB as
+  WebP, with text a JPEG at the same size would have smeared. `source: file` reads all
+  three now, from the bytes rather than the name.
+
+  There is no AVIF. The only encoder here is a browser, and Chromium reads AVIF but will
+  not write it — worse, it answers a request for one with a PNG rather than an error, so
+  every conversion checks what it actually got back.
+
+- **`site.serve`** starts the site, waits until it answers, and stops it afterwards. A
+  server already running is used as it is, so it can stay in the config.
+- **`mask`** paints over a region the recipe does not decide — a clock, a live total, a
+  face — so the rest of the shot stays checkable.
+- **`check.ignore`** leaves a region's contents out of the comparison but shoots it as it
+  is, for when the volatile thing is what the screenshot is _of_. A box that moves or
+  renders nothing is still reported.
+- **`retries` on a recipe**, for a shot that is flaky rather than wrong.
+- **`--keep-going`** finishes the run and names every failure at the end.
+- **`--init`** writes a commented config and a first recipe.
+- **`--check --diff`** writes a committed/re-shot/changed three-up for each drifted shot.
+- **`--check --json`** puts the report on stdout and everything written for a person on
+  stderr.
+- **`--check` says when it is not on the machine that took the images**, which `--install`
+  records in `shotlist.baseline.json`.
+- **`nth` and `child` count from the end when negative**, the way `Array.at` does.
+- **A skill for coding agents**, at `skills/shotlist/SKILL.md`, to copy into
+  `.claude/skills/`.
+- **`--untrusted`**, for a config that is not yours: no processes, nothing but http(s),
+  nothing on the network the runner sits in, nothing outside the project, and `site.allow`
+  ignored. Set from the command line or `SHOTLIST_UNTRUSTED`, never from the config.
+- **`--allow <host>` and `--allow-path <dir>`**, repeatable. Unlike `site.allow` they come
+  from the operator, so they survive `--untrusted`.
+- **`deny:`, `--deny` and `SHOTLIST_DENY`** put a file or folder name out of bounds, on
+  disk and in a URL path alike. They add up and none of them can subtract.
+- **Names never read or written, in any mode**: `.env` and its variants, `.git`, `.ssh`,
+  `.gnupg`, `.aws`, `.npmrc`, `.netrc`, `.htpasswd`, `credentials`, ssh private keys, and
+  `.pem` / `.key` / `.p12` / `.pfx` / `.keystore` / `.jks`.
+
+### Fixed
+
+- **`clip: full` returned one viewport, not the page.** Playwright clamps a clip to the
+  viewport unless `fullPage` is set, so the documented way to shoot a whole page silently
+  gave back its top and nothing else. A clip that reaches past the fold is taken with
+  `fullPage` now — and a query clip is no longer trimmed to the viewport height either, so
+  a region taller than the fold is shot whole rather than cut off at it.
+
+- **`style.label.fontUrl` could not name a font the project ships.** A relative path was
+  refused, and an absolute `file:` URL was accepted and then silently did nothing — the
+  drawing page is built with `setContent`, so it has no file origin and a browser gives it
+  no `file:` subresource. A local stylesheet is read and inlined now, with the font files
+  it points at inlined into it, so a path relative to the config works.
+- **The font warning fired on a webfont that had loaded.** Nothing on the drawing page
+  uses the family until the callouts are drawn, so `document.fonts.ready` resolved against
+  an empty queue and the check ran before the face arrived. The label came out right and
+  the warning contradicted it. The face is now asked for by name, at the label's own
+  weight, before anything is measured.
+
+- **A query that matched nothing reported itself in JavaScript**, through a stack in
+  `UtilityScript`. A failure names the recipe and the key:
+  `recipe "order-row": marks.amount — no element matched {…}`.
+- **A site that was not running said `net::ERR_CONNECTION_REFUSED`.** It names `site.url`,
+  or the recipe's own `url`, and asks whether the site is up.
+- **`source: file` failed on the PNG header rather than on the file**, after launching a
+  browser it did not need.
+- **A bad value in a union said `Invalid input` and stopped.** It follows the union into
+  the branch being written: `numbered: Unrecognized key: "badgee"`.
+- **`grow` with a single side never worked.** `grow: { left: 4 }` read as a call to a
+  finder named `left`; two sides happened to work, which is why it went unnoticed.
+- **`mask` and `check.ignore` covered only the first element their query matched.** A mask
+  over `.avatar` shipped every face but one.
+- **A `fontUrl` could put script into the page the callouts are drawn in.** It is held to
+  a URL and escaped where it is written.
+- **A `matching` pattern could hang a run for ever** by backtracking. Resolving a query is
+  bounded by `site.timeout`.
+- **A viewport or scale past what a browser can paint crashed it**, reporting a Playwright
+  error with the whole Chromium command line in it.
+- **A recipe `name` could climb out of the out directory**, or hold a control character.
+- **A null byte got a forbidden name past every path check**, on disk and in a URL path.
+- **A symlink inside the project was a way out of it** under `--untrusted`.
+- **`$__proto__` in a data reference answered with `Object.prototype`.** Only a key the
+  data holds itself is read.
+- **A query nested deep enough killed the process.** Past 64 deep it is refused.
+- **A negative `pad`, `grow` or `rect` size** was carried until something downstream
+  complained. Each is refused where it is written.
+- **A query resolving to a box with no area** reported the clip it became rather than the
+  query that produced it.
+- **The README's reference tables had fallen behind the schemas they describe.**
 
 ## [0.2.3] — 2026-08-06
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseConfig } from '../src/config.js'
 import { drawAnnotations } from '../src/annotate.js'
 import type { DrawStyle, Mark } from '../src/annotate.js'
@@ -20,6 +20,7 @@ const STYLE: DrawStyle = {
     gap: 40,
   },
   number: { radius: 26, size: 40, text: '#FFFFFF' },
+  mask: { fill: '#94A3B8' },
 }
 
 const IMAGE = { width: 400, height: 300 }
@@ -31,14 +32,25 @@ function mark(over: Partial<Mark> = {}): Mark {
     place: 'right',
     badge: 'tl',
     box: true,
-    inside: false,
     ...over,
   }
 }
 
 /** Draw against a 400×300 image at 2×, the scale most captures use. */
-function draw(marks: Mark[], scale = 2) {
-  return drawAnnotations({ image: IMAGE, scale, style: STYLE, marks })
+function draw(
+  marks: Mark[],
+  scale = 2,
+  masks?: { x: number; y: number; width: number; height: number }[],
+) {
+  return drawAnnotations({ image: IMAGE, scale, style: STYLE, marks, ...(masks ? { masks } : {}) })
+}
+
+/** Every rect the layer holds, as `x,y,width,height`, with its fill. */
+function rects() {
+  return [...document.querySelectorAll('#shotlist-layer rect')].map((node) => ({
+    at: ['x', 'y', 'width', 'height'].map((key) => node.getAttribute(key)).join(','),
+    fill: node.getAttribute('fill'),
+  }))
 }
 
 beforeEach(() => {
@@ -446,5 +458,149 @@ describe('drawing', () => {
     ])
     const [first, second] = [...document.querySelectorAll('#shotlist-layer text')]
     expect(Number(second!.getAttribute('y'))).toBeGreaterThan(Number(first!.getAttribute('y')))
+  })
+})
+
+// A shot can hold one thing the recipe does not decide — a clock, a live total. Without a
+// mask the whole image has to give up `--check`, which is the check nobody then reads.
+describe('masks', () => {
+  const region = { x: 10, y: 20, width: 60, height: 30 }
+
+  it('paints the region, before any callout is drawn over it', () => {
+    draw([mark({ box: true, text: undefined })], 2, [region])
+    const painted = rects()
+    expect(painted[0]).toEqual({ at: '10,20,60,30', fill: STYLE.mask.fill })
+    // The callout's own outline comes after, so it stays legible over a mask.
+    expect(painted[1]?.fill).toBe('none')
+  })
+
+  it('draws over the shot without growing the canvas', () => {
+    const plain = draw([], 2)
+    const masked = draw([], 2, [region])
+    expect(masked.width).toBe(plain.width)
+    expect(masked.height).toBe(plain.height)
+    expect(rects()).toHaveLength(1)
+  })
+
+  it('moves the region by the margin a label claimed', () => {
+    // A label placed left grows the canvas on that side, and the shot moves with it —
+    // a mask is in image coordinates, so it has to move by the same amount.
+    draw([mark({ place: 'left', text: 'Some label' })], 2, [region])
+    const [painted] = rects()
+    const x = Number(painted!.at.split(',')[0])
+    expect(x).toBeGreaterThan(region.x)
+  })
+})
+
+// A label on the left or right grows the canvas by its width, one above or below by its
+// height — and the arrow runs from the margin to the box, so a side whose path crosses
+// something already pointed at is one to avoid. `place:` still beats all of it.
+describe('place: auto', () => {
+  /** Which side a label ended up on, read off the canvas it produced. */
+  function side(result: { width: number; height: number; margin: { left: number; top: number } }) {
+    const grewX = result.width - IMAGE.width
+    const grewY = result.height - IMAGE.height
+    if (grewX >= grewY) return result.margin.left > 0 ? 'left' : 'right'
+    return result.margin.top > 0 ? 'top' : 'bottom'
+  }
+
+  const label = { text: 'What they owe', place: 'auto' } as const
+
+  it('takes the cheap axis: a wide label costs its height, not its width', () => {
+    // 13 characters wide against 20 tall, so beside the mark costs three times as much
+    // canvas as above it. The nearer edge of the two settles which.
+    expect(side(draw([mark(label)]))).toBe('top')
+  })
+
+  it('goes the other way rather than cross another mark', () => {
+    const blocker = mark({ rect: { x: 100, y: 20, width: 80, height: 20 }, place: 'corner' })
+    expect(side(draw([mark(label), blocker]))).toBe('bottom')
+  })
+
+  it('goes the other way rather than cross a mask', () => {
+    expect(side(draw([mark(label)], 2, [{ x: 90, y: 10, width: 100, height: 40 }]))).toBe('bottom')
+  })
+
+  it('leaves a side the recipe named alone', () => {
+    expect(side(draw([mark({ ...label, place: 'left' })]))).toBe('left')
+    expect(side(draw([mark({ ...label, place: 'bottom' })]))).toBe('bottom')
+  })
+
+  it('spreads two labels that would otherwise stack on one side', () => {
+    // Both marks are cheapest above, and their widths overlap — so the second would have
+    // to clear the first. Paying for that is what sends it the other way instead.
+    const together = draw([
+      mark({ ...label, rect: { x: 100, y: 100, width: 80, height: 20 } }),
+      mark({ ...label, rect: { x: 110, y: 140, width: 80, height: 20 } }),
+    ])
+    const grewAbove = together.margin.top
+    const grewBelow = together.height - IMAGE.height - grewAbove
+    expect(grewAbove).toBeGreaterThan(0)
+    expect(grewBelow).toBeGreaterThan(0)
+  })
+})
+
+// A label over the shot costs no canvas at all and needs only a stub of an arrow — but
+// only where it would cover nothing, which marks and masks cannot say. The pixels can.
+describe('place: auto, over the shot', () => {
+  const real = HTMLCanvasElement.prototype.getContext
+
+  /** Give the layer a shot to read: blank, or inked where `busy` says. */
+  function shotOf(busy?: (x: number, y: number) => boolean) {
+    const img = document.getElementById('shotlist-image')!
+    for (const [key, value] of [
+      ['naturalWidth', IMAGE.width * 2],
+      ['naturalHeight', IMAGE.height * 2],
+    ] as const) {
+      Object.defineProperty(img, key, { value, configurable: true })
+    }
+    HTMLCanvasElement.prototype.getContext = (() => ({
+      drawImage: () => {},
+      // The label measurer asks the same kind of context for text metrics; without this
+      // it falls over rather than falling back to the metric box as it does under jsdom.
+      font: '',
+      measureText: () => ({}),
+      getImageData: (_x: number, _y: number, width: number, height: number) => {
+        const data = new Uint8ClampedArray(width * height * 4).fill(255)
+        if (busy) {
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              if (!busy(x, y)) continue
+              const i = (y * width + x) * 4
+              data[i] = 0
+              data[i + 1] = 0
+              data[i + 2] = 0
+            }
+          }
+        }
+        return { data, width, height }
+      },
+    })) as unknown as typeof real
+  }
+
+  afterEach(() => {
+    HTMLCanvasElement.prototype.getContext = real
+  })
+
+  const label = { text: 'What they owe', place: 'auto' } as const
+
+  it('goes over the shot where the shot has nothing there', () => {
+    shotOf()
+    // No margin at all: the label sits in the empty space beside its mark.
+    expect(draw([mark(label)])).toMatchObject(IMAGE)
+  })
+
+  it('stays outside where it would cover something', () => {
+    // Detail, not darkness: a region of one flat colour has nothing to lose by being
+    // covered, and it is the variation in it that says something is there.
+    shotOf((x) => x % 6 < 2)
+    const canvas = draw([mark(label)])
+    expect(canvas.height).toBeGreaterThan(IMAGE.height)
+  })
+
+  it('still obeys a recipe that asked for one or the other', () => {
+    shotOf()
+    // Empty shot, so `auto` would go inside — but the callout said otherwise.
+    expect(draw([mark({ ...label, inside: false })]).height).toBeGreaterThan(IMAGE.height)
   })
 })

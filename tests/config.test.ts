@@ -50,6 +50,35 @@ describe('parseConfig', () => {
   })
 })
 
+describe('serve', () => {
+  /** The complaint about a config, as the author would see it. */
+  function complaint(site: Record<string, unknown>): string {
+    try {
+      parseConfig({ site: { url: 'http://x', ...site } })
+    } catch (error) {
+      return (error as Error).message
+    }
+    throw new Error('the config was expected to be refused')
+  }
+
+  it('reads a bare string as the command, with everything else defaulted', () => {
+    const { serve } = parseConfig({ site: { url: 'http://x', serve: 'npm run dev' } }).site
+    expect(serve).toEqual({ command: 'npm run dev', env: {}, timeout: 30000 })
+  })
+
+  it('names a misspelled key rather than reporting the shorthand did not match', () => {
+    expect(complaint({ serve: { command: 'npm run dev', reddy: 3000 } })).toMatch(
+      /site\.serve: Unrecognized key: "reddy"/,
+    )
+  })
+
+  it('follows the union inside `ready` too, keeping the whole path', () => {
+    expect(complaint({ serve: { command: 'npm run dev', ready: { logg: 'up' } } })).toMatch(
+      /site\.serve\.ready: Unrecognized key: "logg"/,
+    )
+  })
+})
+
 describe('mergeStyle', () => {
   it('merges a recipe override one level deep, keeping the rest', () => {
     const base = parseConfig({ site: { url: 'x' } }).style
@@ -89,5 +118,34 @@ describe('loading', () => {
   it('reports a YAML syntax error against its file', () => {
     const root = project({ 'shotlist.config.yaml': 'site:\n  url: "unclosed\n' })
     expect(() => readDocument(join(root, 'shotlist.config.yaml'))).toThrow(/shotlist.config.yaml/)
+  })
+})
+
+// A config is a file in a repository, and running shotlist in one is not meant to be a
+// decision about what that repository may do to the machine.
+describe('what a config is not allowed to be', () => {
+  const site = { url: 'http://x' }
+
+  it('keeps a finder named __proto__ off Object.prototype', () => {
+    const config = parseConfig({ site, finders: JSON.parse('{"__proto__":{"polluted":true}}') })
+    expect(Object.keys(config.finders)).toEqual([])
+    expect(({} as { polluted?: unknown }).polluted).toBeUndefined()
+  })
+
+  it('takes a fontUrl that is not a URL as a path, which is what a local font is', () => {
+    // What it must never be is markup. A value carrying a quote used to close the
+    // attribute and open a script tag in the page the callouts are drawn in; it is now
+    // escaped there, and anything that is not a http(s) or data: URL never reaches that
+    // branch at all — it is read from disk instead.
+    for (const fontUrl of ['fonts/mono.css', 'https://fonts.example/x.css', '"><script>x']) {
+      expect(() => parseConfig({ site, style: { label: { fontUrl } } }), fontUrl).not.toThrow()
+    }
+  })
+
+  it('refuses a viewport or scale past what a browser can paint', () => {
+    expect(() =>
+      parseConfig({ site: { ...site, viewport: { width: 200000, height: 10 } } }),
+    ).toThrow(/viewport.width: Too big/)
+    expect(() => parseConfig({ site: { ...site, scale: 500 } })).toThrow(/scale: Too big/)
   })
 })

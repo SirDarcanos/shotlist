@@ -1,4 +1,6 @@
-import { ShotlistError } from './config.js'
+import { ShotlistError, pageMessage } from './config.js'
+import { checkUrl } from './trust.js'
+import type { Trust } from './trust.js'
 import { interpolate } from './recipe.js'
 import { resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
@@ -14,6 +16,8 @@ export interface RunContext {
   viewport: { width: number; height: number }
   timeout: number
   newPage(): Promise<Page>
+  /** What this recipe may reach, when the operator said the config is not theirs. */
+  trust?: Trust
 }
 
 const LOCATOR_SOURCES = ['role', 'label', 'placeholder', 'testid'] as const
@@ -44,19 +48,46 @@ async function seedsFor(page: Page, query: QueryInput): Promise<ElementHandle[] 
 export async function resolve(
   page: Page,
   query: QueryInput,
-  ctx: Pick<RunContext, 'rects' | 'viewport'>,
-): Promise<{ rect: Rect; element: ElementHandle | null }> {
-  const seeds = await seedsFor(page, query)
-  const handle = await page.evaluateHandle(resolveQuery, {
-    spec: query,
-    viewport: ctx.viewport,
-    rects: ctx.rects,
-    ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
-  })
-  const rect = await handle.evaluate((r) => r.rect)
-  const element = (await handle.getProperty('element')).asElement()
-  await handle.dispose()
-  return { rect, element }
+  ctx: Pick<RunContext, 'rects' | 'viewport'> & { timeout?: number; all?: boolean },
+): Promise<{ rect: Rect; element: ElementHandle | null; rects?: Rect[] }> {
+  // A query is evaluated inside the page, and the page's one thread runs it to
+  // completion — `matching` with nested quantifiers against the wrong text backtracks
+  // for longer than anyone will wait, and nothing else here would ever come back.
+  const budget = ctx.timeout ?? 15000
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const seeds = await seedsFor(page, query)
+    const overran = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new ShotlistError(
+            `gave up after ${budget}ms resolving ${JSON.stringify(query)} — a \`matching\` ` +
+              'pattern that has to backtrack can take effectively forever on the wrong text. ' +
+              '`site.timeout` is the limit.',
+          ),
+        )
+      }, budget)
+    })
+    const handle = await Promise.race([
+      page.evaluateHandle(resolveQuery, {
+        spec: query,
+        viewport: ctx.viewport,
+        rects: ctx.rects,
+        ...(ctx.all ? { all: true } : {}),
+        ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
+      }),
+      overran,
+    ])
+    const rect = await handle.evaluate((r) => r.rect)
+    const rects = await handle.evaluate((r) => r.rects)
+    const element = (await handle.getProperty('element')).asElement()
+    await handle.dispose()
+    return { rect, element, ...(rects ? { rects } : {}) }
+  } catch (error) {
+    throw error instanceof ShotlistError ? error : new ShotlistError(pageMessage(error))
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /** Resolve a query to an element, failing with the query itself when nothing matched. */
@@ -66,11 +97,16 @@ async function elementFor(
   ctx: RunContext,
   verb: string,
 ): Promise<ElementHandle> {
-  const { element } = await resolve(page, query, ctx)
-  if (!element) {
+  let found: { element: ElementHandle | null }
+  try {
+    found = await resolve(page, query, ctx)
+  } catch (error) {
+    throw new ShotlistError(`\`${verb}\`: ${(error as Error).message}`)
+  }
+  if (!found.element) {
     throw new ShotlistError(`\`${verb}\` needs an element, and ${JSON.stringify(query)} is a box`)
   }
-  return element
+  return found.element
 }
 
 /**
@@ -118,7 +154,9 @@ async function runStep(
   const text = (key: string) => String(step[key])
 
   if ('goto' in step) {
-    await page.goto(text('goto'), { waitUntil: 'load' })
+    const to = text('goto')
+    if (ctx.trust) checkUrl(ctx.trust, to, '`goto`')
+    await page.goto(to, { waitUntil: 'load' })
     return
   }
   if ('click' in step) {
@@ -219,7 +257,9 @@ async function runStep(
     const opened = await ctx.newPage()
     const viewport = step['viewport'] as { width: number; height: number } | undefined
     if (viewport) await opened.setViewportSize(viewport)
-    await opened.goto(text('openPage'), { waitUntil: 'load' })
+    const to = text('openPage')
+    if (ctx.trust) checkUrl(ctx.trust, to, '`openPage`')
+    await opened.goto(to, { waitUntil: 'load' })
     ctx.pages.set(text('as'), opened)
     ctx.page = opened
     return
