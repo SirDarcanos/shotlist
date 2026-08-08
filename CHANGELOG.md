@@ -37,6 +37,19 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **A shot list covers its own site.** `site.url` now decides what a run may open: that
+  host and everything under it, so a config for `rollful.dev` shoots `api.rollful.dev` and
+  is refused `google.com`. Wandering off the site is a mistake far more often than an
+  intention; when it is one, `site.allow` names the hosts. This holds in every mode, with
+  no flag to set. **A config that shot more than one site now has to list the others.**
+- **Paths that are never read or written, in any mode:** `.env` and its variants, `.git`,
+  `.ssh`, `.gnupg`, `.aws`, `.npmrc`, `.netrc`, `.htpasswd`, `credentials`, ssh private
+  keys, and `.pem` / `.key` / `.p12` / `.pfx` / `.keystore` / `.jks` files. Not about
+  trust: a config you wrote has no reason to read your keys, and a typo in an `install`
+  destination should not be able to write into `.git`.
+- **`--allow <host>` and `--allow-path <dir>`**, repeatable, for what the operator wants
+  reachable. Unlike `site.allow` they come from the command line, so they still mean
+  something under `--untrusted`.
 - **`--untrusted`, for running a config that is not yours.** The hardening so far assumed
   a desk: your project, your config, your machine. Automation inverts that — a pull
   request from a fork can edit the config, and the runner it lands on has credentials, a

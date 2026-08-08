@@ -56,7 +56,7 @@ export {
   writeBaseline,
 } from './baseline.js'
 export type { Drift, Environment } from './baseline.js'
-export { checkCommand, checkPath, checkUrl, trustFrom } from './trust.js'
+export { checkCommand, checkPath, checkUrl, hostsFor, secretIn, trustFrom } from './trust.js'
 export type { Trust } from './trust.js'
 export { startServer, tokenize, withServer } from './serve.js'
 export type { Server } from './serve.js'

@@ -80,6 +80,7 @@ The image is written to `screenshots/out/order-row.png`, and `--install` copies 
 | -------------------- | --------------------- | ---------------------------------------------------------------------------- |
 | `site.url`           | required              | Where the site is running                                                    |
 | `site.serve`         | —                     | Command that starts the site, when nothing answers at `site.url`             |
+| `site.allow`         | `[]`                  | Hosts a shot may open besides this site's own and everything under it        |
 | `site.viewport`      | `1280 × 800`          | Browser size                                                                 |
 | `site.scale`         | `2`                   | Device pixel ratio; `2` gives Retina images                                  |
 | `site.theme`         | `light`               | `light`, `dark` or `no-preference`                                           |
@@ -712,19 +713,47 @@ files can use it — point yours at `node_modules/shotlist/skills/shotlist/SKILL
 
 ## What a config can do to the machine that runs it
 
-A `shotlist.config.yaml` is a file in a repository. Whether that is fine depends entirely
-on **whose repository**, and there are two answers.
+A `shotlist.config.yaml` is a file in a repository, and whether that is fine depends on
+**whose repository**. There are two answers, and most of the fence is up in both.
 
-**At a desk, on your own project**, a config is something you wrote, and it is allowed to
-start your dev server and write images where you keep them. That is the default.
+### A shot list covers its own site — always
 
-**In automation it is not.** A pull request from a fork can edit the config, and the
+`site.url` decides what a run may open: that host and everything under it. With
+`site.url: https://rollful.dev/`, a recipe may shoot `rollful.dev/docs` and
+`api.rollful.dev`, and is refused `google.com`. A `www.` host covers its apex too. There
+is no flag to set — wandering off the site is a mistake far more often than an intention.
+
+When it is an intention, say so:
+
+```yaml
+site:
+  url: https://rollful.dev/
+  allow: [accounts.google.com] # a sign-in the flow passes through
+```
+
+### Some paths are never touched — always
+
+Whatever the mode, shotlist will not read or write a path that goes through any of these:
+
+|                                    |                                        |
+| ---------------------------------- | -------------------------------------- |
+| `.env`, `.env.anything`            | `.git`                                 |
+| `.ssh`, `.gnupg`, `.aws`           | `.npmrc`, `.netrc`, `.htpasswd`        |
+| `credentials`                      | `id_rsa`, `id_ed25519`, … (and `.pub`) |
+| `*.pem`, `*.key`, `*.p12`, `*.pfx` | `*.keystore`, `*.jks`                  |
+
+This is not about trust: a config you wrote has no reason to read your keys either, and a
+typo in an `install` destination should not be able to write into `.git`. There is no flag
+to turn it off.
+
+### `--untrusted`, for a config you did not write
+
+In automation the config may not be yours. A pull request from a fork can edit it, and the
 runner it lands on has your credentials, your network, and other people's work on it. A
-service that shoots what strangers submit is the same problem with the volume turned up.
-For that, run it with `--untrusted` (or `SHOTLIST_UNTRUSTED=1`, for a fixed command line):
+service shooting what strangers submit is the same problem louder.
 
 ```bash
-npx shotlist --check --untrusted
+npx shotlist --check --untrusted        # or SHOTLIST_UNTRUSTED=1
 ```
 
 |                                                         | default | `--untrusted` |
@@ -733,30 +762,42 @@ npx shotlist --check --untrusted
 | opens `file:` and `data:` URLs                          | yes     | **refused**   |
 | opens localhost, 10/8, 192.168, 169.254, cloud metadata | yes     | **refused**   |
 | reads or writes outside the project                     | yes     | **refused**   |
+| `site.allow` widens the scope                           | yes     | **ignored**   |
 
-It is set from the command line and the environment, never from the config: **a control
-the config can switch off is not a control.**
+That last row is the point of the flag: `site.allow` is a claim by the thing you are
+distrusting. What the operator typed still counts, and outlives it:
 
-**What is always true, either way.** A config cannot run code — there is no `eval:` step
-and no way to reach one. Queries travel into the page as data, never as source, so a
-malformed selector is a `SyntaxError` from `querySelectorAll` rather than an execution.
-`site.serve` runs a program directly with no shell, so `&&`, `|`, `>` and a `VAR=value`
-prefix are refused rather than interpreted. `site.timeout` bounds how long a query may
-take, viewport and scale are held to what a browser can paint, and `retries` and `repeat`
-are capped — so a run cannot be made to hang.
+```bash
+npx shotlist --check --untrusted --allow docs.example.com --allow-path /srv/shared
+```
 
-**What `--untrusted` does not do.** It reads the host out of the URL; it cannot see that a
-name you allowed resolves to an address you did not. If you shoot what strangers submit,
-put the runner somewhere that cannot reach anything it should not, and rate-limit it —
-shotlist drives a real browser, so a recipe pointed at somebody else's site is traffic
-you are sending, and a `fill:` step is a string you are typing into their forms.
+Both are repeatable. `--allow` takes a host and covers everything under it; `--allow-path`
+takes a directory. Neither can be set from the config, because **a control the config can
+switch off is not a control.**
+
+### What is true whatever the mode
+
+A config cannot run code. There is no `eval:` step and no way to reach one; queries travel
+into the page as data, never as source, so a malformed selector is a `SyntaxError` from
+`querySelectorAll` rather than an execution. `site.serve` runs a program directly with no
+shell, so `&&`, `|`, `>` and a `VAR=value` prefix are refused rather than interpreted. And
+a run cannot be made to hang: `site.timeout` bounds how long a query may take, viewport
+and scale are held to what a browser can paint, and `retries` and `repeat` are capped.
+
+### What none of it does
+
+The host check reads the name out of the URL. It cannot see that a name you allowed
+resolves to an address it would have refused, so a determined DNS rebind gets through: it
+is a fence, not a boundary. If you shoot what strangers submit, put the runner where it
+cannot reach anything it should not, and rate-limit it — a run is one browser and
+amplifies nothing, but an open one is still traffic you are sending.
 
 **shotlist has no database and issues no SQL**, so there is nothing in it to inject into.
-What it does have is a browser: a recipe is a script that types into whatever it is
-pointed at, and a hosted one that lets a stranger choose both the target and the keystrokes
-is an attack proxy for anything a browser can do — SQL injection through somebody else's
-form included. `--untrusted` keeps that off your own network; keeping it off everyone
-else's is the operator choosing what a submitted recipe may aim at.
+It does have a browser. A recipe is a script that types into whatever it is pointed at, so
+a hosted instance that lets a stranger choose both the target and the keystrokes is a
+proxy for anything a browser can do to that target — SQL injection through somebody else's
+form included. The site scope is what keeps a submitted recipe aimed at the site it came
+with.
 
 ## License
 

@@ -109,6 +109,12 @@ const Site = z.object({
   url: z.string(),
   /** Started before the first shot and stopped after the last, unless already running. */
   serve: Serve.optional(),
+  /**
+   * Hosts a shot may open besides this site's own and everything under it — a sign-in
+   * provider a flow passes through, a docs domain, a third-party page worth shooting.
+   * Ignored by an `--untrusted` run, which is what makes that flag worth having.
+   */
+  allow: z.array(z.string()).default([]),
   viewport: Viewport.default({ width: 1280, height: 800 }),
   scale: z.number().positive().max(64).default(2),
   theme: z.enum(['light', 'dark', 'no-preference']).default('light'),

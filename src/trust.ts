@@ -18,6 +18,73 @@ export interface Trust {
   untrusted: boolean
   /** The config file's directory: what the filesystem is confined to when untrusted. */
   root: string
+  /**
+   * The hosts a run may open, always. A shotlist project shoots its own site, so the
+   * scope is whatever `site.url` names and everything under it — `site.allow` adds more,
+   * and is ignored when the config is not the operator's.
+   */
+  hosts: readonly string[]
+  /**
+   * Directories outside the project a run may still read and write, named by the
+   * operator with `--allow-path`. Not by the config: the point of the flag is that the
+   * config does not get a say.
+   */
+  paths: readonly string[]
+}
+
+/**
+ * Names that are never screenshot material, wherever a run is pointed.
+ *
+ * Not about trust — a config you wrote has no reason to read your keys either, and a
+ * typo in an `install` destination should not be able to write into `.git`. This holds
+ * in every mode and there is no flag for it.
+ */
+const SECRET = [
+  /^\.env(\..+)?$/i,
+  /^\.git$/i,
+  /^\.ssh$/i,
+  /^\.gnupg$/i,
+  /^\.aws$/i,
+  /^\.npmrc$/i,
+  /^\.netrc$/i,
+  /^\.htpasswd$/i,
+  /^credentials$/i,
+  /^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/i,
+  /\.(pem|key|p12|pfx|keystore|jks)$/i,
+]
+
+/** The part of a path that is never allowed, or null when none of it is. */
+export function secretIn(path: string): string | null {
+  for (const part of path.split(/[\\/]+/).filter(Boolean)) {
+    if (SECRET.some((pattern) => pattern.test(part))) return part
+  }
+  return null
+}
+
+/** Whether a host is the one named, or something under it. */
+function covers(pattern: string, host: string): boolean {
+  const wanted = pattern.replace(/^\*\./, '').toLowerCase()
+  const found = host.toLowerCase()
+  return found === wanted || found.endsWith(`.${wanted}`)
+}
+
+/**
+ * The hosts a config's own site covers.
+ *
+ * `rollful.dev` covers `api.rollful.dev`; a `www.` host covers the apex it is the www of,
+ * because writing one and meaning the other is the ordinary case rather than a mistake.
+ * There is no public-suffix list here, so nothing wider than that is inferred: a second
+ * domain is something the config says out loud.
+ */
+export function hostsFor(siteUrl: string, allow: readonly string[] = []): string[] {
+  let host: string
+  try {
+    host = new URL(siteUrl).hostname
+  } catch {
+    return [...allow]
+  }
+  const apex = host.replace(/^www\./i, '')
+  return [...new Set([host, apex, ...allow].filter(Boolean))]
 }
 
 /** Addresses that are somewhere else on the network the runner happens to sit in. */
@@ -28,9 +95,30 @@ const PRIVATE =
 const METADATA = /^(metadata\.google\.internal|metadata\.goog|instance-data)$/i
 
 /** Whether the operator asked for the untrusted rules, from the flag or the environment. */
-export function trustFrom(root: string, flag: boolean): Trust {
+export function trustFrom(
+  where: {
+    root: string
+    siteUrl: string
+    allow?: readonly string[]
+    /** Hosts and directories the operator granted, which outlive `--untrusted`. */
+    granted?: { hosts?: readonly string[]; paths?: readonly string[] }
+  },
+  flag: boolean,
+): Trust {
   const fromEnv = process.env['SHOTLIST_UNTRUSTED']
-  return { untrusted: flag || (fromEnv !== undefined && fromEnv !== '' && fromEnv !== '0'), root }
+  const untrusted = flag || (fromEnv !== undefined && fromEnv !== '' && fromEnv !== '0')
+  // `site.allow` is the config widening its own reach, which is only worth anything when
+  // the config is one you wrote. Untrusted, the scope is the site it declared and no more.
+  const granted = where.granted ?? {}
+  return {
+    untrusted,
+    root: where.root,
+    hosts: hostsFor(where.siteUrl, [
+      ...(untrusted ? [] : (where.allow ?? [])),
+      ...(granted.hosts ?? []),
+    ]),
+    paths: (granted.paths ?? []).map((path) => resolve(where.root, path)),
+  }
 }
 
 /**
@@ -45,19 +133,34 @@ export function trustFrom(root: string, flag: boolean): Trust {
  * shooting what strangers submit wants a network that cannot reach those either.
  */
 export function checkUrl(trust: Trust, url: string, where: string): void {
-  if (!trust.untrusted) return
   let parsed: URL
   try {
     parsed = new URL(url)
   } catch {
+    if (!trust.untrusted) return
     throw new ShotlistError(`${where}: ${url} is not a URL, and this run is --untrusted`)
   }
+
   if (!['http:', 'https:'].includes(parsed.protocol)) {
+    // A `file:` page is how a project shoots something it has not served, and it reaches
+    // no network. Untrusted, it is a way to read the disk, and is refused with the rest.
+    if (!trust.untrusted) return
     throw new ShotlistError(
       `${where}: an --untrusted run may only open http(s), and this is ${parsed.protocol.replace(':', '')}`,
     )
   }
-  if (PRIVATE.test(parsed.hostname) || METADATA.test(parsed.hostname)) {
+
+  // A project shoots its own site. Wandering off it is a mistake far more often than an
+  // intention, and when it is an intention `site.allow` is where it is said.
+  if (!trust.hosts.some((pattern) => covers(pattern, parsed.hostname))) {
+    throw new ShotlistError(
+      `${where}: ${parsed.hostname} is not this site — the shot list covers ` +
+        `${trust.hosts.join(', ')} and anything under them. Add it to \`site.allow\` to ` +
+        'shoot it too.',
+    )
+  }
+
+  if (trust.untrusted && (PRIVATE.test(parsed.hostname) || METADATA.test(parsed.hostname))) {
     throw new ShotlistError(
       `${where}: ${parsed.hostname} is on the network the runner sits in, and this run is ` +
         '--untrusted. Only names that resolve outside it may be opened.',
@@ -65,14 +168,29 @@ export function checkUrl(trust: Trust, url: string, where: string): void {
   }
 }
 
-/** Refuse a path that leaves the project, so a run cannot read or write around itself. */
+/** Refuse a path that holds a secret, or — untrusted — one that leaves the project. */
 export function checkPath(trust: Trust, path: string, where: string): void {
-  if (!trust.untrusted) return
   const full = isAbsolute(path) ? path : resolve(trust.root, path)
-  const inside = relative(trust.root, full)
-  if (inside.startsWith('..') || isAbsolute(inside)) {
-    throw new ShotlistError(`${where}: ${path} is outside the project, and this run is --untrusted`)
+
+  // Always, in every mode: these are not things anybody screenshots.
+  const secret = secretIn(full)
+  if (secret !== null) {
+    throw new ShotlistError(
+      `${where}: ${path} goes through "${secret}", which shotlist does not read or write ` +
+        'in any mode.',
+    )
   }
+
+  if (!trust.untrusted) return
+  const within = (root: string) => {
+    const inside = relative(root, full)
+    return inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))
+  }
+  if (within(trust.root) || trust.paths.some(within)) return
+  throw new ShotlistError(
+    `${where}: ${path} is outside the project, and this run is --untrusted. ` +
+      'Pass --allow-path to let it out.',
+  )
 }
 
 /** Refuse to start a process, which is the one thing a strange config must never do. */

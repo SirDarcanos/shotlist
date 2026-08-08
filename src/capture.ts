@@ -243,6 +243,7 @@ export async function shoot(
     )
   }
   const outDir = fromRoot(loaded, config.paths.out)
+  if (loaded.trust) checkPath(loaded.trust, outDir, 'paths.out')
   mkdirSync(outDir, { recursive: true })
   const file = join(outDir, `${recipe.name}.png`)
   const source = recipe.source === 'file' ? sourceImage(recipe, loaded) : undefined
