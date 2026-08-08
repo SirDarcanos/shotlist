@@ -228,12 +228,22 @@ export interface QueryContext {
   rects?: Record<string, Rect>
   /** Elements Playwright's locator engine found for `role`/`label`/`placeholder`/`testid`. */
   seeds?: Element[]
+  /**
+   * Report every element the query matched, not only the one it settles on.
+   *
+   * `mask` and `check.ignore` cover regions rather than pointing at one thing, and a
+   * page has three avatars far more often than it has one. A query that names `pick` or
+   * `nth` has already said it means a single element, and still gets that.
+   */
+  all?: boolean
 }
 
 /** A query's answer: the box to draw on, and the element to act on if there is one. */
 export interface Resolved {
   rect: Rect
   element: Element | null
+  /** Every match, when `all` was asked for. `rect` is still the one it settled on. */
+  rects?: Rect[]
 }
 
 /**
@@ -435,5 +445,12 @@ export function resolveQuery(context: QueryContext): Resolved {
   else chosen = candidates[0]
 
   if (!chosen) throw new Error(`no element at the requested position for ${describe}`)
-  return { rect: padded(rectOf(chosen), query.pad, query.grow), element: chosen }
+  const rect = padded(rectOf(chosen), query.pad, query.grow)
+  const singled = query.nth !== undefined || query.pick !== undefined
+  if (!ctx.all || singled) return { rect, element: chosen }
+  return {
+    rect,
+    element: chosen,
+    rects: candidates.map((el) => padded(rectOf(el), query.pad, query.grow)),
+  }
 }

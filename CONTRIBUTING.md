@@ -48,10 +48,19 @@ Run `npm run build` after changing any schema. The JSON Schemas that drive edito
 autocomplete are generated from the zod schemas, so a new field only reaches editors once
 they are regenerated.
 
-## The fixture
+## The fixtures
+
+There are two, and they are for different things.
 
 `tests/fixture/index.html` is a three-column app with a list, a detail pane, a controls
-pane and a modal. The browser-driven tests shoot it; the jsdom tests query it.
+pane and a modal. It exists to exercise query primitives. The browser-driven tests shoot
+it; the jsdom tests query it.
+
+`tests/fixture/site.html` is a product page — a brand, a nav, a hero, pricing cards, a
+table and a footer — for the tests that need a page shaped like the ones recipes are
+really written against. It is only ever shot in a real browser, so it carries no
+`data-rect` and is laid out by CSS like any page. Its "last seen" column is redrawn on
+every load on purpose: it is what `mask` and `check.ignore` are tested against.
 
 Two constraints:
 

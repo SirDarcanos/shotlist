@@ -347,11 +347,15 @@ export async function shoot(
           }
         }
 
+        // Every match, not the first: a page has three avatars far more often than it
+        // has one, and a mask that covered only the first would ship the other two.
         masks = []
         for (const [i, query] of recipe.mask.entries()) {
           try {
-            const { rect } = await resolveInPage(ctx.page, query, ctx)
-            masks.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+            const found = await resolveInPage(ctx.page, query, { ...ctx, all: true })
+            for (const rect of found.rects ?? [found.rect]) {
+              masks.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+            }
           } catch (error) {
             throw inRecipe(recipe, `mask[${i}]`, pageMessage(error))
           }
@@ -360,8 +364,10 @@ export async function shoot(
         const skip = recipe.check === false ? [] : (recipe.check?.ignore ?? [])
         for (const [i, query] of skip.entries()) {
           try {
-            const { rect } = await resolveInPage(ctx.page, query, ctx)
-            ignore.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+            const found = await resolveInPage(ctx.page, query, { ...ctx, all: true })
+            for (const rect of found.rects ?? [found.rect]) {
+              ignore.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+            }
           } catch (error) {
             throw inRecipe(recipe, `check.ignore[${i}]`, pageMessage(error))
           }

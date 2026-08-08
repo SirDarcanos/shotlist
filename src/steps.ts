@@ -44,8 +44,8 @@ async function seedsFor(page: Page, query: QueryInput): Promise<ElementHandle[] 
 export async function resolve(
   page: Page,
   query: QueryInput,
-  ctx: Pick<RunContext, 'rects' | 'viewport'> & { timeout?: number },
-): Promise<{ rect: Rect; element: ElementHandle | null }> {
+  ctx: Pick<RunContext, 'rects' | 'viewport'> & { timeout?: number; all?: boolean },
+): Promise<{ rect: Rect; element: ElementHandle | null; rects?: Rect[] }> {
   // A query is evaluated inside the page, and the page's one thread runs it to
   // completion — `matching` with nested quantifiers against the wrong text backtracks
   // for longer than anyone will wait, and nothing else here would ever come back.
@@ -69,14 +69,16 @@ export async function resolve(
         spec: query,
         viewport: ctx.viewport,
         rects: ctx.rects,
+        ...(ctx.all ? { all: true } : {}),
         ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
       }),
       overran,
     ])
     const rect = await handle.evaluate((r) => r.rect)
+    const rects = await handle.evaluate((r) => r.rects)
     const element = (await handle.getProperty('element')).asElement()
     await handle.dispose()
-    return { rect, element }
+    return { rect, element, ...(rects ? { rects } : {}) }
   } catch (error) {
     throw error instanceof ShotlistError ? error : new ShotlistError(pageMessage(error))
   } finally {

@@ -131,6 +131,10 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Fixed
 
+- **`mask` and `check.ignore` covered only the first element their query matched.** A
+  page has three avatars far more often than it has one, and a mask over `.avatar` shipped
+  two of them. Both now cover every match; naming `pick` or `nth` still says you mean one.
+
 - **A `fontUrl` could put script into the page the callouts are drawn in.** It was
   interpolated straight into a `<link href>`, so a value carrying a quote closed the
   attribute and opened a tag — in the page holding the screenshot. It is now held to a
