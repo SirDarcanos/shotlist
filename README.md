@@ -69,7 +69,8 @@ npx shotlist order-row --install
 ```
 
 The image is written to `screenshots/out/order-row.png`, and `--install` copies it to
-`content/guide/images/order-row.png`.
+`content/guide/images/order-row.png`. PNG is the default; `image.format` also takes `jpeg`
+and `webp`, per project or per recipe.
 
 ## Commands
 
@@ -117,7 +118,7 @@ Full detail, and the two things it does not cover, at
 | ---------------------------------------------------------- | --------------------------------------------- |
 | [Install](https://shotlist.dev/docs/install)               | Setting up, and a first recipe                |
 | [Configuration](https://shotlist.dev/docs/config)          | Every key, starting the site, style and fonts |
-| [Recipes](https://shotlist.dev/docs/recipes)               | Every field, and annotating an existing PNG   |
+| [Recipes](https://shotlist.dev/docs/recipes)               | Every field, and annotating an existing image |
 | [Steps](https://shotlist.dev/docs/steps)                   | The step vocabulary                           |
 | [Queries](https://shotlist.dev/docs/queries)               | Sources, filters, traversal, finders          |
 | [Callouts](https://shotlist.dev/docs/callouts)             | Labels, numbered discs, masking               |

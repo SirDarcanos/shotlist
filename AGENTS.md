@@ -68,6 +68,11 @@ with the shot that needs it as the evidence.
   That is how `{ listRow: 'Acme' }` works, and it is why `grow: { left: 4 }` was read as a
   finder named `left`. A new query key whose value is an object of non-query keys belongs
   in `NOT_A_QUERY` in `query.ts`.
+- **The browser is the only encoder, and it lies about the ones it cannot do.** A canvas
+  asked for a format it will not write answers with a PNG rather than an error — which is
+  how an `.avif` file full of PNG bytes gets written and installed. Every conversion checks
+  the mime it got back, and `FORMATS` is pinned by a test to what Chromium can really
+  encode. Adding a format means proving the browser writes it, not adding a string.
 - **`site.timeout` bounds a query because the page cannot be interrupted.** A `matching`
   pattern runs inside the page on its one thread; nothing else can stop it.
 
@@ -81,6 +86,7 @@ with the shot that needs it as the evidence.
 | `src/steps.ts`    | the step vocabulary, run against a Playwright page          |
 | `src/annotate.ts` | the drawing layer, injected into the page                   |
 | `src/capture.ts`  | clip, scale, canvas growth, write                           |
+| `src/image.ts`    | the formats a shot is written in, and reading one back      |
 | `src/check.ts`    | perceptual diff against the committed image                 |
 | `src/serve.ts`    | starting the site and stopping it again                     |
 | `src/trust.ts`    | what a config may reach: hosts, paths, forbidden names      |
