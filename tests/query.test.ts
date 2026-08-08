@@ -105,6 +105,44 @@ describe('a position counted from the end', () => {
   })
 })
 
+// Twenty, so that no index coincides with any other and an off-by-one has nowhere to
+// hide. Each item's x is its position, so a rect names which one came back.
+describe('counting from the end of a long list', () => {
+  const LONG = 20
+
+  beforeEach(() => {
+    const items = Array.from(
+      { length: LONG },
+      (_, i) => `<li class="ledger" data-rect="${i},0,1,1"></li>`,
+    ).join('')
+    document.body.insertAdjacentHTML('beforeend', `<ul>${items}</ul>`)
+  })
+
+  /** Which item came back, read off the x that encodes its position. */
+  const at = (nth: number) => find({ css: '.ledger', nth }).x
+
+  it('reads -1 as the last and -2 as the one before it, not as the first', () => {
+    expect(at(-1)).toBe(19)
+    expect(at(-2)).toBe(18)
+    // The whole point: in a list this long, -2 and 0 are nineteen apart.
+    expect(at(0)).toBe(0)
+    expect(at(-2)).not.toBe(at(0))
+  })
+
+  it('walks back the whole way, one at a time', () => {
+    for (let back = 1; back <= LONG; back++) expect(at(-back), `nth: -${back}`).toBe(LONG - back)
+  })
+
+  it('still counts forward from the front', () => {
+    for (let forward = 0; forward < LONG; forward++) expect(at(forward)).toBe(forward)
+  })
+
+  it('has nothing one step past either end', () => {
+    expect(() => at(-(LONG + 1))).toThrow(/no element at the requested position/)
+    expect(() => at(LONG)).toThrow(/no element at the requested position/)
+  })
+})
+
 describe('traversal', () => {
   it('climbs to the nearest matching ancestor', () => {
     // The select sits in a label, which is the first box around it under 95vw.
