@@ -92,6 +92,11 @@ All of these, not most of them.
       reference at [shotlist.dev/docs](https://shotlist.dev/docs), which lives in its own
       repository. The README is the short version and links there; `skills/shotlist/` ships
       with the package and needs anything an agent writing recipes would have to know.
+- [ ] The change went into the right part of those docs. They follow
+      [Diátaxis](https://diataxis.fr/), so a new key is a row in `reference/`, the reason
+      behind it belongs in `explanation/`, and the task it makes possible is a page in
+      `how-to/`. One change often touches more than one, and those are not duplicates of
+      each other. See that repository's `AGENTS.md`.
 - [ ] Nothing is documented that does not work yet, unless it is marked as not built.
 
 ## The rules
@@ -227,4 +232,4 @@ a path or host check that can be walked around, or anything that gets a run to t
 it should not, is worth reporting privately first: use GitHub's **Report a vulnerability**
 on the Security tab rather than opening an issue. What is already known and deliberate,
 including the two things the checks do not cover, is at
-**[shotlist.dev/docs/security](https://shotlist.dev/docs/security)**.
+**[shotlist.dev/docs/explanation/security-model](https://shotlist.dev/docs/explanation/security-model)**.
