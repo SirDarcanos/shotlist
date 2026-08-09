@@ -256,4 +256,4 @@ primitives, that is a gap in the vocabulary, not a reason to write code around i
 plainly, describe the shot that cannot be expressed, and point at
 [CONTRIBUTING.md](https://github.com/SirDarcanos/shotlist/blob/main/CONTRIBUTING.md#adding-a-step-verb-or-a-query-primitive).
 Most gaps turn out to be an existing primitive that was hard to find — check
-[the query reference](https://shotlist.dev/docs/queries) before concluding one is missing.
+[the query reference](https://shotlist.dev/docs/reference/queries) before concluding one is missing.

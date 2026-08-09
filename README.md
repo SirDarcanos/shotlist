@@ -90,18 +90,19 @@ and `webp`, per project or per recipe.
 
 ## Documentation
 
-| Page                                                           | What it covers                                |
-| -------------------------------------------------------------- | --------------------------------------------- |
-| [Install](https://shotlist.dev/docs/install)                   | Setting up, and a first recipe                |
-| [Configuration](https://shotlist.dev/docs/config)              | Every key, starting the site, style and fonts |
-| [Recipes](https://shotlist.dev/docs/recipes)                   | Every field, and annotating an existing image |
-| [Steps](https://shotlist.dev/docs/steps)                       | The step vocabulary                           |
-| [Queries](https://shotlist.dev/docs/queries)                   | Sources, filters, traversal, finders          |
-| [Callouts](https://shotlist.dev/docs/callouts)                 | Labels, numbered discs, masking               |
-| [Macros and data](https://shotlist.dev/docs/macros)            | Sharing setup, driving a shot from a list     |
-| [Running shotlist](https://shotlist.dev/docs/running-shotlist) | Every flag, the API, editor and agent support |
-| [Checking for staleness](https://shotlist.dev/docs/check)      | `--check`, diffs, and a shot that changes     |
-| [What a config can do](https://shotlist.dev/docs/security)     | What a run is allowed to reach                |
+| Page                                                                                             | What it covers                                |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| [Your first screenshot](https://shotlist.dev/docs/tutorials/first-screenshot)                    | A lesson: install, a recipe, a callout        |
+| [Add shotlist to a project](https://shotlist.dev/docs/how-to/install)                            | Setting up in an app you already have         |
+| [Configuration file](https://shotlist.dev/docs/reference/configuration)                          | Every key, starting the site, style and fonts |
+| [Recipe file](https://shotlist.dev/docs/reference/recipe)                                        | Every field, and annotating an existing image |
+| [Steps](https://shotlist.dev/docs/reference/steps)                                               | The step vocabulary                           |
+| [Queries](https://shotlist.dev/docs/reference/queries)                                           | Sources, filters, traversal, frames, finders  |
+| [Callouts and masks](https://shotlist.dev/docs/reference/callouts)                               | Labels, numbered discs, masking               |
+| [Macros and data files](https://shotlist.dev/docs/reference/macros-and-data)                     | Sharing setup, driving a shot from a list     |
+| [Command line](https://shotlist.dev/docs/reference/cli)                                          | Every flag, the API, editor and agent support |
+| [Keeping a screenshot current](https://shotlist.dev/docs/tutorials/keeping-a-screenshot-current) | `--check`, diffs, and a shot that changes     |
+| [What a configuration can do](https://shotlist.dev/docs/explanation/security-model)              | What a run is allowed to reach                |
 
 ## Commands
 
@@ -135,7 +136,7 @@ rest, `--untrusted` starts no processes, opens nothing on the runner's own netwo
 stays inside the project.
 
 Full detail, and the two things it does not cover, at
-**[shotlist.dev/docs/security](https://shotlist.dev/docs/security)**.
+**[shotlist.dev/docs/explanation/security-model](https://shotlist.dev/docs/explanation/security-model)**.
 
 ## Contributing
 
