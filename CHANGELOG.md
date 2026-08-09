@@ -18,6 +18,11 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   is wrong with all of them at once — no browser, no site running. `--warnings` adds what
   is legal but probably unmeant, a mark no callout points at or an `install:` the config
   does not name, and never changes the exit code.
+- **`SHOTLIST_ENV_DENY`**, the counterpart of `SHOTLIST_DENY` for variable names, globs
+  and all. Subtracted last, so an administrator building a CI image can put a name out of
+  reach and no config key or flag adds it back. A fence rather than a boundary: it stops
+  `--allow-env AWS_SECRET_KEY` and does nothing about `echo $AWS_SECRET_KEY` on the same
+  machine, so it is worth having where shotlist is close to the only thing that runs.
 - **`allowEnv` in the config**, naming the variables a recipe may read as `${env.NAME}` so
   a project that always signs in the same way does not repeat `--allow-env` on every run.
   Names only, and an `--untrusted` run ignores it exactly as it ignores `site.allow`.

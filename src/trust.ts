@@ -33,7 +33,7 @@ export interface Trust {
   paths: readonly string[]
   /** What this project forbids on top of the names shotlist never touches. */
   deny: readonly string[]
-  /** What a recipe may read as `${env.NAME}`, from `allowEnv` and `--allow-env`. */
+  /** What a recipe may read as `${env.NAME}`, less anything `SHOTLIST_ENV_DENY` forbids. */
   env: readonly string[]
 }
 
@@ -178,6 +178,7 @@ export function trustFrom(
   // `site.allow` is the config widening its own reach, which is only worth anything when
   // the config is one you wrote. Untrusted, the scope is the site it declared and no more.
   const granted = where.granted ?? {}
+  const forbiddenEnv = envDenyFromEnv()
   return {
     untrusted,
     root: where.root,
@@ -190,8 +191,32 @@ export function trustFrom(
     deny: [...(where.deny ?? []), ...(granted.deny ?? []), ...denyFromEnv()],
     // Dropped whole rather than narrowed: a partial grant reads like a safe one. The
     // config's own list is widening, so it goes the way `site.allow` goes.
-    env: untrusted ? [] : [...(where.allowEnv ?? []), ...(granted.env ?? []), ...envFromEnv()],
+    env: (untrusted
+      ? []
+      : [...(where.allowEnv ?? []), ...(granted.env ?? []), ...envFromEnv()]
+    ).filter((name) => !forbiddenEnv.some((pattern) => pattern.test(name))),
   }
+}
+
+/**
+ * Variable names this machine will not hand a recipe, whatever allowed them.
+ *
+ * The counterpart of `SHOTLIST_DENY`, subtracted last, so an administrator building a CI
+ * image can put a name out of reach and no config key or flag adds it back. Globs, the
+ * same as the path list: `AWS_*` and `*_TOKEN` both work.
+ *
+ * A fence, not a boundary. It stops `--allow-env AWS_SECRET_KEY`; it does nothing about
+ * `echo $AWS_SECRET_KEY` on the same machine, because the shell of whoever runs a command
+ * was never something a screenshot tool could stand in front of. It is worth having where
+ * shotlist is close to the only thing that runs — a container built to shoot configs that
+ * came from somewhere else — and worth nothing as a control over a person at a terminal.
+ */
+function envDenyFromEnv(): RegExp[] {
+  return (process.env['SHOTLIST_ENV_DENY'] ?? '')
+    .split(/[,:\s]+/)
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .map(segmentPattern)
 }
 
 /** Names granted through `SHOTLIST_ENV`, for CI that sets its secrets there anyway. */

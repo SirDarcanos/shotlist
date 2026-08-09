@@ -235,6 +235,42 @@ describe('allowEnv in the config', () => {
   })
 })
 
+describe('SHOTLIST_ENV_DENY', () => {
+  it('takes a name back out, whatever the config or the flag allowed', () => {
+    process.env['SHOTLIST_ENV_DENY'] = 'ADMIN_PASSWORD'
+    process.env['ADMIN_PASSWORD'] = 'hunter2'
+    const trust = trustFrom(
+      {
+        root: '/p',
+        siteUrl: SITE,
+        allowEnv: ['ADMIN_PASSWORD'],
+        granted: { env: ['ADMIN_PASSWORD'] },
+      },
+      false,
+    )
+    expect(trust.env).toEqual([])
+    expect(envFor(trust)).toEqual({})
+  })
+
+  it('globs, the way the path list does', () => {
+    process.env['SHOTLIST_ENV_DENY'] = 'AWS_*, *_TOKEN'
+    process.env['AWS_SECRET_KEY'] = 'a'
+    process.env['NPM_TOKEN'] = 'b'
+    process.env['SAFE_ONE'] = 'c'
+    const trust = trustFrom(
+      { root: '/p', siteUrl: SITE, allowEnv: ['AWS_SECRET_KEY', 'NPM_TOKEN', 'SAFE_ONE'] },
+      false,
+    )
+    expect(envFor(trust)).toEqual({ SAFE_ONE: 'c' })
+  })
+
+  it('leaves everything alone when it is not set', () => {
+    process.env['ADMIN_PASSWORD'] = 'hunter2'
+    const trust = trustFrom({ root: '/p', siteUrl: SITE, allowEnv: ['ADMIN_PASSWORD'] }, false)
+    expect(envFor(trust)).toEqual({ ADMIN_PASSWORD: 'hunter2' })
+  })
+})
+
 describe('an untrusted run', () => {
   it('reads no variable, however it was allowed — flag, environment or config', () => {
     process.env['SHOTLIST_ENV'] = 'FROM_ENV'
