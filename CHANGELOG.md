@@ -10,6 +10,17 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A key legal in another document no longer suggests itself.** A recipe filed under
+  `paths.macros` reported `unknown key "install" — did you mean "install"?`, once per key,
+  because the suggestion vocabulary spans both shapes. A word is not a misspelling of
+  itself.
+- **A document filed as the wrong kind says so, in one line.** The same case described the
+  symptom eight times and never named the cause. It now opens with "this reads as a recipe
+  rather than a macro" and lists the keys that say so — and the other way round for a
+  macro under `paths.recipes`.
+
 ## [0.4.0] — 2026-08-09
 
 ### Added

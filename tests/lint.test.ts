@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { lint, parseRecipe, run } from '../src/index.js'
+import { lint, nearest, parseRecipe, run } from '../src/index.js'
 
 const made: string[] = []
 afterAll(() => {
@@ -59,6 +59,43 @@ describe('a key that is nearly right', () => {
       'shotlist.config.yaml': 'site:\n  url: http://x.test\n  viewpoint: 3\n',
     })
     expect(lint(config(root))[0]?.message).toMatch(/did you mean "viewport"\?/)
+  })
+})
+
+describe('a document filed as the wrong kind', () => {
+  it('names the cause once, rather than every recipe key it holds', () => {
+    const root = project({
+      'macros/image-block.yaml': `name: image-block\ninstall: guide\nclip: { css: '.b' }\nmarks:\n  t: { css: h2 }\ncallouts:\n  - { mark: t, text: Heading }\n`,
+    })
+    const problems = lint(config(root))
+    expect(problems).toHaveLength(1)
+    expect(problems[0]!.message).toMatch(/reads as a recipe rather than a macro/)
+    expect(problems[0]!.message).toMatch(/install, clip, marks, callouts/)
+    // The old output was one line per key, each suggesting the key back to itself.
+    expect(problems[0]!.message).not.toMatch(/did you mean/)
+    expect(problems[0]!.message.split('\n')).toHaveLength(1)
+  })
+
+  it('says the same the other way round, for a macro in the recipes directory', () => {
+    const root = project({ 'recipes/opener.yaml': `steps:\n  - click: { css: button }\n` })
+    expect(lint(config(root))[0]!.message).toMatch(/reads as a macro rather than a recipe/)
+  })
+
+  it('leaves a real macro alone', () => {
+    const root = project({ 'macros/opener.yaml': `steps:\n  - click: { css: button }\n` })
+    expect(lint(config(root))).toEqual([])
+  })
+})
+
+describe('a suggestion', () => {
+  it('is never the word itself, however legal that word is elsewhere', () => {
+    // `install` is a recipe key, so it is in the vocabulary — and a macro that uses it
+    // used to be told it meant `install`.
+    expect(nearest('install', ['install', 'setup', 'clip'])).toBeUndefined()
+  })
+
+  it('still finds a genuine near miss', () => {
+    expect(nearest('instal', ['install', 'setup'])).toBe('install')
   })
 })
 

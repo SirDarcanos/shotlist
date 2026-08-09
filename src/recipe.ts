@@ -329,11 +329,48 @@ function validate<T>(schema: z.ZodType<T>, raw: unknown, what: string, file?: st
   return result.data
 }
 
+/** Keys a recipe has and a macro does not, for telling one filed as the other apart. */
+const RECIPE_ONLY: ReadonlySet<string> = new Set(
+  Object.keys(Recipe.shape).filter((key) => !['name', 'defaults', 'steps'].includes(key)),
+)
+
+/**
+ * Refuse a document that is plainly the other kind, and say which.
+ *
+ * A recipe in `paths.macros` fails as a macro missing `steps`, followed by a line for
+ * every recipe key it has — which describes the symptom eight times and never once names
+ * the cause, that the file is in the wrong directory.
+ */
+function checkKind(raw: unknown, kind: 'recipe' | 'macro', file?: string): void {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return
+  const keys = Object.keys(raw)
+  if (kind === 'macro' && !keys.includes('steps')) {
+    const recipeish = keys.filter((key) => RECIPE_ONLY.has(key))
+    if (recipeish.length) {
+      throw new ShotlistError(
+        `this reads as a recipe rather than a macro — it has ${recipeish.join(', ')}, and a ` +
+          'macro is `steps:` with an optional `name` and `defaults`. Move it to ' +
+          '`paths.recipes`, or give it the steps it is missing.',
+        file,
+      )
+    }
+  }
+  if (kind === 'recipe' && keys.includes('steps') && !keys.includes('setup')) {
+    throw new ShotlistError(
+      'this reads as a macro rather than a recipe — a recipe drives the page with ' +
+        '`setup:` and says what to shoot. Move it to `paths.macros`, or rename `steps` ' +
+        'to `setup`.',
+      file,
+    )
+  }
+}
+
 /** Validate one macro document, checking its verbs the way a recipe's setup is checked. */
 export function parseMacro(
   raw: unknown,
   options: { finders?: Record<string, unknown>; file?: string } = {},
 ): Macro {
+  checkKind(raw, 'macro', options.file)
   if (typeof raw === 'object' && raw !== null && 'steps' in raw) {
     checkVerbs((raw as { steps: unknown }).steps, 'steps')
   }
@@ -345,6 +382,7 @@ export function parseRecipe(
   raw: unknown,
   options: { finders?: Record<string, unknown>; file?: string; name?: string } = {},
 ): Recipe {
+  checkKind(raw, 'recipe', options.file)
   if (typeof raw === 'object' && raw !== null && 'setup' in raw) {
     checkVerbs((raw as { setup: unknown }).setup, 'setup')
   }

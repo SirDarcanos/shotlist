@@ -312,6 +312,10 @@ export function nearest(word: string, known: readonly string[]): string | undefi
   let best: string | undefined
   let score = Infinity
   for (const candidate of known) {
+    // A word is not a misspelling of itself. A key legal in one document and not in
+    // another lands here — `install` in a macro — and suggesting it back reads as a
+    // taunt while saying nothing about what is actually wrong.
+    if (candidate.toLowerCase() === word.toLowerCase()) continue
     const d = distance(word.toLowerCase(), candidate.toLowerCase())
     if (d < score) {
       score = d

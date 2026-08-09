@@ -6,6 +6,7 @@ export {
   fromRoot,
   loadConfig,
   mergeStyle,
+  nearest,
   parseConfig,
   readDocument,
 } from './config.js'
