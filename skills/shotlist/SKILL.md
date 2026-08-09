@@ -189,6 +189,23 @@ npx shotlist --login admin --using sign-in --allow-env WP_USER,WP_PASSWORD
 
 An `--untrusted` run loads no session and reads no variable.
 
+## Checking a recipe without running it
+
+`npx shotlist --lint` parses every config, recipe, macro and data file and reports what is
+wrong with all of them at once. No browser, no site running — so it is the fastest way to
+find a typo, and the right thing to run before shooting.
+
+```
+recipes/order-row.yaml
+  ✗ clip: unknown key "marching" — did you mean "matching"?
+
+1 error in 3 files
+```
+
+It checks shape, not truth: a `css` selector that matches nothing is only knowable against
+a real page. `--warnings` adds what is legal but probably unmeant — a mark no callout
+points at, an `install:` the config does not name — and never changes the exit code.
+
 ## When a recipe fails
 
 Errors name the recipe and the key inside it. Match the message to the fix:

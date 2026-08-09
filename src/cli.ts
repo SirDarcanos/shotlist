@@ -13,6 +13,7 @@ import { check } from './check.js'
 import { loadPlaywright } from './playwright.js'
 import { withServer } from './serve.js'
 import { scaffold } from './init.js'
+import { countDocuments, formatProblems, lint } from './lint.js'
 import { trustFrom } from './trust.js'
 import { sessionFor, signIn } from './session.js'
 import {
@@ -33,12 +34,14 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   shotlist --check [<name>...]   re-shoot and compare against the committed images
   shotlist --check --diff        …and write a before/after/changed image for each
   shotlist --check --json        …and report it as JSON on stdout
+  shotlist --lint                check every recipe, macro and data file, and stop
   shotlist --login <name>        sign in by hand, and save the session under this name
   shotlist --login <name> --using <macro>
                                  …signing in with a macro instead of by hand
 
   --config <file>   use this config instead of the nearest one
   --using <macro>   with --login, the macro that signs in, for a run with nobody at it
+  --warnings        with --lint, also report what is legal but probably not meant
   --allow-env <n>   let a recipe read this variable as \${env.<n>}; repeatable
   --keep-going      carry on past a recipe that fails, and report them at the end
   --untrusted       the config is not yours: no processes, no leaving the project,
@@ -118,6 +121,8 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         'keep-going': { type: 'boolean', default: false },
         diff: { type: 'boolean', default: false },
         json: { type: 'boolean', default: false },
+        lint: { type: 'boolean', default: false },
+        warnings: { type: 'boolean', default: false },
         untrusted: { type: 'boolean', default: false },
         allow: { type: 'string', multiple: true },
         'allow-path': { type: 'string', multiple: true },
@@ -163,6 +168,14 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
       io.out('\nStart the site, then shoot it:\n  npx shotlist example')
     }
     return 0
+  }
+
+  // Before the config is loaded, because a config that will not load is the first thing
+  // this has to be able to report rather than die of.
+  if (values.lint) {
+    const problems = lint(values.config, { warnings: values.warnings })
+    for (const line of formatProblems(problems, countDocuments(values.config))) io.out(line)
+    return problems.some((one) => one.level === 'error') ? 1 : 0
   }
 
   try {

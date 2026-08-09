@@ -62,7 +62,7 @@ describe('parseRecipe', () => {
   // matched — naming neither the key that was wrong nor what it should have been.
   it('names the key inside the branch the author was plainly writing', () => {
     expect(() => parseRecipe({ numbered: { marks: ['a'], badgee: 'ml' } }, { name: 'x' })).toThrow(
-      /numbered: Unrecognized key: "badgee"/,
+      /numbered: unknown key "badgee" — did you mean "badge"\?/,
     )
   })
 

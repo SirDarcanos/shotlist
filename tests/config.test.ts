@@ -68,13 +68,13 @@ describe('serve', () => {
 
   it('names a misspelled key rather than reporting the shorthand did not match', () => {
     expect(complaint({ serve: { command: 'npm run dev', reddy: 3000 } })).toMatch(
-      /site\.serve: Unrecognized key: "reddy"/,
+      /site\.serve: unknown key "reddy" — did you mean "ready"\?/,
     )
   })
 
   it('follows the union inside `ready` too, keeping the whole path', () => {
     expect(complaint({ serve: { command: 'npm run dev', ready: { logg: 'up' } } })).toMatch(
-      /site\.serve\.ready: Unrecognized key: "logg"/,
+      /site\.serve\.ready: unknown key "logg" — did you mean "log"\?/,
     )
   })
 })

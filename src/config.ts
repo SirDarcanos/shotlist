@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
 import { FORMATS } from './image.js'
+import { QUERY_KEYS } from './query.js'
 
 const Style = z
   .object({
@@ -114,7 +115,7 @@ const Session = z.union([
   SessionOptions,
 ])
 
-const Site = z.object({
+const Site = z.strictObject({
   url: z.string(),
   /** Started before the first shot and stopped after the last, unless already running. */
   serve: Serve.optional(),
@@ -137,11 +138,11 @@ const Site = z.object({
   timeout: z.number().positive().default(15000),
 })
 
-export const Config = z.object({
+export const Config = z.strictObject({
   site: Site,
   style: Style,
   paths: z
-    .object({
+    .strictObject({
       recipes: z.string().default('screenshots/recipes'),
       macros: z.string().default('screenshots/macros'),
       data: z.string().default('screenshots/data'),
@@ -158,7 +159,7 @@ export const Config = z.object({
    * write it.
    */
   image: z
-    .object({
+    .strictObject({
       format: z.enum(FORMATS).default('png'),
       /** Ignored by `png`, which has nothing to trade. */
       quality: z.int().min(1).max(100).default(90),
@@ -177,7 +178,7 @@ export const Config = z.object({
    */
   deny: z.array(z.string()).default([]),
   check: z
-    .object({
+    .strictObject({
       /** The fraction of differing pixels a shot may have before it counts as changed. */
       threshold: z.number().min(0).max(1).default(0.002),
       /** How far one channel may move before a pixel counts as differing, out of 255. */
@@ -188,6 +189,37 @@ export const Config = z.object({
 
 export type Config = z.infer<typeof Config>
 export type Style = z.infer<typeof Style>
+
+/**
+ * Every key name anywhere in a schema, for suggesting the one an author meant.
+ *
+ * Walked rather than listed, so a key added three levels down is offered the day it
+ * exists. Zod's internals are read defensively: a shape this does not recognize costs a
+ * suggestion, never a crash, and the depth cap stops a recursive schema walking forever.
+ */
+export function keysIn(schema: unknown, depth = 0, seen = new Set<unknown>()): string[] {
+  if (depth > 8 || seen.has(schema)) return []
+  seen.add(schema)
+  const def = (schema as { def?: Record<string, unknown> })?.def
+  if (!def) return []
+  const found: string[] = []
+  const shape = def['shape'] as Record<string, unknown> | undefined
+  if (shape) {
+    found.push(...Object.keys(shape))
+    for (const inner of Object.values(shape)) found.push(...keysIn(inner, depth + 1, seen))
+  }
+  for (const key of ['innerType', 'element', 'valueType']) {
+    if (def[key]) found.push(...keysIn(def[key], depth + 1, seen))
+  }
+  const options = def['options'] as unknown[] | undefined
+  if (Array.isArray(options)) {
+    for (const option of options) found.push(...keysIn(option, depth + 1, seen))
+  }
+  return found
+}
+
+/** Every name a config may legally use as a key. `finders` hold queries, so those too. */
+const CONFIG_WORDS: readonly string[] = [...new Set([...keysIn(Config), ...QUERY_KEYS])]
 export type Serve = z.infer<typeof Serve>
 
 const FILENAMES = ['shotlist.config.yaml', 'shotlist.config.yml', 'shotlist.config.json']
@@ -231,25 +263,100 @@ const UNION_DEPTH = 3
  * written — `serve: { command: …, reddy: … }` is not a failed attempt at a string.
  * Whatever branches are left are the ones with something to say.
  */
-function explain(issues: readonly Issue[], prefix: PropertyKey[] = [], depth = 0): string[] {
+/** How many of an author's keys a branch did not know. */
+function unknownIn(branch: readonly Issue[]): number {
+  return branch.reduce(
+    (total, issue) => total + (issue.code === 'unrecognized_keys' ? issue.keys.length : 0),
+    0,
+  )
+}
+
+/**
+ * Edit distance, for suggesting the word an author meant.
+ *
+ * Shared by the step verbs and the key names: a typo is a typo wherever it lands.
+ */
+export function distance(a: string, b: string): number {
+  const rows: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [
+    i,
+    ...Array<number>(b.length).fill(0),
+  ])
+  for (let j = 0; j <= b.length; j++) rows[0]![j] = j
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      rows[i]![j] = Math.min(
+        rows[i - 1]![j]! + 1,
+        rows[i]![j - 1]! + 1,
+        rows[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      )
+    }
+  }
+  return rows[a.length]![b.length]!
+}
+
+/** The name a misspelling was reaching for, or undefined when nothing is close enough. */
+export function nearest(word: string, known: readonly string[]): string | undefined {
+  let best: string | undefined
+  let score = Infinity
+  for (const candidate of known) {
+    const d = distance(word.toLowerCase(), candidate.toLowerCase())
+    if (d < score) {
+      score = d
+      best = candidate
+    }
+  }
+  return best !== undefined && score <= Math.max(2, Math.floor(word.length / 3)) ? best : undefined
+}
+
+function explain(
+  issues: readonly Issue[],
+  prefix: PropertyKey[] = [],
+  depth = 0,
+  known: readonly string[] = [],
+): string[] {
   return issues.flatMap((issue) => {
     const path = [...prefix, ...issue.path]
     if (issue.code === 'invalid_union' && depth < UNION_DEPTH) {
+      // A branch that rejected the value without looking inside it is not the one being
+      // written: `clip: { css: … }` is not a failed attempt at the word `viewport`.
       const branches = issue.errors.filter(
-        (branch) => !branch.every((each) => each.code === 'invalid_type' && !each.path.length),
+        (branch) =>
+          !branch.every(
+            (each) =>
+              (each.code === 'invalid_type' || each.code === 'invalid_value') && !each.path.length,
+          ),
       )
-      if (branches.length) {
-        return [...new Set(branches.flatMap((branch) => explain(branch, path, depth + 1)))]
+      // Of what is left, a branch complaining only about extra keys knew everything else
+      // that was written — and the one that knew most of it names the fewest.
+      const shapely = branches.filter((branch) =>
+        branch.every((each) => each.code === 'unrecognized_keys'),
+      )
+      const chosen = shapely.length
+        ? [shapely.reduce((best, branch) => (unknownIn(branch) < unknownIn(best) ? branch : best))]
+        : branches
+      if (chosen.length) {
+        return [...new Set(chosen.flatMap((branch) => explain(branch, path, depth + 1, known)))]
       }
     }
     const where = path.length ? path.join('.') : '(root)'
+    if (issue.code === 'unrecognized_keys') {
+      return issue.keys.map((key) => {
+        const meant = nearest(key, known)
+        return `  ${where}: unknown key "${key}"${meant ? ` — did you mean "${meant}"?` : ''}`
+      })
+    }
     return [`  ${where}: ${issue.message}`]
   })
 }
 
-/** Turn zod's issue list into one line per problem, addressed by its path in the document. */
-export function formatIssues(error: z.ZodError): string {
-  return explain(error.issues).join('\n')
+/**
+ * Turn zod's issue list into one line per problem, addressed by its path in the document.
+ *
+ * `known` is every name a suggestion may propose. Passed in rather than read off the
+ * schema, because zod reports which key it did not recognize and never which it would.
+ */
+export function formatIssues(error: z.ZodError, known: readonly string[] = []): string {
+  return explain(error.issues, [], 0, known).join('\n')
 }
 
 /**
@@ -279,7 +386,7 @@ export function readDocument(file: string): unknown {
 export function parseConfig(raw: unknown, file?: string): Config {
   const result = Config.safeParse(raw)
   if (!result.success) {
-    throw new ShotlistError(`invalid config —\n${formatIssues(result.error)}`, file)
+    throw new ShotlistError(`invalid config —\n${formatIssues(result.error, CONFIG_WORDS)}`, file)
   }
   return result.data
 }

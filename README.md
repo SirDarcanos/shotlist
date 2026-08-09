@@ -115,6 +115,7 @@ npx shotlist --all --keep-going   # …carrying on past a recipe that fails
 npx shotlist --check              # compare against committed images
 npx shotlist --check --diff       # …and write a before/after/changed image
 npx shotlist --check --json       # …and report it as JSON on stdout
+npx shotlist --lint               # check every YAML; no browser, no site needed
 npx shotlist --login admin        # sign in by hand, and save the session
 npx shotlist --help               # the full list, from the tool
 ```

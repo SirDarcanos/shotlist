@@ -14,6 +14,10 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`shotlist --lint`** parses every config, recipe, macro and data file and reports what
+  is wrong with all of them at once — no browser, no site running. `--warnings` adds what
+  is legal but probably unmeant, a mark no callout points at or an `install:` the config
+  does not name, and never changes the exit code.
 - **`site.sessions` and a recipe's `session:`**, for a page you have to sign in for.
   `shotlist --login <name>` opens a browser, waits while you sign in, and saves the cookies
   under that name. Named rather than single, so one shot list can shoot the same page as an
@@ -34,6 +38,13 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Changed
 
+- **A misspelled key now names the one it was reaching for**, and says it once.
+  `clip: { css: …, marching: … }` reported six lines — two of them about the words
+  `viewport` and `full`, which a mapping was never a failed attempt at. It reads
+  `clip: unknown key "marching" — did you mean "matching"?`.
+- **A config key the schema does not know is now refused rather than ignored.**
+  `site.viewpoint: 3` silently did nothing, which looks exactly like a setting that has no
+  effect. A config carrying a key on purpose has to drop it.
 - **`unrecognised step` now reads `unrecognized step`.** The project settles on American
   spelling throughout, and that error was the only British one a user could see. A check
   that greps for the old wording needs the new one.

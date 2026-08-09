@@ -1,9 +1,16 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
-import { MAX_PIXELS, ShotlistError, formatIssues, readDocument } from './config.js'
+import {
+  MAX_PIXELS,
+  ShotlistError,
+  distance,
+  formatIssues,
+  keysIn,
+  readDocument,
+} from './config.js'
 import { FORMATS } from './image.js'
-import { makeQuery } from './query.js'
+import { QUERY_KEYS, makeQuery } from './query.js'
 import type { QueryInput } from './query.js'
 
 /** A value a recipe can hold literally or reference with `$name`. */
@@ -248,25 +255,6 @@ export type Recipe = z.infer<typeof Recipe>
 export type Callout = z.infer<typeof Callout>
 export type Macro = z.infer<typeof Macro>
 
-/** Edit distance, for suggesting the verb an author meant. */
-function distance(a: string, b: string): number {
-  const rows: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [
-    i,
-    ...Array<number>(b.length).fill(0),
-  ])
-  for (let j = 0; j <= b.length; j++) rows[0]![j] = j
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      rows[i]![j] = Math.min(
-        rows[i - 1]![j]! + 1,
-        rows[i]![j - 1]! + 1,
-        rows[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
-      )
-    }
-  }
-  return rows[a.length]![b.length]!
-}
-
 /** The closest known verb to `word`, when one is close enough to be worth suggesting. */
 export function nearestVerb(word: string): string | null {
   let best: string | null = null
@@ -314,6 +302,14 @@ function checkVerbs(steps: unknown, where: string): void {
 }
 
 /**
+ * Every name a recipe may legally use as a key, for suggesting the one that was meant.
+ *
+ * Read off the schemas rather than listed, so a new verb or query primitive is offered
+ * as a suggestion the day it is added.
+ */
+const RECIPE_WORDS: readonly string[] = [...new Set([...keysIn(Recipe), ...QUERY_KEYS, ...VERBS])]
+
+/**
  * Run a schema, turning both kinds of failure into one error an author can act on.
  *
  * Alias expansion happens inside the schema and throws rather than adding an issue,
@@ -328,9 +324,20 @@ function validate<T>(schema: z.ZodType<T>, raw: unknown, what: string, file?: st
     throw new ShotlistError((error as Error).message, file)
   }
   if (!result.success) {
-    throw new ShotlistError(`invalid ${what} —\n${formatIssues(result.error)}`, file)
+    throw new ShotlistError(`invalid ${what} —\n${formatIssues(result.error, RECIPE_WORDS)}`, file)
   }
   return result.data
+}
+
+/** Validate one macro document, checking its verbs the way a recipe's setup is checked. */
+export function parseMacro(
+  raw: unknown,
+  options: { finders?: Record<string, unknown>; file?: string } = {},
+): Macro {
+  if (typeof raw === 'object' && raw !== null && 'steps' in raw) {
+    checkVerbs((raw as { steps: unknown }).steps, 'steps')
+  }
+  return validate(makeMacro(options.finders ?? {}), raw, 'macro', options.file)
 }
 
 /** Validate one recipe document against this project's aliases. */
@@ -400,16 +407,18 @@ export interface Library {
 
 const DOCUMENTS = new Set(['.yaml', '.yml', '.json'])
 
-/** Every document in a directory, keyed by filename without its extension. */
-function documentsIn(dir: string): Array<{ name: string; file: string; raw: unknown }> {
+/** Every document in a directory, named but not yet read — the linter reads them itself. */
+export function documentFiles(dir: string): Array<{ name: string; file: string }> {
   if (!existsSync(dir)) return []
   return readdirSync(dir)
     .filter((entry) => DOCUMENTS.has(extname(entry)) && !entry.startsWith('.'))
     .sort()
-    .map((entry) => {
-      const file = join(dir, entry)
-      return { name: basename(entry, extname(entry)), file, raw: readDocument(file) }
-    })
+    .map((entry) => ({ name: basename(entry, extname(entry)), file: join(dir, entry) }))
+}
+
+/** Every document in a directory, keyed by filename without its extension. */
+function documentsIn(dir: string): Array<{ name: string; file: string; raw: unknown }> {
+  return documentFiles(dir).map(({ name, file }) => ({ name, file, raw: readDocument(file) }))
 }
 
 /** Load a project's recipes, macros and data from the directories its config names. */
@@ -423,10 +432,7 @@ export function loadLibrary(paths: {
 
   const macros = new Map<string, Macro>()
   for (const { name, file, raw } of documentsIn(paths.macros)) {
-    if (typeof raw === 'object' && raw !== null && 'steps' in raw) {
-      checkVerbs((raw as { steps: unknown }).steps, 'steps')
-    }
-    const macro = validate(makeMacro(finders), raw, 'macro', file)
+    const macro = parseMacro(raw, { finders, file })
     macros.set(macro.name ?? name, macro)
   }
 
