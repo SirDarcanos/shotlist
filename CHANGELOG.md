@@ -10,15 +10,21 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
-### Fixed
-
-- **A label beside a mark sat above it, and its arrow sloped.** `place: left` and
-  `place: right` centred the label's _metric box_ on the mark while the arrow left from
-  the label's _ink_ — and a font reserves room for descenders whether or not a line has
-  any, so a label like "Start here" rode about 4px high and its arrow ran downhill. Both
-  now use the ink, which is what the arrow was already following.
+## [0.4.0] — 2026-08-09
 
 ### Added
+
+- **`site.sessions` and a recipe's `session:`**, for a page you have to sign in for.
+  `shotlist --login <name>` opens a browser, waits while you sign in, and saves the cookies
+  under that name. Named rather than single, so one shot list can shoot the same page as an
+  administrator and as somebody with no rights.
+- **A session's `verify` selector**, checked after every navigation. An expired session
+  redirects rather than failing, so without one every shot becomes the sign-in form.
+- **`--login <name> --using <macro>`** signs in with ordinary steps, for a run with nobody
+  at it.
+- **`${env.NAME}` in a recipe**, for the variables named with `--allow-env` or
+  `SHOTLIST_ENV` and no others. An `--untrusted` run reads none of them, and loads no
+  session either.
 
 - **`style.label.fontUrl` may be the font file itself** — a `.woff2`, `.woff`, `.otf` or
   `.ttf` — not only a stylesheet. shotlist writes the `@font-face`, under the first real
@@ -31,13 +37,22 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 - **`unrecognised step` now reads `unrecognized step`.** The project settles on American
   spelling throughout, and that error was the only British one a user could see. A check
   that greps for the old wording needs the new one.
-- **The README is the short version, and everything a contributor needs is in
-  [CONTRIBUTING.md](./CONTRIBUTING.md).** [shotlist.dev/docs](https://shotlist.dev/docs) is
-  the reference for every key, verb and primitive; setup, the rules, and what "done" means
-  are in one file rather than spread across three, so no two of them can disagree.
+- **Everything a contributor needs is in [CONTRIBUTING.md](./CONTRIBUTING.md)**, rather
+  than spread across three files that could disagree.
+- **The bundled skill covers sessions, and points at
+  [shotlist.dev/docs](https://shotlist.dev/docs)** — it still called the README the
+  reference, which it has not been since the docs moved.
 
 ### Fixed
 
+- **The published CLI would not run.** `npx shotlist` failed with `Permission denied` on
+  macOS and Linux, so 0.3.0 was installable and unusable from a terminal: `tsc` writes
+  `dist/cli.js` as 0644 and npm publishes the mode the file has. The build sets it now.
+- **A label beside a mark sat above it, and its arrow sloped.** `place: left` and
+  `place: right` centered the label's _metric box_ on the mark while the arrow left from
+  the label's _ink_ — and a font reserves room for descenders whether or not a line has
+  any, so a label like "Start here" rode about 4px high and its arrow ran downhill. Both
+  now use the ink, which is what the arrow was already following.
 - **A font that never loaded held the run open.** The drawing page waits for a `fontUrl`
   to arrive, and nothing bounded that wait — `page.evaluate` has no timeout of its own, so
   a stylesheet host that accepted a connection and then said nothing kept the shot going
@@ -351,7 +366,8 @@ The layers that turn a validated recipe into a PNG — running steps against Pla
 drawing the callouts, capturing and installing, and `--check` for staleness — plus the
 `shotlist` CLI itself. The README documents them; nothing in 0.0.1 runs them.
 
-[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.3.0...HEAD
+[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/SirDarcanos/shotlist/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SirDarcanos/shotlist/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/SirDarcanos/shotlist/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/SirDarcanos/shotlist/compare/v0.2.1...v0.2.2
