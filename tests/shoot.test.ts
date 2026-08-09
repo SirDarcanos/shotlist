@@ -459,10 +459,27 @@ describe('a font the project ships itself', () => {
     expect((await shootIt(loaded, library)).warnings ?? []).toEqual([])
   })
 
+  // The stylesheet is the general case; a project that licenced one face and dropped the
+  // file in should not have to write two lines of `@font-face` to say so.
+  it('takes the font file itself, and declares it under the family the labels ask for', async () => {
+    const { loaded, library } = withFont(SHEET, 'fonts/JetBrainsMono-Bold.woff2')
+    // `font` is `Shotlist Mono` with no fallback, so silence here means the file was read,
+    // declared under that name and resolved — the same signal the stylesheet test uses.
+    expect((await shootIt(loaded, library)).warnings ?? []).toEqual([])
+  }, 120_000)
+
+  it('refuses a font file when the stack names no family to declare it under', async () => {
+    const { loaded, library } = withFont(SHEET, 'fonts/JetBrainsMono-Bold.woff2')
+    loaded.config.style.label.font = 'sans-serif'
+    await expect(shootIt(loaded, library)).rejects.toThrow(
+      /style\.label\.font has to name the family/,
+    )
+  }, 120_000)
+
   it('says where it looked for a stylesheet that is not there', async () => {
     const { loaded, library } = withFont(SHEET, 'fonts/missing.css')
     await expect(shootIt(loaded, library)).rejects.toThrow(
-      /style\.label\.fontUrl: no stylesheet at .*fonts\/missing\.css/,
+      /style\.label\.fontUrl: nothing at .*fonts\/missing\.css/,
     )
   }, 120_000)
 
@@ -470,7 +487,7 @@ describe('a font the project ships itself', () => {
     // It used to be interpolated into a `<link href>`, where a quote closed the attribute
     // and opened a script tag — in the page holding the screenshot.
     const { loaded, library } = withFont(SHEET, '"><script>globalThis.PWNED=1</script>')
-    await expect(shootIt(loaded, library)).rejects.toThrow(/no stylesheet at /)
+    await expect(shootIt(loaded, library)).rejects.toThrow(/nothing at /)
   }, 120_000)
 
   it('says which font a stylesheet points at when that is missing', async () => {

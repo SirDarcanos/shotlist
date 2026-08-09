@@ -10,6 +10,22 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Added
+
+- **`style.label.fontUrl` may be the font file itself** — a `.woff2`, `.woff`, `.otf` or
+  `.ttf` — not only a stylesheet. shotlist writes the `@font-face`, under the first real
+  family in `style.label.font` and at that label's weight, so a font nobody serves and
+  nobody has installed still sets the labels. A stack of only generic keywords is refused:
+  there is no name to declare the file under.
+
+### Fixed
+
+- **A font that never loaded held the run open.** The drawing page waits for a `fontUrl`
+  to arrive, and nothing bounded that wait — `page.evaluate` has no timeout of its own, so
+  a stylesheet host that accepted a connection and then said nothing kept the shot going
+  indefinitely. It is bounded by `site.timeout` now, and giving up warns and draws the
+  labels in whatever resolved.
+
 ## [0.3.0] — 2026-08-08
 
 ### Changed

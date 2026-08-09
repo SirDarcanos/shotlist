@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
 import { checkPath, checkUrl } from './trust.js'
@@ -134,6 +134,29 @@ function fontType(path: string): string {
   return 'application/octet-stream'
 }
 
+/** What a font file's extension has to be called in a `format()` hint. */
+const FONT_FORMAT: Record<string, string | undefined> = {
+  woff2: 'woff2',
+  woff: 'woff',
+  otf: 'opentype',
+  ttf: 'truetype',
+}
+
+/**
+ * The first family in a stack that names a face rather than a category.
+ *
+ * `sans-serif` and its like are what the platform has, not something to declare a file
+ * under, so a stack of nothing else has no name to give.
+ */
+function namedFamily(stack: string): string | undefined {
+  const generic = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|-apple-system|ui-[\w-]+)$/
+  for (const part of stack.split(',')) {
+    const family = part.trim().replace(/^['"]|['"]$/g, '')
+    if (family && !generic.test(family)) return family
+  }
+  return undefined
+}
+
 /**
  * The stylesheet `style.label.fontUrl` names, ready to put in the drawing page.
  *
@@ -168,9 +191,30 @@ function fontSheet(style: Style, loaded: LoadedConfig): FontSheet {
   if (loaded.trust) checkPath(loaded.trust, file, 'style.label.fontUrl')
   if (!existsSync(file)) {
     throw new ShotlistError(
-      `style.label.fontUrl: no stylesheet at ${file} — a relative path is resolved from the ` +
+      `style.label.fontUrl: nothing at ${file} — a relative path is resolved from the ` +
         "config file's directory",
     )
+  }
+
+  // A font file rather than a stylesheet: the common case is a project shipping one face
+  // it licenced, and writing a two-line `@font-face` by hand to point at it is a step
+  // that only exists to be got wrong. The family it is declared under is the first real
+  // one in `style.label.font`, so the stack the labels ask for is the stack it answers.
+  const format = FONT_FORMAT[extname(file).slice(1).toLowerCase()]
+  if (format) {
+    const family = namedFamily(style.label.font)
+    if (!family) {
+      throw new ShotlistError(
+        `style.label.fontUrl points at a font file, so style.label.font has to name the ` +
+          `family to declare it under — "${style.label.font}" is only generic keywords`,
+      )
+    }
+    const data = readFileSync(file).toString('base64')
+    return {
+      css:
+        `@font-face{font-family:"${family}";font-weight:${style.label.weight};` +
+        `font-display:block;src:url(data:${fontType(file)};base64,${data}) format("${format}")}`,
+    }
   }
 
   const css = readFileSync(file, 'utf8').replace(
@@ -201,6 +245,7 @@ async function annotate(
   masks: Rect[],
   font: FontSheet,
   sourceMedia: string,
+  timeout: number,
 ): Promise<{
   png: Buffer
   size: { width: number; height: number }
@@ -213,6 +258,7 @@ async function annotate(
   })
   try {
     const page = await context.newPage()
+    let slow: string | undefined
     // Escaped even where the schema already held it to a URL: this is markup, and the
     // two checks fail independently.
     const escape = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
@@ -233,17 +279,28 @@ async function annotate(
     // does — so `ready` resolves against an empty queue and the drawing measures a font
     // that has not arrived. The label renders correctly in the end, but the check for
     // whether the family resolved runs before it and reports a fallback that never was.
+    // Bounded, because nothing else here bounds it: `page.evaluate` has no timeout of its
+    // own, so a stylesheet host that accepts a connection and then says nothing would hold
+    // the run open for as long as it cared to. Giving up draws the labels in whatever
+    // resolved, which is the same outcome as a font that is not installed, and the probe
+    // below reports it either way.
     if (font.href || font.css) {
       const wanted = `${style.label.weight} ${style.label.size}px ${style.label.font}`
-      await page.evaluate(
-        (spec) =>
-          document.fonts
-            .load(spec)
-            .catch(() => undefined)
-            .then(() => document.fonts.ready)
-            .then(() => undefined),
-        wanted,
+      const arrived = await page.evaluate(
+        ({ spec, ms }) =>
+          Promise.race([
+            document.fonts
+              .load(spec)
+              .catch(() => undefined)
+              .then(() => document.fonts.ready)
+              .then(() => true),
+            new Promise<boolean>((done) => setTimeout(() => done(false), ms)),
+          ]),
+        { spec: wanted, ms: timeout },
       )
+      if (!arrived) {
+        slow = `style.label.fontUrl did not load within ${timeout}ms — labels are drawn in whatever the browser had`
+      }
     }
     await page.evaluate(
       () =>
@@ -274,7 +331,7 @@ async function annotate(
       png,
       size: { width: canvas.width, height: canvas.height },
       margin: canvas.margin,
-      warnings: canvas.fontWarning ? [canvas.fontWarning] : [],
+      warnings: [slow, canvas.fontWarning].filter((one): one is string => one !== undefined),
     }
   } finally {
     await context.close()
@@ -571,6 +628,7 @@ export async function shoot(
             masks,
             fontSheet(style, loaded),
             source ? MEDIA[source.format] : MEDIA.png,
+            config.site.timeout,
           )
         : {
             png: image,
