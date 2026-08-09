@@ -81,6 +81,26 @@ describe('canvas', () => {
     expect(canvas.width).toBeGreaterThan(IMAGE.width)
   })
 
+  // The arrow leaves the label's ink and lands on the middle of the mark. Those are the
+  // same height or the arrow slopes, which is what centring the label's metric box did:
+  // a font reserves room for descenders whether or not a line has any.
+  it('runs a side label’s arrow level with the mark it points at', () => {
+    // Both paths: a label in a margin, and one sitting over the shot, which places
+    // itself separately and had the same mistake.
+    for (const place of ['left', 'right'] as const)
+      for (const inside of [false, true]) {
+        draw([mark({ text: 'Start here', place, inside })])
+        const arrow = [...document.querySelectorAll('#shotlist-layer polygon')].at(-1)!
+        const points = (arrow.getAttribute('points') ?? '')
+          .split(' ')
+          .map((pair) => pair.split(',').map(Number))
+        // The tip, and the tail as the midpoint of the two corners behind it.
+        const tip = points[0]!
+        const tail = [(points[3]![0]! + points[4]![0]!) / 2, (points[3]![1]! + points[4]![1]!) / 2]
+        expect(Math.abs(tail[1]! - tip[1]!), `${place}, inside ${inside}: slopes`).toBeLessThan(0.5)
+      }
+  })
+
   it('grows for a box drawn on an element that reaches the edge', () => {
     // Half the stroke and all of the padding would otherwise fall outside the shot.
     const canvas = draw([mark({ rect: { x: 0, y: 0, width: IMAGE.width, height: 40 } })])
@@ -89,7 +109,7 @@ describe('canvas', () => {
   })
 
   it('grows sideways for a label above a mark near the edge', () => {
-    // A top label is centred on its mark, so one wider than the room beside it hangs off
+    // A top label is centered on its mark, so one wider than the room beside it hangs off
     // the shot. Without this the label is slid back against the edge and shaved.
     const canvas = draw([
       mark({
@@ -328,7 +348,7 @@ describe('style', () => {
   // and no test had ever drawn with them.
   const bare = parseConfig({ site: { url: 'http://localhost' } }).style
 
-  it('outlines a label in the callout colour when no stroke is named', () => {
+  it('outlines a label in the callout color when no stroke is named', () => {
     expect(bare.label.stroke).toBeUndefined()
     drawAnnotations({
       image: IMAGE,
@@ -339,7 +359,7 @@ describe('style', () => {
     expect(document.querySelector('#shotlist-layer text')!.getAttribute('stroke')).toBe(bare.color)
   })
 
-  it('fills a disc with the callout colour when no fill is named', () => {
+  it('fills a disc with the callout color when no fill is named', () => {
     expect(bare.number.fill).toBeUndefined()
     drawAnnotations({
       image: IMAGE,
@@ -591,7 +611,7 @@ describe('place: auto, over the shot', () => {
   })
 
   it('stays outside where it would cover something', () => {
-    // Detail, not darkness: a region of one flat colour has nothing to lose by being
+    // Detail, not darkness: a region of one flat color has nothing to lose by being
     // covered, and it is the variation in it that says something is there.
     shotOf((x) => x % 6 < 2)
     const canvas = draw([mark(label)])

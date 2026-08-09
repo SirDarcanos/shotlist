@@ -459,7 +459,7 @@ describe('a font the project ships itself', () => {
     expect((await shootIt(loaded, library)).warnings ?? []).toEqual([])
   })
 
-  // The stylesheet is the general case; a project that licenced one face and dropped the
+  // The stylesheet is the general case; a project that licensed one face and dropped the
   // file in should not have to write two lines of `@font-face` to say so.
   it('takes the font file itself, and declares it under the family the labels ask for', async () => {
     const { loaded, library } = withFont(SHEET, 'fonts/JetBrainsMono-Bold.woff2')

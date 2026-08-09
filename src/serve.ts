@@ -49,7 +49,7 @@ function parseCommand(command: string): { tokens: string[]; bare: string } {
   return { tokens, bare }
 }
 
-/** Split a command line into a program and its arguments, honouring quotes. */
+/** Split a command line into a program and its arguments, honoring quotes. */
 export function tokenize(command: string): string[] {
   return parseCommand(command).tokens
 }

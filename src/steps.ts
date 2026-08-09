@@ -276,7 +276,7 @@ async function runStep(
     ctx.page = named
     return
   }
-  throw new ShotlistError(`unrecognised step ${JSON.stringify(step)}`)
+  throw new ShotlistError(`unrecognized step ${JSON.stringify(step)}`)
 }
 
 /**

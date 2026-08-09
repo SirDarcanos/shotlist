@@ -182,10 +182,10 @@ export function drawAnnotations(spec: AnnotationSpec): {
 
   // Measure every label before deciding the margins: how far the canvas has to grow on a
   // side is the widest label placed there.
-  const labelled = marks.filter((mark) => mark.text !== undefined && mark.place !== 'corner')
+  const labeled = marks.filter((mark) => mark.text !== undefined && mark.place !== 'corner')
   const linesOf = (mark: Mark) => (Array.isArray(mark.text) ? mark.text : [mark.text!])
-  const sizes = new Map<Mark, { width: number; height: number; leading: number; centre: number }>()
-  for (const mark of labelled) {
+  const sizes = new Map<Mark, { width: number; height: number; leading: number; center: number }>()
+  for (const mark of labeled) {
     let width = 0
     let line = 0
     // Where the glyphs actually sit, which getBBox cannot say: it reports the font's
@@ -228,7 +228,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
       return baseline + (first.actualBoundingBoxDescent - first.actualBoundingBoxAscent) / 2
     })()
 
-    const centre =
+    const center =
       inked !== undefined
         ? inked + ((middles.length - 1) * leading) / 2
         : middles.reduce((sum, mid, index) => sum + mid + index * leading, 0) / middles.length
@@ -236,7 +236,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
       width,
       height: leading * (linesOf(mark).length - 1) + line,
       leading,
-      centre,
+      center,
     })
   }
 
@@ -356,7 +356,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
     })
   }
 
-  for (const mark of labelled) {
+  for (const mark of labeled) {
     if (mark.place !== 'auto') {
       if (!(mark.inside ?? false)) claim(mark, mark.place as Side)
       continue
@@ -445,7 +445,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
 
   // Only a label placed outside claims a margin; one placed inside sits over the shot.
   const margin = { left: 0, right: 0, top: 0, bottom: 0 }
-  for (const mark of labelled) {
+  for (const mark of labeled) {
     if (insideOf(mark)) continue
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
@@ -453,19 +453,21 @@ export function drawAnnotations(spec: AnnotationSpec): {
     const need = side === 'left' || side === 'right' ? size.width + gap * 2 : size.height + gap * 2
     margin[side] = Math.max(margin[side], need)
 
-    // And on the other axis, where the label is centred on its mark: one longer than the
+    // And on the other axis, where the label is centered on its mark: one longer than the
     // room beside it overhangs the shot, and without a margin to overhang into it is slid
     // back against the edge with half its outline off the canvas.
     const b = rawBox(mark)
     const ink = px(style.label.strokeWidth) / 2
     if (side === 'left' || side === 'right') {
-      const middle = (b.top + b.bottom) / 2
-      margin.top = Math.max(margin.top, size.height / 2 - middle + ink)
-      margin.bottom = Math.max(margin.bottom, middle + size.height / 2 - image.height + ink)
+      // The same anchor the label is actually placed at, or the room reserved is not the
+      // room used and a label beside a mark near the edge overhangs anyway.
+      const top = (b.top + b.bottom) / 2 - size.center
+      margin.top = Math.max(margin.top, -top + ink)
+      margin.bottom = Math.max(margin.bottom, top + size.height - image.height + ink)
     } else {
-      const centre = (b.left + b.right) / 2
-      margin.left = Math.max(margin.left, size.width / 2 - centre + ink)
-      margin.right = Math.max(margin.right, centre + size.width / 2 - image.width + ink)
+      const center = (b.left + b.right) / 2
+      margin.left = Math.max(margin.left, size.width / 2 - center + ink)
+      margin.right = Math.max(margin.right, center + size.width / 2 - image.width + ink)
     }
   }
 
@@ -685,7 +687,7 @@ export function drawAnnotations(spec: AnnotationSpec): {
     )
   }
 
-  for (const mark of labelled) {
+  for (const mark of labeled) {
     const size = sizes.get(mark)!
     const gap = px(mark.gap ?? style.label.gap)
     const b = boxOf(mark)
@@ -726,12 +728,14 @@ export function drawAnnotations(spec: AnnotationSpec): {
           : side === 'right'
             ? b.right + gap
             : (b.left + b.right) / 2 - size.width / 2
+      // `size.center` for the same reason as the outside case below: the ink and the
+      // metric box do not share a middle, and the arrow leaves from the ink.
       const wantY =
         side === 'top'
           ? b.top - gap - size.height
           : side === 'bottom'
             ? b.bottom + gap
-            : (b.top + b.bottom) / 2 - size.height / 2
+            : (b.top + b.bottom) / 2 - size.center
       x = hold(wantX + dx, canvas.width - size.width)
       y = hold(wantY + dy, canvas.height - size.height)
 
@@ -747,7 +751,12 @@ export function drawAnnotations(spec: AnnotationSpec): {
         else x = hold(x + stride, canvas.width - size.width)
       }
     } else if (side === 'left' || side === 'right') {
-      const wanted = (b.top + b.bottom) / 2 - size.height / 2 + dy
+      // On `size.center`, not half the height: the first is where the label's ink sits,
+      // the second where its metric box does, and they are not the same point. A line of
+      // capitals with no descender inks well above the middle of the box the font
+      // reserves for it, so centring the box left the words riding high and the arrow —
+      // which starts at the ink and ends at the middle of the mark — running downhill.
+      const wanted = (b.top + b.bottom) / 2 - size.center + dy
       y = slot(side, wanted, size.height, canvas.height)
       x =
         (side === 'left' ? margin.left - gap - size.width : canvas.width - margin.right + gap) + dx
@@ -774,15 +783,15 @@ export function drawAnnotations(spec: AnnotationSpec): {
     // The outline is painted outside the box getBBox measures, so a tail starting at the
     // measured edge sits on top of it. Clear the stroke, then a little air.
     const clear = px(style.label.strokeWidth) / 2 + px(8)
-    const middle = y + size.centre
+    const middle = y + size.center
     const from =
       side === 'left'
         ? { x: x + size.width + clear, y: middle }
         : side === 'right'
           ? { x: x - clear, y: middle }
           : side === 'top'
-            ? { x: x + size.width / 2, y: y + size.centre + size.height / 2 + clear }
-            : { x: x + size.width / 2, y: y + size.centre - size.height / 2 - clear }
+            ? { x: x + size.width / 2, y: y + size.center + size.height / 2 + clear }
+            : { x: x + size.width / 2, y: y + size.center - size.height / 2 - clear }
     // The middle of the edge it approaches. Following the label's own height instead
     // lands the head wherever the label happens to sit, which reads as an arrow that
     // missed — the reader is looking at the box, not at the words.

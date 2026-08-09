@@ -468,7 +468,7 @@ describe('--check', () => {
     expect(out).toContain('opts out of checking')
   })
 
-  it('honours a threshold the recipe sets for itself', { timeout: 120_000 }, async () => {
+  it('honors a threshold the recipe sets for itself', { timeout: 120_000 }, async () => {
     const root = project()
     await cli(root, ['order-row', '--install'])
     // A threshold of 0 calls any difference at all a change; the shot is stable, so this

@@ -10,6 +10,14 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A label beside a mark sat above it, and its arrow sloped.** `place: left` and
+  `place: right` centred the label's _metric box_ on the mark while the arrow left from
+  the label's _ink_ — and a font reserves room for descenders whether or not a line has
+  any, so a label like "Start here" rode about 4px high and its arrow ran downhill. Both
+  now use the ink, which is what the arrow was already following.
+
 ### Added
 
 - **`style.label.fontUrl` may be the font file itself** — a `.woff2`, `.woff`, `.otf` or
@@ -17,6 +25,16 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   family in `style.label.font` and at that label's weight, so a font nobody serves and
   nobody has installed still sets the labels. A stack of only generic keywords is refused:
   there is no name to declare the file under.
+
+### Changed
+
+- **`unrecognised step` now reads `unrecognized step`.** The project settles on American
+  spelling throughout, and that error was the only British one a user could see. A check
+  that greps for the old wording needs the new one.
+- **The README is the short version, and everything a contributor needs is in
+  [CONTRIBUTING.md](./CONTRIBUTING.md).** [shotlist.dev/docs](https://shotlist.dev/docs) is
+  the reference for every key, verb and primitive; setup, the rules, and what "done" means
+  are in one file rather than spread across three, so no two of them can disagree.
 
 ### Fixed
 
@@ -136,7 +154,7 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 ### Fixed
 
 - **A label above or below its mark was shaved by the edge of the canvas.** Only the side
-  a label is placed on claimed a margin, but a label is centred on what it names — so one
+  a label is placed on claimed a margin, but a label is centered on what it names — so one
   above a mark near the right edge overhung a canvas that never grew to hold it, and was
   slid back until it sat flush and lost half its outline. The margins are now measured on
   both axes, which fixes the mirror case as well: a label beside a mark at the top or the
@@ -164,7 +182,7 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   every line whatever its letters — so a line with a cap and a descender, which inks half
   again as tall as one with neither, dragged the middle up into itself. A canvas can
   measure the glyphs' real ink, and the tail now sits in the gap between the lines.
-- **An arrow to a label of several lines pointed off-centre.** The text is positioned from
+- **An arrow to a label of several lines pointed off-center.** The text is positioned from
   a hanging baseline rather than from the top of the ink, and the gap between the two was
   never measured — so the arrow was aimed at the middle of the anchor box instead of the
   middle of the writing. Worse, the probe that measures a label left the baseline at its
@@ -295,7 +313,7 @@ there is no CLI yet, so the package is usable through its API and not from a ter
 
 - **Project config** (`shotlist.config.yaml`). Where the site runs, what callouts look
   like, where recipes and images live, and the named install destinations a recipe
-  selects with `install:`. Every drawing constant — colour, stroke, radius, font, label
+  selects with `install:`. Every drawing constant — color, stroke, radius, font, label
   fill — is config with a neutral default, so nothing about any one site is baked in.
 - **Recipes**: a screenshot described as data — `setup` steps, a `clip`, named `marks`,
   and `callouts` that say which side of a mark a label belongs on rather than where it

@@ -76,7 +76,7 @@ function segmentPattern(glob: string): RegExp {
  * Works on a filesystem path and on the path of a URL alike: an administrator saying
  * `/fake-secret` means it whether a recipe reaches it through the disk or through the
  * site. `also` are the project's own additions, which can only ever make this stricter —
- * which is why, unlike `site.allow`, they are honoured even when the config is not
+ * which is why, unlike `site.allow`, they are honored even when the config is not
  * trusted. A config widening its reach is a claim; a config narrowing it is not.
  */
 export function secretIn(path: string, also: readonly string[] = []): string | null {

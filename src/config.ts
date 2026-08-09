@@ -53,7 +53,7 @@ const Style = z
       })
       .prefault({}),
     /**
-     * What a masked region is painted with. Neutral rather than the callout colour: a
+     * What a masked region is painted with. Neutral rather than the callout color: a
      * mask is not pointing anything out, and a white one would vanish on a light UI.
      */
     mask: z.object({ fill: z.string().default('#94A3B8') }).prefault({}),
@@ -153,7 +153,7 @@ export const Config = z.object({
    * touches. One path segment each, with `*` for any run of characters — so `*.sqlite`
    * is a file and `fixtures` is a folder and everything under it.
    *
-   * Honoured whether the config is trusted or not, because it can only ever refuse more.
+   * Honored whether the config is trusted or not, because it can only ever refuse more.
    */
   deny: z.array(z.string()).default([]),
   check: z

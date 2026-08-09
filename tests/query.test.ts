@@ -281,7 +281,7 @@ describe('aliases', () => {
 
 describe('validation', () => {
   it('rejects a key that is not part of the language', () => {
-    expect(() => parseQuery({ css: 'div', colour: 'red' } as unknown as QueryInput)).toThrow()
+    expect(() => parseQuery({ css: 'div', color: 'red' } as unknown as QueryInput)).toThrow()
   })
 
   it('accepts every documented dimension unit', () => {

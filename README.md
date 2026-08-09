@@ -11,8 +11,20 @@ verb, every query primitive. This file is the short version.
 
 ## Install
 
+This is a [Node.js](https://nodejs.org/en/) module available through the
+[npm registry](https://www.npmjs.com/).
+
+Before installing, [download and install Node.js](https://nodejs.org/en/download/).
+Node.js 20 or higher is required.
+
+If this is a brand new project, make sure to create a `package.json` first with
+the [`npm init` command](https://docs.npmjs.com/creating-a-package-json-file).
+
+Installation is done using the
+[`npm install` command](https://docs.npmjs.com/downloading-and-installing-packages-locally):
+
 ```bash
-npm i -D shotlist playwright
+npm install -D shotlist playwright
 ```
 
 pnpm and yarn work the same way.
@@ -76,6 +88,21 @@ The image is written to `screenshots/out/order-row.png`, and `--install` copies 
 `content/guide/images/order-row.png`. PNG is the default; `image.format` also takes `jpeg`
 and `webp`, per project or per recipe.
 
+## Documentation
+
+| Page                                                       | What it covers                                |
+| ---------------------------------------------------------- | --------------------------------------------- |
+| [Install](https://shotlist.dev/docs/install)               | Setting up, and a first recipe                |
+| [Configuration](https://shotlist.dev/docs/config)          | Every key, starting the site, style and fonts |
+| [Recipes](https://shotlist.dev/docs/recipes)               | Every field, and annotating an existing image |
+| [Steps](https://shotlist.dev/docs/steps)                   | The step vocabulary                           |
+| [Queries](https://shotlist.dev/docs/queries)               | Sources, filters, traversal, finders          |
+| [Callouts](https://shotlist.dev/docs/callouts)             | Labels, numbered discs, masking               |
+| [Macros and data](https://shotlist.dev/docs/macros)        | Sharing setup, driving a shot from a list     |
+| [CLI](https://shotlist.dev/docs/cli)                       | Every flag, the API, editor and agent support |
+| [Checking for staleness](https://shotlist.dev/docs/check)  | `--check`, diffs, and a shot that changes     |
+| [What a config can do](https://shotlist.dev/docs/security) | What a run is allowed to reach                |
+
 ## Commands
 
 ```bash
@@ -116,23 +143,11 @@ stays inside the project.
 Full detail, and the two things it does not cover, at
 **[shotlist.dev/docs/security](https://shotlist.dev/docs/security)**.
 
-## Documentation
+## Contributing
 
-| Page                                                       | What it covers                                |
-| ---------------------------------------------------------- | --------------------------------------------- |
-| [Install](https://shotlist.dev/docs/install)               | Setting up, and a first recipe                |
-| [Configuration](https://shotlist.dev/docs/config)          | Every key, starting the site, style and fonts |
-| [Recipes](https://shotlist.dev/docs/recipes)               | Every field, and annotating an existing image |
-| [Steps](https://shotlist.dev/docs/steps)                   | The step vocabulary                           |
-| [Queries](https://shotlist.dev/docs/queries)               | Sources, filters, traversal, finders          |
-| [Callouts](https://shotlist.dev/docs/callouts)             | Labels, numbered discs, masking               |
-| [Macros and data](https://shotlist.dev/docs/macros)        | Sharing setup, driving a shot from a list     |
-| [CLI](https://shotlist.dev/docs/cli)                       | Every flag, the API, editor and agent support |
-| [Checking for staleness](https://shotlist.dev/docs/check)  | `--check`, diffs, and a shot that changes     |
-| [What a config can do](https://shotlist.dev/docs/security) | What a run is allowed to reach                |
+Any constructive contribution is welcome! You may contribute in any way you feel comfortable, from code for bug fixes and enhancements, to additions and fixes to documentation, additional tests, fixing a typo, and more!
 
-Changes are in [CHANGELOG.md](./CHANGELOG.md). How the package is built is in
-[AGENTS.md](./AGENTS.md); setup and releases are in [CONTRIBUTING.md](./CONTRIBUTING.md).
+Everything you need is in [CONTRIBUTING.md](./CONTRIBUTING.md): setup, the commands, the code style, and what "done" means.
 
 ## License
 

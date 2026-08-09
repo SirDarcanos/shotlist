@@ -197,7 +197,7 @@ function fontSheet(style: Style, loaded: LoadedConfig): FontSheet {
   }
 
   // A font file rather than a stylesheet: the common case is a project shipping one face
-  // it licenced, and writing a two-line `@font-face` by hand to point at it is a step
+  // it licensed, and writing a two-line `@font-face` by hand to point at it is a step
   // that only exists to be got wrong. The family it is declared under is the first real
   // one in `style.label.font`, so the stack the labels ask for is the stack it answers.
   const format = FONT_FORMAT[extname(file).slice(1).toLowerCase()]
