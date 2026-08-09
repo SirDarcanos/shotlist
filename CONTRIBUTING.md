@@ -89,8 +89,9 @@ All of these, not most of them.
 - [ ] [`CHANGELOG.md`](./CHANGELOG.md) has an entry under `## [Unreleased]`, in the right
       section.
 - [ ] A change to the recipe format, the step vocabulary or the query language is in the
-      README's reference tables. The README is reference: what a key does, in plain
-      language, and nothing else.
+      reference at [shotlist.dev/docs](https://shotlist.dev/docs), which lives in its own
+      repository. The README is the short version and links there; `skills/shotlist/` ships
+      with the package and needs anything an agent writing recipes would have to know.
 - [ ] Nothing is documented that does not work yet, unless it is marked as not built.
 
 ## The rules
@@ -170,8 +171,13 @@ only ever shot in a real browser, so it carries no `data-rect` and must not grow
 "last seen" column is redrawn on every load on purpose: it is what `mask` and
 `check.ignore` are tested against.
 
-Nothing in either comes from a real product. If you need a new shape to test against, add
-a neutral one.
+`tests/fixture/signin.html` has two states — a sign-in form, and what somebody signed in
+sees — chosen by a cookie the form sets itself. It is the only fixture served over http
+rather than opened from disk, because a `file:` origin keeps no cookies and a session is
+cookies. The session tests start a server for it themselves.
+
+Nothing in any of them comes from a real product. If you need a new shape to test against,
+add a neutral one.
 
 `JetBrainsMono-Bold.woff2` beside them is for the tests that load a font from disk. It is
 SIL Open Font License 1.1, `JetBrainsMono-OFL.txt` is the license, and it is not

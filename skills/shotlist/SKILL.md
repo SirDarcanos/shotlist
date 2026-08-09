@@ -8,10 +8,10 @@ description: Use when a project needs annotated screenshots of its own web UI �
 shotlist drives a running site, clips a region, draws callouts on it, and writes the
 image. Every screenshot is a YAML recipe; there is no per-screenshot code.
 
-The README that ships with the package is the reference — every key, every default, every
-step verb. Read it for _what a key does_. This skill is for the part the reference cannot
-give you: **choosing a query that will still match after the next redesign**, and placing
-a callout where it does not point across the thing it is naming.
+[shotlist.dev/docs](https://shotlist.dev/docs) is the reference — every key, every default,
+every step verb. Read it for _what a key does_. This skill is for the part the reference
+cannot give you: **choosing a query that will still match after the next redesign**, and
+placing a callout where it does not point across the thing it is naming.
 
 ## Before writing anything, look at the page
 
@@ -143,6 +143,52 @@ For a set of recipes in CI, `--keep-going` finishes the run and reports every fa
 rather than stopping at the first. For a shot that fails intermittently — an element that
 had not rendered yet — give that recipe `retries: 2`.
 
+## Shooting a page that needs signing in
+
+A recipe never holds a password. Sign in once, and shotlist keeps the cookies:
+
+```bash
+npx shotlist --login admin      # a browser opens; sign in, then press Enter
+```
+
+```yaml
+# shotlist.config.yaml — the file holds live cookies, so gitignore it
+site:
+  sessions:
+    admin: { path: .shotlist/admin.json, verify: '#account' }
+```
+
+A recipe picks one by name, and the shot is taken as whoever that is:
+
+```yaml
+name: dashboard
+session: admin
+```
+
+**Always give `verify` a selector only a signed-in page has.** An expired session does not
+fail — it redirects — so without one every shot of the run becomes a picture of the sign-in
+form, and `--install` commits them.
+
+Where nobody can click, a macro signs in instead, reading only the variables the command
+line allowed. Quote the reference: bare `${...}` is a flow mapping to YAML and will not
+parse.
+
+```yaml
+# screenshots/macros/sign-in.yaml
+steps:
+  - fill: { css: '#username' }
+    value: '${env.WP_USER}'
+  - fill: { css: '#password' }
+    value: '${env.WP_PASSWORD}'
+  - click: { css: '#signin' }
+```
+
+```bash
+npx shotlist --login admin --using sign-in --allow-env WP_USER,WP_PASSWORD
+```
+
+An `--untrusted` run loads no session and reads no variable.
+
 ## When a recipe fails
 
 Errors name the recipe and the key inside it. Match the message to the fix:
@@ -169,5 +215,5 @@ If a screenshot genuinely cannot be described with the existing steps and query
 primitives, that is a gap in the vocabulary, not a reason to write code around it. Say so
 plainly, describe the shot that cannot be expressed, and point at
 [CONTRIBUTING.md](https://github.com/SirDarcanos/shotlist/blob/main/CONTRIBUTING.md#adding-a-step-verb-or-a-query-primitive).
-Most gaps turn out to be an existing primitive that was hard to find — check the README's
-query tables before concluding one is missing.
+Most gaps turn out to be an existing primitive that was hard to find — check
+[the query reference](https://shotlist.dev/docs/queries) before concluding one is missing.

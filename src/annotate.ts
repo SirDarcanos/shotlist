@@ -68,8 +68,7 @@ export interface AnnotationSpec {
  * what lets it be unit-tested in jsdom.
  *
  * A label sits in a margin outside the screenshot with an arrow reaching in, or over the
- * shot when the recipe asks for it. Outside never covers the interface but costs width;
- * inside suits a mark with empty space beside it. Margins are measured from the labels
+ * shot when the recipe asks for it — see `inside`. Margins are measured from the labels
  * that need them, so the canvas grows only as far as it must.
  */
 export function drawAnnotations(spec: AnnotationSpec): {

@@ -90,18 +90,18 @@ and `webp`, per project or per recipe.
 
 ## Documentation
 
-| Page                                                       | What it covers                                |
-| ---------------------------------------------------------- | --------------------------------------------- |
-| [Install](https://shotlist.dev/docs/install)               | Setting up, and a first recipe                |
-| [Configuration](https://shotlist.dev/docs/config)          | Every key, starting the site, style and fonts |
-| [Recipes](https://shotlist.dev/docs/recipes)               | Every field, and annotating an existing image |
-| [Steps](https://shotlist.dev/docs/steps)                   | The step vocabulary                           |
-| [Queries](https://shotlist.dev/docs/queries)               | Sources, filters, traversal, finders          |
-| [Callouts](https://shotlist.dev/docs/callouts)             | Labels, numbered discs, masking               |
-| [Macros and data](https://shotlist.dev/docs/macros)        | Sharing setup, driving a shot from a list     |
-| [CLI](https://shotlist.dev/docs/cli)                       | Every flag, the API, editor and agent support |
-| [Checking for staleness](https://shotlist.dev/docs/check)  | `--check`, diffs, and a shot that changes     |
-| [What a config can do](https://shotlist.dev/docs/security) | What a run is allowed to reach                |
+| Page                                                           | What it covers                                |
+| -------------------------------------------------------------- | --------------------------------------------- |
+| [Install](https://shotlist.dev/docs/install)                   | Setting up, and a first recipe                |
+| [Configuration](https://shotlist.dev/docs/config)              | Every key, starting the site, style and fonts |
+| [Recipes](https://shotlist.dev/docs/recipes)                   | Every field, and annotating an existing image |
+| [Steps](https://shotlist.dev/docs/steps)                       | The step vocabulary                           |
+| [Queries](https://shotlist.dev/docs/queries)                   | Sources, filters, traversal, finders          |
+| [Callouts](https://shotlist.dev/docs/callouts)                 | Labels, numbered discs, masking               |
+| [Macros and data](https://shotlist.dev/docs/macros)            | Sharing setup, driving a shot from a list     |
+| [Running shotlist](https://shotlist.dev/docs/running-shotlist) | Every flag, the API, editor and agent support |
+| [Checking for staleness](https://shotlist.dev/docs/check)      | `--check`, diffs, and a shot that changes     |
+| [What a config can do](https://shotlist.dev/docs/security)     | What a run is allowed to reach                |
 
 ## Commands
 
@@ -115,15 +115,8 @@ npx shotlist --all --keep-going   # …carrying on past a recipe that fails
 npx shotlist --check              # compare against committed images
 npx shotlist --check --diff       # …and write a before/after/changed image
 npx shotlist --check --json       # …and report it as JSON on stdout
+npx shotlist --login admin        # sign in by hand, and save the session
 npx shotlist --help               # the full list, from the tool
-```
-
-`--check` re-shoots every recipe and compares it against the committed image, exiting
-non-zero if any changed — so it can gate a build. Errors name the recipe and the key
-inside it that could not be resolved:
-
-```
-recipe "order-row": marks.amount — no element matched {"css":".amount"}
 ```
 
 ## A recipe is data
