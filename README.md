@@ -15,8 +15,12 @@ verb, every query primitive. This file is the short version.
 npm i -D shotlist playwright
 ```
 
-Playwright is an optional peer dependency. shotlist does not install it, because its
-postinstall downloads browsers.
+pnpm and yarn work the same way.
+
+Playwright is an optional peer dependency — shotlist does not install it, because its
+postinstall downloads browsers. You need it whenever shotlist writes an image, which
+includes `--check` and a `source: file` recipe, since the callouts are drawn in a page.
+`--init`, `--help` and listing recipes need no browser and launch none.
 
 ## Quick start
 
