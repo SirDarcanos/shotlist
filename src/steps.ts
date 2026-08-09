@@ -5,7 +5,7 @@ import { interpolate } from './recipe.js'
 import { resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
 import type { ResolvedStep, StepInput } from './recipe.js'
-import type { ElementHandle, Page } from './playwright.js'
+import type { ElementHandle, Frame, Page, QueryTarget } from './playwright.js'
 
 /** What the runner carries between steps: the pages open, and what has been read so far. */
 export interface RunContext {
@@ -23,7 +23,10 @@ export interface RunContext {
 const LOCATOR_SOURCES = ['role', 'label', 'placeholder', 'testid'] as const
 
 /** Elements Playwright's own engine can find, for the sources that need ARIA or labels. */
-async function seedsFor(page: Page, query: QueryInput): Promise<ElementHandle[] | undefined> {
+async function seedsFor(
+  page: QueryTarget,
+  query: QueryInput,
+): Promise<ElementHandle[] | undefined> {
   if ('span' in query || 'rect' in query) return undefined
   const q = query as Record<string, unknown>
   if (!LOCATOR_SOURCES.some((key) => q[key] !== undefined)) return undefined
@@ -44,12 +47,78 @@ async function seedsFor(page: Page, query: QueryInput): Promise<ElementHandle[] 
   return page.getByTestId(String(q['testid'])).elementHandles()
 }
 
+/**
+ * Where a frame's own coordinates sit in the page's, and how big it is inside.
+ *
+ * `boundingBox` is reported against the main frame, so a frame nested in a frame needs no
+ * arithmetic here. The border and padding do: a rect inside the document starts at the
+ * content box, and an `<iframe>` with a border would put every callout out by its width.
+ */
+async function frameOrigin(
+  frame: Frame,
+): Promise<{ x: number; y: number; width: number; height: number }> {
+  const element = await frame.frameElement()
+  const box = await element.boundingBox()
+  if (!box) {
+    throw new ShotlistError('the iframe is not rendered, so nothing inside it has a position')
+  }
+  const inset = await element.evaluate((node: Element) => {
+    const style = getComputedStyle(node as Element)
+    return {
+      left: parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+      top: parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop),
+    }
+  })
+  return { x: box.x + inset.left, y: box.y + inset.top, width: box.width, height: box.height }
+}
+
+/** The frame a query names, and the query with that key taken off. */
+async function intoFrame(
+  target: QueryTarget,
+  query: QueryInput,
+  ctx: Pick<RunContext, 'rects' | 'viewport'> & { timeout?: number },
+): Promise<{ frame: Frame; rest: QueryInput; origin: { x: number; y: number } }> {
+  const { frame: spec, ...rest } = query as { frame: QueryInput } & Record<string, unknown>
+  const found = await resolve(target, spec, ctx)
+  if (!found.element) {
+    throw new ShotlistError(`\`frame\`: ${JSON.stringify(spec)} is a box, not an iframe`)
+  }
+  const frame = await found.element.contentFrame()
+  if (!frame) {
+    throw new ShotlistError(
+      `\`frame\`: ${JSON.stringify(spec)} matched an element that is not an iframe`,
+    )
+  }
+  return { frame, rest: rest as QueryInput, origin: await frameOrigin(frame) }
+}
+
 /** Resolve a query in the page, returning both the box and the element it found. */
 export async function resolve(
-  page: Page,
+  page: QueryTarget,
   query: QueryInput,
   ctx: Pick<RunContext, 'rects' | 'viewport'> & { timeout?: number; all?: boolean },
 ): Promise<{ rect: Rect; element: ElementHandle | null; rects?: Rect[] }> {
+  // Inside a frame the query resolves against that document, and its rects come back
+  // measured from the frame's own top-left. The drawing layer works in page coordinates,
+  // so they are moved here — closest to where the frame's position was measured.
+  if (query !== null && typeof query === 'object' && 'frame' in query) {
+    const { frame, rest, origin } = await intoFrame(page, query, ctx)
+    // `within` names a rect the outer page resolved, which the inner document knows
+    // nothing about. Rather than silently scoping to nothing, say so.
+    if ('within' in rest && typeof (rest as { within: unknown }).within === 'string') {
+      throw new ShotlistError(
+        '`within` names a rect from the page, and `frame` looks in another document — ' +
+          'give the query inside the frame its own `within`, or drop it',
+      )
+    }
+    const found = await resolve(frame, rest, { ...ctx, rects: {} })
+    const move = (rect: Rect): Rect => ({ ...rect, x: rect.x + origin.x, y: rect.y + origin.y })
+    return {
+      ...found,
+      rect: move(found.rect),
+      ...(found.rects ? { rects: found.rects.map(move) } : {}),
+    }
+  }
   // A query is evaluated inside the page, and the page's one thread runs it to
   // completion — `matching` with nested quantifiers against the wrong text backtracks
   // for longer than anyone will wait, and nothing else here would ever come back.

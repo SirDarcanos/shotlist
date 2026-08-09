@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Fixture — the document inside the frame</title>
+<!--
+  What the frame in `framed.html` holds. Its own margin is deliberate: it puts the target
+  at a known offset from the frame's top-left, so a rect that came back untranslated is
+  a different number from one that was translated, whichever origin the frame loaded from.
+-->
+<style>
+  body {
+    margin: 0;
+    font: 16px/1.5 system-ui, sans-serif;
+    background: #f8fafc;
+  }
+  #total {
+    position: absolute;
+    left: 20px;
+    top: 30px;
+    width: 120px;
+    height: 24px;
+    background: #e2e8f0;
+  }
+</style>
+<div id="total">$42.00</div>
+<button id="pay">Pay</button>
+<p id="paid" hidden>Paid</p>
+<script>
+  document.getElementById('pay').addEventListener('click', () => {
+    document.getElementById('paid').hidden = false
+  })
+</script>

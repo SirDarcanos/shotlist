@@ -181,6 +181,11 @@ sees — chosen by a cookie the form sets itself. It is the only fixture served 
 rather than opened from disk, because a `file:` origin keeps no cookies and a session is
 cookies. The session tests start a server for it themselves.
 
+`tests/fixture/framed.html` holds an iframe, offset from the page and given a border and
+padding — the two things a rect measured inside a frame does not know about. Its `?src=`
+decides where the frame loads from, so one file covers a same-origin frame and a
+cross-origin one; the frame tests start two servers to make the second real.
+
 Nothing in any of them comes from a real product. If you need a new shape to test against,
 add a neutral one.
 

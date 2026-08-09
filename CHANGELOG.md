@@ -14,6 +14,21 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **`frame:` on a query**, for an element inside an iframe. It names the `<iframe>` with a
+  query of its own, and everything else resolves in that document — filters and all:
+
+  ```yaml
+  clip:
+    frame: { css: 'iframe[title="Checkout"]' }
+    css: '.order-total'
+  ```
+
+  Rects come back in page coordinates, so a callout lands where the reader sees the
+  element rather than where the frame thinks it is. Cross-origin frames work, because
+  resolution goes through Playwright rather than `contentDocument`, which is null there.
+  Steps take queries too, so `click: { frame: …, css: 'button' }` needs no new verb. A
+  `transform` or `zoom` on the iframe itself is not compensated for.
+
 - **`shotlist --lint`** parses every config, recipe, macro and data file and reports what
   is wrong with all of them at once — no browser, no site running. `--warnings` adds what
   is legal but probably unmeant, a mark no callout points at or an `install:` the config

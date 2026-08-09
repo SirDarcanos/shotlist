@@ -25,7 +25,30 @@ export interface BrowserContext {
   storageState(options?: { path?: string }): Promise<unknown>
 }
 
-export interface Page {
+/**
+ * What a query needs to resolve itself, which a page and a frame both answer to.
+ *
+ * An iframe is its own document with its own JavaScript context, so nothing in the top
+ * page can read inside one — cross-origin it is refused outright, and Playwright's own
+ * `Frame` is the way in either way. Naming the slice a query uses is what lets the same
+ * resolution run against both without `evaluateQuery` knowing which it is in.
+ */
+export interface QueryTarget {
+  evaluate<R, A>(fn: (arg: A) => R | Promise<R>, arg: A): Promise<R>
+  evaluateHandle<R, A>(fn: (arg: A) => R, arg: A): Promise<JSHandle<R>>
+  getByRole(role: string, options?: Record<string, unknown>): Locator
+  getByLabel(text: string, options?: Record<string, unknown>): Locator
+  getByPlaceholder(text: string, options?: Record<string, unknown>): Locator
+  getByTestId(id: string): Locator
+}
+
+export interface Frame extends QueryTarget {
+  /** The `<iframe>` this frame is the content of, for measuring where it sits. */
+  frameElement(): Promise<ElementHandle>
+  url(): string
+}
+
+export interface Page extends QueryTarget {
   goto(url: string, options?: Record<string, unknown>): Promise<unknown>
   setContent(html: string, options?: Record<string, unknown>): Promise<void>
   setViewportSize(size: { width: number; height: number }): Promise<void>
@@ -55,6 +78,10 @@ export interface JSHandle<T = unknown> {
 }
 
 export interface ElementHandle extends JSHandle<Element> {
+  /** The frame this element holds, or null when it is not a frame at all. */
+  contentFrame(): Promise<Frame | null>
+  /** Where the element sits, which Playwright reports against the main frame. */
+  boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null>
   click(options?: Record<string, unknown>): Promise<void>
   dblclick(options?: Record<string, unknown>): Promise<void>
   hover(options?: Record<string, unknown>): Promise<void>

@@ -82,6 +82,11 @@ export const ElementQuery = Filters.extend({
   // the page, so it cannot use the sources Playwright's engine answers.
   within: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
 
+  // The iframe to look inside, named by a query that finds the `<iframe>` element itself.
+  // Everything else here then resolves in that document, and the rect comes back in page
+  // coordinates so a callout lands where the reader sees the element.
+  frame: z.record(z.string(), z.unknown()).optional(),
+
   // Traversal, applied in this order.
   ancestor: Ancestor.optional(),
   parent: z.boolean().optional(),
@@ -129,11 +134,13 @@ export const Query: z.ZodType<QueryInput> = z.union([RectQuery, SpanQuery, OneSo
 
 // `within` is stated by hand, as an interface. It refers back to Query, and a type alias
 // cannot reference itself through z.input — an interface can.
-type ElementQueryBase = Omit<z.input<typeof ElementQuery>, 'within'>
+type ElementQueryBase = Omit<z.input<typeof ElementQuery>, 'within' | 'frame'>
 
 export interface ElementQueryInput extends ElementQueryBase {
   /** A resolved rect by name, or a query resolved on the spot. */
   within?: string | QueryInput
+  /** The query that finds the `<iframe>` whose document the rest of this looks in. */
+  frame?: QueryInput
 }
 export type QueryInput =
   | ElementQueryInput

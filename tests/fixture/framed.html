@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Fixture — a page holding an iframe</title>
+<!--
+  A page whose interesting element is inside an iframe, for the frame tests.
+
+  The iframe is offset from the page's top-left and given a border and padding, because
+  those are exactly what a rect measured inside the frame does not know about: a query
+  that forgets them still finds the element and draws the box in the wrong place, which
+  no assertion on "did it match" would catch.
+
+  `?src=` decides where the frame is loaded from, so one file covers a same-origin frame
+  and a cross-origin one — the second server the test starts is a different origin to
+  this page, and nothing in the top document can read into it.
+-->
+<style>
+  body {
+    margin: 0;
+    font: 16px/1.5 system-ui, sans-serif;
+    background: #fff;
+  }
+  header {
+    height: 60px;
+    padding: 12px 24px;
+  }
+  iframe {
+    display: block;
+    margin-left: 40px;
+    width: 400px;
+    height: 200px;
+    border: 8px solid #cbd5e1;
+    padding: 6px;
+    box-sizing: content-box;
+  }
+</style>
+<header><h1 id="outside">Outside the frame</h1></header>
+<iframe id="panel" title="Panel"></iframe>
+<script>
+  const src = new URL(location.href).searchParams.get('src') ?? 'framed-inner.html'
+  document.getElementById('panel').src = src
+</script>

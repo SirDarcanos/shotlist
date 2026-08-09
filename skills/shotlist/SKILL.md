@@ -83,6 +83,25 @@ it untested is the main way recipes rot.
 The browser resolves those before the page is searched, so a nested one has nothing to
 narrow. Use `css`, `text`, `startsWith` or `contains` in those positions.
 
+## Reaching inside an iframe
+
+An iframe is a separate document, so an ordinary query cannot see into one. `frame:` names
+it, and the rest of the query resolves in there:
+
+```yaml
+clip:
+  frame: { css: 'iframe[title="Checkout"]' }
+  css: '.order-total'
+```
+
+`frame` is a query like any other, so `nth`, `contains` and the rest all work on picking
+the right iframe. The rect comes back in page coordinates, so callouts land correctly, and
+a cross-origin frame — a payment widget, an embedded map — works the same. Steps take the
+same queries: `click: { frame: { css: 'iframe' }, css: '#pay' }`.
+
+`within:` naming a mark from the outer page is refused inside a frame; that rect belongs to
+a document the frame knows nothing about.
+
 ## Masking what the shot must not check
 
 A shot holding a clock, a live total or a face differs on every re-shoot, so `--check` on
