@@ -38,6 +38,10 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Changed
 
+- **The config's JSON Schema is `dist/config.schema.json`**, next to `recipe.schema.json`
+  and `macro.schema.json` — it was `dist/schema.json`, which named one of three "the
+  schema". The old file is still written and `shotlist/schema.json` still resolves, so a
+  YAML header or a workspace setting pointing at it keeps working; both go at 1.0.
 - **A misspelled key now names the one it was reaching for**, and says it once.
   `clip: { css: …, marching: … }` reported six lines — two of them about the words
   `viewport` and `full`, which a mapping was never a failed attempt at. It reads

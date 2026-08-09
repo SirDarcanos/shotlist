@@ -12,7 +12,8 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./schema.json": "./dist/schema.json",
+    "./config.schema.json": "./dist/config.schema.json",
+    "./schema.json": "./dist/config.schema.json",
     "./recipe.schema.json": "./dist/recipe.schema.json",
     "./macro.schema.json": "./dist/macro.schema.json"
   },

@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   ShotlistError,
@@ -147,5 +148,27 @@ describe('what a config is not allowed to be', () => {
       parseConfig({ site: { ...site, viewport: { width: 200000, height: 10 } } }),
     ).toThrow(/viewport.width: Too big/)
     expect(() => parseConfig({ site: { ...site, scale: 500 } })).toThrow(/scale: Too big/)
+  })
+})
+
+describe('the generated schemas', () => {
+  const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+
+  it('name the config schema for what it describes', () => {
+    const schema = JSON.parse(readFileSync(join(dist, 'config.schema.json'), 'utf8'))
+    expect(schema.title).toBe('shotlist config')
+    expect(schema.properties.site).toBeDefined()
+  })
+
+  it('still answer to the old name, which editors are pointed at by path', () => {
+    expect(readFileSync(join(dist, 'schema.json'), 'utf8')).toBe(
+      readFileSync(join(dist, 'config.schema.json'), 'utf8'),
+    )
+  })
+
+  it('declare no $id, so two packages can never claim the same identity', () => {
+    for (const file of ['config.schema.json', 'recipe.schema.json', 'macro.schema.json']) {
+      expect(JSON.parse(readFileSync(join(dist, file), 'utf8'))['$id']).toBeUndefined()
+    }
   })
 })
