@@ -187,6 +187,10 @@ steps:
 npx shotlist --login admin --using sign-in --allow-env WP_USER,WP_PASSWORD
 ```
 
+A project that always signs in the same way can name them in the config instead, and drop
+the flag — `allowEnv: [WP_USER, WP_PASSWORD]`. Names only; the values stay in the
+environment, and an `--untrusted` run ignores the list either way.
+
 An `--untrusted` run loads no session and reads no variable.
 
 ## Checking a recipe without running it

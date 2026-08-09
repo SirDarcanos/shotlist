@@ -42,7 +42,8 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   --config <file>   use this config instead of the nearest one
   --using <macro>   with --login, the macro that signs in, for a run with nobody at it
   --warnings        with --lint, also report what is legal but probably not meant
-  --allow-env <n>   let a recipe read this variable as \${env.<n>}; repeatable
+  --allow-env <n>   let a recipe read this variable as \${env.<n>}; repeatable.
+                    allowEnv in the config does the same for every run
   --keep-going      carry on past a recipe that fails, and report them at the end
   --untrusted       the config is not yours: no processes, no leaving the project,
                     and nothing opened on the network this machine sits in
@@ -189,6 +190,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         siteUrl: loaded.config.site.url,
         allow: loaded.config.site.allow,
         deny: loaded.config.deny,
+        allowEnv: loaded.config.allowEnv,
         granted: {
           hosts: values.allow ?? [],
           paths: values['allow-path'] ?? [],

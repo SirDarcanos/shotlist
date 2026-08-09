@@ -211,11 +211,44 @@ describe('${env.NAME}', () => {
   })
 })
 
+describe('allowEnv in the config', () => {
+  it('grants the same names the flag does, so a run needs no flag at all', () => {
+    process.env['FIXTURE_PASSWORD'] = 'hunter2'
+    const trust = trustFrom({ root: '/p', siteUrl: SITE, allowEnv: ['FIXTURE_PASSWORD'] }, false)
+    expect(envFor(trust)).toEqual({ FIXTURE_PASSWORD: 'hunter2' })
+  })
+
+  it('adds to the flag rather than replacing it', () => {
+    process.env['FROM_CONFIG'] = 'a'
+    process.env['FROM_FLAG'] = 'b'
+    const trust = trustFrom(
+      { root: '/p', siteUrl: SITE, allowEnv: ['FROM_CONFIG'], granted: { env: ['FROM_FLAG'] } },
+      false,
+    )
+    expect(envFor(trust)).toEqual({ FROM_CONFIG: 'a', FROM_FLAG: 'b' })
+  })
+
+  it('is a list of names — a mapping of values is refused, not committed', () => {
+    expect(() => parseConfig({ site: { url: SITE }, allowEnv: { A: 'secret' } })).toThrow(
+      /list of variable names/,
+    )
+  })
+})
+
 describe('an untrusted run', () => {
-  it('reads no variable, however the operator allowed it', () => {
+  it('reads no variable, however it was allowed — flag, environment or config', () => {
     process.env['SHOTLIST_ENV'] = 'FROM_ENV'
     process.env['FROM_ENV'] = 'yes'
-    const trust = trustFrom({ root: '/p', siteUrl: SITE, granted: { env: ['FROM_FLAG'] } }, true)
+    process.env['FROM_CONFIG'] = 'yes'
+    const trust = trustFrom(
+      {
+        root: '/p',
+        siteUrl: SITE,
+        allowEnv: ['FROM_CONFIG'],
+        granted: { env: ['FROM_FLAG'] },
+      },
+      true,
+    )
     expect(trust.env).toEqual([])
     expect(envFor(trust)).toEqual({})
   })

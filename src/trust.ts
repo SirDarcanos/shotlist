@@ -33,7 +33,7 @@ export interface Trust {
   paths: readonly string[]
   /** What this project forbids on top of the names shotlist never touches. */
   deny: readonly string[]
-  /** What a recipe may read as `${env.NAME}`, from `--allow-env`. Empty when untrusted. */
+  /** What a recipe may read as `${env.NAME}`, from `allowEnv` and `--allow-env`. */
   env: readonly string[]
 }
 
@@ -161,6 +161,8 @@ export function trustFrom(
     allow?: readonly string[]
     /** The project's own forbidden names, which hold whether it is trusted or not. */
     deny?: readonly string[]
+    /** Variable names the config asks for, which only a trusted one gets. */
+    allowEnv?: readonly string[]
     /** What the operator granted or forbade, which outlives `--untrusted`. */
     granted?: {
       hosts?: readonly string[]
@@ -186,8 +188,9 @@ export function trustFrom(
     paths: (granted.paths ?? []).map((path) => resolve(where.root, path)),
     // Both, always: neither can do anything but refuse more.
     deny: [...(where.deny ?? []), ...(granted.deny ?? []), ...denyFromEnv()],
-    // Dropped whole rather than narrowed: a partial grant reads like a safe one.
-    env: untrusted ? [] : [...(granted.env ?? []), ...envFromEnv()],
+    // Dropped whole rather than narrowed: a partial grant reads like a safe one. The
+    // config's own list is widening, so it goes the way `site.allow` goes.
+    env: untrusted ? [] : [...(where.allowEnv ?? []), ...(granted.env ?? []), ...envFromEnv()],
   }
 }
 

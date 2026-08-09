@@ -18,6 +18,9 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   is wrong with all of them at once — no browser, no site running. `--warnings` adds what
   is legal but probably unmeant, a mark no callout points at or an `install:` the config
   does not name, and never changes the exit code.
+- **`allowEnv` in the config**, naming the variables a recipe may read as `${env.NAME}` so
+  a project that always signs in the same way does not repeat `--allow-env` on every run.
+  Names only, and an `--untrusted` run ignores it exactly as it ignores `site.allow`.
 - **`site.sessions` and a recipe's `session:`**, for a page you have to sign in for.
   `shotlist --login <name>` opens a browser, waits while you sign in, and saves the cookies
   under that name. Named rather than single, so one shot list can shoot the same page as an

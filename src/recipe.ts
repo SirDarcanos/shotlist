@@ -509,8 +509,8 @@ export const ENV = 'env'
 /** Why an `env.` reference did not resolve: not set and not allowed look the same. */
 function noEnv(reference: string, name: string): ShotlistError {
   return new ShotlistError(
-    `no value for ${reference} — either ${name} is not set, or the run was not given ` +
-      `\`--allow-env ${name}\`. A recipe reads no variable the command line did not name.`,
+    `no value for ${reference} — either ${name} is not set, or nothing allowed it. ` +
+      `Add it to \`allowEnv\` in the config, or pass \`--allow-env ${name}\`.`,
   )
 }
 

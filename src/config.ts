@@ -177,6 +177,19 @@ export const Config = z.strictObject({
    * Honored whether the config is trusted or not, because it can only ever refuse more.
    */
   deny: z.array(z.string()).default([]),
+  /**
+   * Variable names a recipe may read as `${env.NAME}`, so a project that always signs in
+   * the same way does not repeat `--allow-env` on every run.
+   *
+   * Names only — a value here would be a secret in a file that gets committed. Widening,
+   * so an `--untrusted` run ignores it exactly as it ignores `site.allow`: a config
+   * nobody vouched for does not get to choose what it may read.
+   */
+  allowEnv: z
+    .array(z.string(), {
+      error: '`allowEnv` is a list of variable names; the values stay in the environment',
+    })
+    .default([]),
   check: z
     .strictObject({
       /** The fraction of differing pixels a shot may have before it counts as changed. */
