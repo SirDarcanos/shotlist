@@ -60,8 +60,19 @@ export {
   writeBaseline,
 } from './baseline.js'
 export type { Drift, Environment } from './baseline.js'
-export { checkCommand, checkPath, checkUrl, hostsFor, secretIn, trustFrom } from './trust.js'
+export {
+  checkCommand,
+  checkPath,
+  checkSession,
+  checkUrl,
+  envFor,
+  hostsFor,
+  secretIn,
+  trustFrom,
+} from './trust.js'
 export type { Trust } from './trust.js'
+export { readSession, sessionFor, signIn } from './session.js'
+export type { Session } from './session.js'
 export { startServer, tokenize, withServer } from './serve.js'
 export type { Server } from './serve.js'
 export { run } from './cli.js'

@@ -162,6 +162,8 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
       /** With `source: file`, the PNG to annotate instead of driving the site. */
       file: z.string().optional(),
       install: z.string().optional(),
+      /** Which of `site.sessions` to shoot this as. Unset, the browser is a stranger. */
+      session: z.string().optional(),
       url: z.string().optional(),
       viewport: z
         .object({
@@ -495,6 +497,17 @@ export function expandSteps(
   })
 }
 
+/** The scope a recipe reads the operator's variables through: `${env.NAME}`. */
+export const ENV = 'env'
+
+/** Why an `env.` reference did not resolve: not set and not allowed look the same. */
+function noEnv(reference: string, name: string): ShotlistError {
+  return new ShotlistError(
+    `no value for ${reference} — either ${name} is not set, or the run was not given ` +
+      `\`--allow-env ${name}\`. A recipe reads no variable the command line did not name.`,
+  )
+}
+
 /**
  * Resolve `$name` and `${name}` in a value against the variables in scope.
  *
@@ -513,11 +526,17 @@ export function interpolate(
       const resolved = lookup(vars, whole[1]!)
       if (resolved !== undefined) return resolved
       if (missing === 'keep') return value
+      if (whole[1]!.startsWith(`${ENV}.`)) throw noEnv(value, whole[1]!.slice(ENV.length + 1))
       throw new ShotlistError(`no value for ${value}`)
     }
     return value.replace(/\$\{?([A-Za-z_][\w.]*)\}?/g, (all, path: string) => {
       const resolved = lookup(vars, path)
-      return resolved === undefined ? all : String(resolved)
+      if (resolved !== undefined) return String(resolved)
+      // Left as written, a password is typed into the page as those literal characters.
+      if (missing === 'throw' && path.startsWith(`${ENV}.`)) {
+        throw noEnv(all, path.slice(ENV.length + 1))
+      }
+      return all
     })
   }
   if (Array.isArray(value)) return value.map((item) => interpolate(item, vars, missing))

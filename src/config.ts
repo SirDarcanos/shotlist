@@ -96,10 +96,30 @@ const Serve = z.union([
   ServeOptions,
 ])
 
+const SessionOptions = z
+  .object({
+    /** Where the state is kept, from the config's directory. Holds cookies: do not commit. */
+    path: z.string(),
+    /**
+     * A selector only a signed-in page has. Without one an expired session redirects
+     * rather than failing, and every shot of the run becomes the sign-in form.
+     */
+    verify: z.string().optional(),
+  })
+  .strict()
+
+/** `admin: .shotlist/admin.json` is the whole of it; the mapping adds `verify`. */
+const Session = z.union([
+  z.string().transform((path) => SessionOptions.parse({ path })),
+  SessionOptions,
+])
+
 const Site = z.object({
   url: z.string(),
   /** Started before the first shot and stopped after the last, unless already running. */
   serve: Serve.optional(),
+  /** Signed-in states by name, written by `--login <name>` and picked by a recipe's `session:`. */
+  sessions: z.record(z.string(), Session).default({}),
   /**
    * Hosts a shot may open besides this site's own and everything under it — a sign-in
    * provider a flow passes through, a docs domain, a third-party page worth shooting.

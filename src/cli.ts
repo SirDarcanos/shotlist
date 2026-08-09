@@ -14,6 +14,7 @@ import { loadPlaywright } from './playwright.js'
 import { withServer } from './serve.js'
 import { scaffold } from './init.js'
 import { trustFrom } from './trust.js'
+import { sessionFor, signIn } from './session.js'
 import {
   BASELINE_FILE,
   describeEnvironment,
@@ -32,8 +33,13 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   shotlist --check [<name>...]   re-shoot and compare against the committed images
   shotlist --check --diff        …and write a before/after/changed image for each
   shotlist --check --json        …and report it as JSON on stdout
+  shotlist --login <name>        sign in by hand, and save the session under this name
+  shotlist --login <name> --using <macro>
+                                 …signing in with a macro instead of by hand
 
   --config <file>   use this config instead of the nearest one
+  --using <macro>   with --login, the macro that signs in, for a run with nobody at it
+  --allow-env <n>   let a recipe read this variable as \${env.<n>}; repeatable
   --keep-going      carry on past a recipe that fails, and report them at the end
   --untrusted       the config is not yours: no processes, no leaving the project,
                     and nothing opened on the network this machine sits in
@@ -47,11 +53,21 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
 export interface Io {
   out(line: string): void
   err(line: string): void
+  /** Wait for the person to say they are done, which only `--login` by hand needs. */
+  pause?(): Promise<void>
 }
 
 const CONSOLE: Io = {
   out: (line) => console.log(line),
   err: (line) => console.error(line),
+  pause: () =>
+    new Promise((done) => {
+      process.stdin.resume()
+      process.stdin.once('data', () => {
+        process.stdin.pause()
+        done()
+      })
+    }),
 }
 
 /** Load the project's config and its recipes, macros and data. */
@@ -96,6 +112,9 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         all: { type: 'boolean', default: false },
         check: { type: 'boolean', default: false },
         config: { type: 'string' },
+        login: { type: 'string' },
+        using: { type: 'string' },
+        'allow-env': { type: 'string', multiple: true },
         'keep-going': { type: 'boolean', default: false },
         diff: { type: 'boolean', default: false },
         json: { type: 'boolean', default: false },
@@ -128,6 +147,10 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     io.err('--json reports a --check run, and there is nothing else for it to report')
     return 1
   }
+  if (values.using !== undefined && values.login === undefined) {
+    io.err('--using names the macro that signs in, which only a --login run does')
+    return 1
+  }
 
   // Before anything is loaded: this is the command for a project that has no config.
   if (values.init) {
@@ -157,10 +180,21 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
           hosts: values.allow ?? [],
           paths: values['allow-path'] ?? [],
           deny: values.deny ?? [],
+          env: values['allow-env'] ?? [],
         },
       },
       values.untrusted,
     )
+
+    if (values.login !== undefined) {
+      const session = sessionFor(loaded, values.login, '--login')
+      await signIn(loaded, library, session, {
+        ...(values.using !== undefined ? { using: values.using } : {}),
+        ...(io.pause ? { pause: io.pause.bind(io) } : {}),
+        say: io.out,
+      })
+      return 0
+    }
 
     // No recipe named and nothing to do with them: list what there is.
     if (!values.all && !values.check && positionals.length === 0) {

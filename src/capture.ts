@@ -2,11 +2,12 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
-import { checkPath, checkUrl } from './trust.js'
+import { checkPath, checkUrl, envFor } from './trust.js'
+import { readSession, sessionFor } from './session.js'
 import { MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
 import type { Format } from './image.js'
 import type { Config, LoadedConfig, Style } from './config.js'
-import { expandSteps } from './recipe.js'
+import { ENV, expandSteps } from './recipe.js'
 import type { Library, Recipe } from './recipe.js'
 import { resolve as resolveInPage, runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
@@ -449,6 +450,10 @@ export async function shoot(
       `recipe "${recipe.name}": ${recipe.url ? '`url`' : '`site.url`'}`,
     )
   }
+  const session =
+    recipe.session === undefined
+      ? undefined
+      : sessionFor(loaded, recipe.session, `recipe "${recipe.name}": \`session\``)
   const outDir = fromRoot(loaded, config.paths.out)
   if (loaded.trust) checkPath(loaded.trust, outDir, 'paths.out')
   mkdirSync(outDir, { recursive: true })
@@ -512,6 +517,7 @@ export async function shoot(
         deviceScaleFactor: settings.scale,
         colorScheme: settings.theme,
         reducedMotion: config.site.reducedMotion ? 'reduce' : 'no-preference',
+        ...(session ? { storageState: readSession(session) } : {}),
       })
       try {
         const page = await context.newPage()
@@ -537,12 +543,27 @@ export async function shoot(
             )
           }
         }
+        // An expired session redirects rather than failing, and `--install` would commit
+        // a run's worth of sign-in forms.
+        if (session?.verify) {
+          try {
+            await page.waitForSelector(session.verify, { timeout: config.site.timeout })
+          } catch {
+            throw inRecipe(
+              recipe,
+              '`session`',
+              `loaded the session "${session.name}", but "${session.verify}" never appeared ` +
+                `at ${settings.url} — it has most likely expired. Run \`shotlist --login ` +
+                `${session.name}\` to sign in again.`,
+            )
+          }
+        }
         if (config.site.settle) await page.waitForTimeout(config.site.settle)
 
         const ctx: RunContext = {
           pages: new Map<string, Page>([['main', page]]),
           page,
-          vars: { ...library.data },
+          vars: { ...library.data, [ENV]: envFor(loaded.trust) },
           rects: {},
           viewport: settings.viewport,
           timeout: config.site.timeout,

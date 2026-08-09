@@ -33,6 +33,8 @@ export interface Trust {
   paths: readonly string[]
   /** What this project forbids on top of the names shotlist never touches. */
   deny: readonly string[]
+  /** What a recipe may read as `${env.NAME}`, from `--allow-env`. Empty when untrusted. */
+  env: readonly string[]
 }
 
 /**
@@ -160,7 +162,12 @@ export function trustFrom(
     /** The project's own forbidden names, which hold whether it is trusted or not. */
     deny?: readonly string[]
     /** What the operator granted or forbade, which outlives `--untrusted`. */
-    granted?: { hosts?: readonly string[]; paths?: readonly string[]; deny?: readonly string[] }
+    granted?: {
+      hosts?: readonly string[]
+      paths?: readonly string[]
+      deny?: readonly string[]
+      env?: readonly string[]
+    }
   },
   flag: boolean,
 ): Trust {
@@ -179,7 +186,36 @@ export function trustFrom(
     paths: (granted.paths ?? []).map((path) => resolve(where.root, path)),
     // Both, always: neither can do anything but refuse more.
     deny: [...(where.deny ?? []), ...(granted.deny ?? []), ...denyFromEnv()],
+    // Dropped whole rather than narrowed: a partial grant reads like a safe one.
+    env: untrusted ? [] : [...(granted.env ?? []), ...envFromEnv()],
   }
+}
+
+/** Names granted through `SHOTLIST_ENV`, for CI that sets its secrets there anyway. */
+function envFromEnv(): string[] {
+  return (process.env['SHOTLIST_ENV'] ?? '')
+    .split(/[,:\s]+/)
+    .map((name) => name.trim())
+    .filter(Boolean)
+}
+
+/** The values a recipe may interpolate. An empty one is left out, so it fails as unset. */
+export function envFor(trust: Trust | undefined): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const name of trust?.env ?? []) {
+    const value = process.env[name]
+    if (value !== undefined && value !== '') values[name] = value
+  }
+  return values
+}
+
+/** Refuse a session to a config that is not the operator's: it is a credential. */
+export function checkSession(trust: Trust, name: string, where: string): void {
+  if (!trust.untrusted) return
+  throw new ShotlistError(
+    `${where}: an --untrusted run does not load sessions, and this one asks for "${name}". ` +
+      'Shoot what does not need signing in, or run it without --untrusted.',
+  )
 }
 
 /**

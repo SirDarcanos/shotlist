@@ -22,6 +22,12 @@ site:
   # A selector proving the page is up, waited for after every navigation.
   # ready: '[data-app-ready]'
 
+  # Signed-in states for pages needing an account: \`shotlist --login admin\`, then
+  # \`session: admin\` in a recipe. Holds live cookies — gitignore it, never commit it.
+  # \`verify\` catches a session that expired, which redirects rather than failing.
+  # sessions:
+  #   admin: { path: .shotlist/admin.json, verify: '[data-signed-in]' }
+
 # Named destinations a recipe copies to with \`install: <name>\`, given --install.
 install:
   docs: docs/images

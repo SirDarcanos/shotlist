@@ -21,6 +21,8 @@ export interface Browser {
 export interface BrowserContext {
   newPage(): Promise<Page>
   close(): Promise<void>
+  /** Cookies and local storage as they stand, written to `path` when one is given. */
+  storageState(options?: { path?: string }): Promise<unknown>
 }
 
 export interface Page {

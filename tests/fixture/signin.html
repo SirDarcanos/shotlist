@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Fixture — signing in</title>
+<!--
+  A page with two states, for the session tests: a sign-in form, and what a signed-in
+  visitor sees. Which one renders is decided by a cookie the form sets itself, so no
+  server is needed beyond one that hands the file over. It is served over http rather
+  than opened from disk because a `file:` origin keeps no cookies.
+-->
+<style>
+  body {
+    margin: 0;
+    font: 16px/1.5 system-ui, sans-serif;
+    background: #101418;
+    color: #f4f6f8;
+  }
+  main {
+    padding: 32px;
+  }
+  input,
+  button {
+    display: block;
+    margin: 8px 0;
+    padding: 8px;
+    font: inherit;
+  }
+  #account {
+    padding: 12px 16px;
+    background: #1d2530;
+    border-radius: 8px;
+  }
+</style>
+<main id="app"></main>
+<script>
+  const NAME = 'fixture-session'
+
+  /** The signed-in visitor's name, or null when nothing has signed in. */
+  function signedInAs() {
+    const found = document.cookie.split('; ').find((one) => one.startsWith(`${NAME}=`))
+    return found ? decodeURIComponent(found.slice(NAME.length + 1)) : null
+  }
+
+  function render() {
+    const who = signedInAs()
+    const app = document.getElementById('app')
+    if (who) {
+      app.innerHTML = `
+        <div id="account">Signed in as <b id="who"></b></div>
+        <h1>Dashboard</h1>
+        <p id="private">Only a signed-in visitor sees this.</p>`
+      document.getElementById('who').textContent = who
+      return
+    }
+    app.innerHTML = `
+      <h1>Sign in</h1>
+      <input id="username" placeholder="Username" />
+      <input id="password" type="password" placeholder="Password" />
+      <button id="signin">Sign in</button>
+      <p id="failed" hidden>Those do not match.</p>`
+    document.getElementById('signin').addEventListener('click', () => {
+      const user = document.getElementById('username').value
+      const password = document.getElementById('password').value
+      // Any non-empty pair is accepted: what is under test is where the values came
+      // from, not whether this page can check them.
+      if (!user || !password) {
+        document.getElementById('failed').hidden = false
+        return
+      }
+      document.cookie = `${NAME}=${encodeURIComponent(user)}; path=/`
+      render()
+    })
+  }
+
+  render()
+</script>
