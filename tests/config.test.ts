@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { SCHEMA_FILES } from '../src/schemas.js'
 import {
   ShotlistError,
   findConfig,
@@ -152,23 +153,30 @@ describe('what a config is not allowed to be', () => {
 })
 
 describe('the generated schemas', () => {
-  const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+  // Generated here from the same list the emitter uses, rather than read out of `dist/`:
+  // the gate runs the tests before the build, so on a clean checkout there is no `dist/`
+  // to read and a test that needed one would fail for the wrong reason.
+  const options = { io: 'input', target: 'draft-7' } as const
+  const emitted = (file: string) => {
+    const entry = SCHEMA_FILES.find((one) => one.file === file)!
+    return z.toJSONSchema(entry.schema, options) as Record<string, unknown>
+  }
 
-  it('name the config schema for what it describes', () => {
-    const schema = JSON.parse(readFileSync(join(dist, 'config.schema.json'), 'utf8'))
-    expect(schema.title).toBe('shotlist config')
-    expect(schema.properties.site).toBeDefined()
+  it('write the config under the name that says so, and the old one beside it', () => {
+    const config = SCHEMA_FILES.filter((one) => one.title === 'shotlist config')
+    // Editors are pointed at these by path, so dropping the old name would stop
+    // autocomplete with nothing to read anywhere.
+    expect(config.map((one) => one.file)).toEqual(['config.schema.json', 'schema.json'])
+    expect(config[0]!.schema).toBe(config[1]!.schema)
   })
 
-  it('still answer to the old name, which editors are pointed at by path', () => {
-    expect(readFileSync(join(dist, 'schema.json'), 'utf8')).toBe(
-      readFileSync(join(dist, 'config.schema.json'), 'utf8'),
-    )
+  it('describe what their titles say they do', () => {
+    expect(emitted('config.schema.json')['properties']).toHaveProperty('site')
+    expect(emitted('recipe.schema.json')['properties']).toHaveProperty('session')
+    expect(emitted('macro.schema.json')['properties']).toHaveProperty('steps')
   })
 
   it('declare no $id, so two packages can never claim the same identity', () => {
-    for (const file of ['config.schema.json', 'recipe.schema.json', 'macro.schema.json']) {
-      expect(JSON.parse(readFileSync(join(dist, file), 'utf8'))['$id']).toBeUndefined()
-    }
+    for (const { file } of SCHEMA_FILES) expect(emitted(file)['$id']).toBeUndefined()
   })
 })
