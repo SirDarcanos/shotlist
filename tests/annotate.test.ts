@@ -5,6 +5,13 @@ import { parseConfig } from '../src/config.js'
 import { drawAnnotations } from '../src/annotate.js'
 import type { DrawStyle, Mark } from '../src/annotate.js'
 
+// jsdom has no 2D context and logs a "Not implemented" error every time one is asked
+// for — hundreds of them across this file, which makes a passing run read as a failing
+// one. The drawing layer already treats a missing context as the ordinary jsdom case and
+// falls back to metric boxes, so saying so outright is the same code path without the
+// noise. A test that needs real pixel measurement belongs in the browser suite.
+HTMLCanvasElement.prototype.getContext = () => null
+
 const STYLE: DrawStyle = {
   color: '#DC2626',
   canvas: '#FFFFFF',
