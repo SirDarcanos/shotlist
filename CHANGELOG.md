@@ -10,6 +10,13 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Security
+
+- **A session file is written `0600`.** Playwright writes it at the default umask, so it
+  landed as `0644` — readable by every other account on the machine. The file holds live
+  cookies, which sign their holder in as that administrator and outlive the password if it
+  is rotated. An existing session takes the new mode the next time `--login` writes it.
+
 ## [0.4.1] — 2026-08-09
 
 ### Fixed

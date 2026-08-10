@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -320,6 +320,10 @@ describe('--login', () => {
       expect(JSON.stringify(readSession(sessionFor(loaded, 'admin', 'x')))).toContain(
         'fixture-session',
       )
+      // Windows has no mode bits to set, so there is nothing to assert there.
+      if (process.platform !== 'win32') {
+        expect(statSync(file).mode & 0o777).toBe(0o600)
+      }
 
       writeFileSync(
         join(root, 'recipes', 'dash.yaml'),

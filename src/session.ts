@@ -2,7 +2,7 @@
  * Cookies and local storage, written by `shotlist --login` and read back before a shot,
  * so a recipe can shoot a page that needs an account without holding the password.
  */
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { ShotlistError, fromRoot, pageMessage, type LoadedConfig } from './config.js'
 import { checkPath, checkSession, checkUrl, envFor } from './trust.js'
@@ -127,6 +127,9 @@ export async function signIn(
       }
     }
     await context.storageState({ path: session.file })
+    // Anyone holding this file is signed in as that account, and Playwright writes it at
+    // the default umask — 0644, which every other user on the machine can read.
+    chmodSync(session.file, 0o600)
     options.say(`  ✓ wrote ${session.file}`)
   } finally {
     await browser.close()
