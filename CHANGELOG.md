@@ -10,6 +10,8 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-08-10
+
 ### Security
 
 - **A session file is written `0600`.** Playwright writes it at the default umask, so it
@@ -424,7 +426,8 @@ The layers that turn a validated recipe into a PNG — running steps against Pla
 drawing the callouts, capturing and installing, and `--check` for staleness — plus the
 `shotlist` CLI itself. The README documents them; nothing in 0.0.1 runs them.
 
-[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.4.1...HEAD
+[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/SirDarcanos/shotlist/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/SirDarcanos/shotlist/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SirDarcanos/shotlist/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SirDarcanos/shotlist/compare/v0.2.3...v0.3.0
