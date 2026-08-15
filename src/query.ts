@@ -356,8 +356,10 @@ export function resolveQuery(context: QueryContext): Resolved {
   }
 
   if ('span' in spec) {
+    // Seeds answer the query they were resolved for; a part is a different query, and
+    // inheriting them would make it search the outer query's elements instead of the page.
     const parts: Rect[] = spec.span.map(
-      (part: QueryInput) => resolveQuery({ ...ctx, spec: part }).rect,
+      (part: QueryInput) => resolveQuery({ ...ctx, spec: part, seeds: undefined }).rect,
     )
     const x0 = Math.min(...parts.map((r) => r.x))
     const y0 = Math.min(...parts.map((r) => r.y))
@@ -441,13 +443,15 @@ export function resolveQuery(context: QueryContext): Resolved {
   }
 
   // Resolved once, not per candidate: a `within` that is itself a query would otherwise
-  // be re-run against every element on the page.
+  // be re-run against every element on the page. Seeds stay out for the same reason a
+  // span part drops them: they answer the outer query, and a scope that searches only
+  // the seeded elements can never find the container around them.
   const scope =
     query.within === undefined
       ? undefined
       : typeof query.within === 'string'
         ? ctx.rects?.[query.within]
-        : resolveQuery({ ...ctx, spec: query.within as QueryInput }).rect
+        : resolveQuery({ ...ctx, spec: query.within as QueryInput, seeds: undefined }).rect
   if (query.within !== undefined && !scope) {
     throw new Error(`query names within: "${String(query.within)}", which is not a resolved rect`)
   }

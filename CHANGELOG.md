@@ -79,6 +79,12 @@ expected string, received number`. The branch a step is written against always r
   zod runs, was the fix `numbered: Unrecognized key: "badgee"` in 0.4.0 needed but did not
   cover.
 
+- **A `within` sub-query no longer inherits the outer query's seeds.** A step like
+  `click: { role: button, name: Fail, within: { css: li, contains: Zara } }` resolved
+  the scope against the role engine's own matches — and a container is never among the
+  elements it contains, so the scope could not be found. Span parts drop the seeds for
+  the same reason.
+
 ### Security
 
 - **A session file holds this site's cookies and nothing else.** `--login` wrote back

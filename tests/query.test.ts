@@ -66,6 +66,23 @@ describe('a source Playwright resolves', () => {
   it('says it cannot be nested when the engine never ran at all', () => {
     expect(() => find({ placeholder: 'Search packages' })).toThrow(/cannot be used inside/)
   })
+
+  it('keeps the seeds out of a `within` sub-query', () => {
+    // The seeds are the two Edit buttons, as the role engine would hand them over. The
+    // `within` names the row around one of them; searching the seeds for it can only
+    // fail, because a container is never among the elements it contains.
+    const seeds = [...document.querySelectorAll('.row button')]
+    expect(
+      evaluateQuery({
+        spec: {
+          css: 'button',
+          within: { css: 'li, div', contains: 'Acme Corp', matching: '\\$\\d', pick: 'smallest' },
+        },
+        viewport: VIEWPORT,
+        seeds,
+      }),
+    ).toEqual({ x: 300, y: 80, width: 76, height: 28 })
+  })
 })
 
 // Negative counts from the end, the way `Array.at` does. Checked against a list of four,
