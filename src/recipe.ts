@@ -190,6 +190,16 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
       theme: z.enum(['light', 'dark', 'no-preference']).optional(),
       style: StylePatch.optional(),
       setup: z.array(makeStep(aliases)).default([]),
+      /**
+       * Steps run after the shot, and after a shot that failed.
+       *
+       * Closing the browser undoes the browser, and nothing `setup` asked the application
+       * to do: a recipe that has to create an order to photograph one leaves an order
+       * behind, and the next run finds two. What a teardown throws is reported only when
+       * the shot itself came back — the reason a shot failed is worth more than the
+       * trouble tidying up after it had.
+       */
+      teardown: z.array(makeStep(aliases)).default([]),
       clip: z.union([z.literal('viewport'), z.literal('full'), Query]).default('viewport'),
       marks: z.record(z.string(), Query).default({}),
       /**
@@ -388,8 +398,10 @@ export function parseRecipe(
   options: { finders?: Record<string, unknown>; file?: string; name?: string } = {},
 ): Recipe {
   checkKind(raw, 'recipe', options.file)
-  if (typeof raw === 'object' && raw !== null && 'setup' in raw) {
-    checkVerbs((raw as { setup: unknown }).setup, 'setup')
+  for (const key of ['setup', 'teardown'] as const) {
+    if (typeof raw === 'object' && raw !== null && key in raw) {
+      checkVerbs((raw as Record<string, unknown>)[key], key)
+    }
   }
   const recipe = validate(makeRecipe(options.finders ?? {}), raw, 'recipe', options.file)
   const name = recipe.name ?? options.name
@@ -422,6 +434,18 @@ export function parseRecipe(
   }
   if (recipe.source === 'file' && !recipe.file) {
     throw new ShotlistError('`source: file` needs a `file:` pointing at the PNG', options.file)
+  }
+  // Refused rather than ignored: there is no page for them to run against, so a recipe
+  // carrying them is one whose author believes something is happening that is not.
+  const unrun = (['setup', 'teardown'] as const).filter(
+    (key) => recipe.source === 'file' && recipe[key].length,
+  )
+  if (unrun.length) {
+    throw new ShotlistError(
+      `${unrun.join(' and ')}: \`source: file\` annotates an image on disk and never opens a ` +
+        'page, so these steps would never run — drop them, or drop `source: file`',
+      options.file,
+    )
   }
   return { ...recipe, name }
 }

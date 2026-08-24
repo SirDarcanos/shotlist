@@ -164,6 +164,26 @@ is almost always `place: left`.
 - A callout with no `text` and `box: true` is just an outline. That is often all a shot
   needs.
 
+## Putting the application back
+
+Every shot gets its own browser context, so cookies and local storage never carry from one
+recipe to the next. What the application did carries: a recipe that clicks **New order** to
+photograph one has created an order, and it is still there on the next run — where the
+query now matches two rows and clips the wrong one. `teardown:` runs after the shot and
+undoes it:
+
+```yaml
+setup:
+  - click: { role: button, name: New order }
+clip: { css: '.order-row' }
+teardown:
+  - click: { role: button, name: Delete }
+```
+
+It runs after a shot that failed too, which is exactly when something is left over. Write
+one whenever a `setup` writes to the application rather than only navigating it — a shot
+list that only clicks through to a page needs none.
+
 ## Running it
 
 ```bash

@@ -58,6 +58,30 @@ describe('parseRecipe', () => {
     expect(() => parseRecipe({ source: 'file' }, { name: 'x' })).toThrow(/needs a `file:`/)
   })
 
+  it('checks the verbs in a teardown the way it checks the ones in a setup', () => {
+    expect(() => parseRecipe({ teardown: [{ clik: { css: 'button' } }] }, { name: 'x' })).toThrow(
+      /teardown\[0\]: unknown step "clik" — did you mean "click"\?/,
+    )
+  })
+
+  it('refuses steps on a file recipe, which has no page for them to run against', () => {
+    const file = { source: 'file', file: 'shot.png' }
+    expect(() =>
+      parseRecipe({ ...file, teardown: [{ click: { css: 'a' } }] }, { name: 'x' }),
+    ).toThrow(/teardown: `source: file` .*never opens a page/s)
+    expect(() => parseRecipe({ ...file, setup: [{ click: { css: 'a' } }] }, { name: 'x' })).toThrow(
+      /^setup: /,
+    )
+    // Both at once names both, rather than the first and then the other on the next run.
+    expect(() =>
+      parseRecipe(
+        { ...file, setup: [{ click: { css: 'a' } }], teardown: [{ click: { css: 'b' } }] },
+        { name: 'x' },
+      ),
+    ).toThrow(/^setup and teardown: /)
+    expect(parseRecipe(file, { name: 'x' }).teardown).toEqual([])
+  })
+
   // Several keys accept more than one shape, and a union reports only that none of them
   // matched — naming neither the key that was wrong nor what it should have been.
   it('names the key inside the branch the author was plainly writing', () => {

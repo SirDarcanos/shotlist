@@ -30,6 +30,34 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   `prompt()` is answered with; `dismiss` takes none, because a dialog being closed has
   nothing to type into.
 
+- **`teardown:` on a recipe**, steps run once the shot has been taken:
+
+  ```yaml
+  setup:
+    - click: { role: button, name: New order }
+  clip: { listRow: Acme Corp }
+  teardown:
+    - click: { role: button, name: Delete }
+  ```
+
+  Each shot already gets its own browser context, so nothing the browser holds survives
+  one — and nothing the browser holds is the problem. What `setup` asked the application
+  to do is still done afterwards: a recipe that has to create an order to photograph one
+  leaves the order behind, and the next run finds two.
+
+  It runs after a shot that failed as well, which is when there is most left over. What it
+  throws is reported only when the shot itself came back, because an error about tidying
+  up a page that never loaded buries the reason it never loaded. A recipe with `retries`
+  tears down after each attempt, since each attempt ran the setup again.
+
+### Changed
+
+- **`setup` and `teardown` on a `source: file` recipe are refused rather than ignored.**
+  That recipe annotates an image on disk and never opens a page, so steps on it never ran
+  — which reads exactly like steps that ran and did nothing. No screenshot changes: a
+  recipe affected by this was already getting nothing out of them. Drop the steps, or drop
+  `source: file`.
+
 ### Fixed
 
 - **A known verb with a bad value reported every branch of the step union.** `press: 5`

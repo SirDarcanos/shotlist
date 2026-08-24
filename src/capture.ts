@@ -521,45 +521,6 @@ export async function shoot(
       })
       try {
         const page = await context.newPage()
-        // The site not being up is the first thing a new project gets wrong, and
-        // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
-        try {
-          await page.goto(settings.url, { waitUntil: 'load' })
-        } catch (error) {
-          throw inRecipe(
-            recipe,
-            recipe.url ? '`url`' : '`site.url`',
-            `could not open ${settings.url} — ${pageMessage(error)}. Is the site running?`,
-          )
-        }
-        if (config.site.ready) {
-          try {
-            await page.waitForSelector(config.site.ready, { timeout: config.site.timeout })
-          } catch {
-            throw inRecipe(
-              recipe,
-              '`site.ready`',
-              `waited ${config.site.timeout}ms at ${settings.url} for "${config.site.ready}", which never appeared`,
-            )
-          }
-        }
-        // An expired session redirects rather than failing, and `--install` would commit
-        // a run's worth of sign-in forms.
-        if (session?.verify) {
-          try {
-            await page.waitForSelector(session.verify, { timeout: config.site.timeout })
-          } catch {
-            throw inRecipe(
-              recipe,
-              '`session`',
-              `loaded the session "${session.name}", but "${session.verify}" never appeared ` +
-                `at ${settings.url} — it has most likely expired. Run \`shotlist --login ` +
-                `${session.name}\` to sign in again.`,
-            )
-          }
-        }
-        if (config.site.settle) await page.waitForTimeout(config.site.settle)
-
         const ctx: RunContext = {
           pages: new Map<string, Page>([['main', page]]),
           page,
@@ -570,66 +531,122 @@ export async function shoot(
           newPage: () => context.newPage(),
           ...(loaded.trust ? { trust: loaded.trust } : {}),
         }
+        // Held rather than thrown from the `finally`, because a shot that already failed
+        // is the more useful thing to report: an error about tidying up a page that never
+        // loaded would bury the reason it never loaded.
+        let tidying: unknown
         try {
-          await runSteps(expandSteps(recipe.setup, library.macros), ctx)
-        } catch (error) {
-          throw inRecipe(recipe, 'setup', pageMessage(error))
-        }
-
-        let clip: Rect
-        try {
-          clip = await clipRect(recipe.clip, ctx, settings.viewport)
-        } catch (error) {
-          throw inRecipe(recipe, 'clip', pageMessage(error))
-        }
-        ctx.rects['clip'] = clip
-        for (const [name, query] of Object.entries(recipe.marks)) {
+          // The site not being up is the first thing a new project gets wrong, and
+          // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
           try {
-            ctx.rects[name] = (await resolveInPage(ctx.page, query, ctx)).rect
+            await page.goto(settings.url, { waitUntil: 'load' })
           } catch (error) {
-            throw inRecipe(recipe, `marks.${name}`, pageMessage(error))
+            throw inRecipe(
+              recipe,
+              recipe.url ? '`url`' : '`site.url`',
+              `could not open ${settings.url} — ${pageMessage(error)}. Is the site running?`,
+            )
           }
-        }
-
-        // Every match, not the first: a page has three avatars far more often than it
-        // has one, and a mask that covered only the first would ship the other two.
-        masks = []
-        for (const [i, query] of recipe.mask.entries()) {
-          try {
-            const found = await resolveInPage(ctx.page, query, { ...ctx, all: true })
-            for (const rect of found.rects ?? [found.rect]) {
-              masks.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+          if (config.site.ready) {
+            try {
+              await page.waitForSelector(config.site.ready, { timeout: config.site.timeout })
+            } catch {
+              throw inRecipe(
+                recipe,
+                '`site.ready`',
+                `waited ${config.site.timeout}ms at ${settings.url} for "${config.site.ready}", which never appeared`,
+              )
             }
-          } catch (error) {
-            throw inRecipe(recipe, `mask[${i}]`, pageMessage(error))
           }
-        }
-
-        const skip = recipe.check === false ? [] : (recipe.check?.ignore ?? [])
-        for (const [i, query] of skip.entries()) {
-          try {
-            const found = await resolveInPage(ctx.page, query, { ...ctx, all: true })
-            for (const rect of found.rects ?? [found.rect]) {
-              ignore.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+          // An expired session redirects rather than failing, and `--install` would commit
+          // a run's worth of sign-in forms.
+          if (session?.verify) {
+            try {
+              await page.waitForSelector(session.verify, { timeout: config.site.timeout })
+            } catch {
+              throw inRecipe(
+                recipe,
+                '`session`',
+                `loaded the session "${session.name}", but "${session.verify}" never appeared ` +
+                  `at ${settings.url} — it has most likely expired. Run \`shotlist --login ` +
+                  `${session.name}\` to sign in again.`,
+              )
             }
+          }
+          if (config.site.settle) await page.waitForTimeout(config.site.settle)
+
+          try {
+            await runSteps(expandSteps(recipe.setup, library.macros), ctx)
           } catch (error) {
-            throw inRecipe(recipe, `check.ignore[${i}]`, pageMessage(error))
+            throw inRecipe(recipe, 'setup', pageMessage(error))
+          }
+
+          let clip: Rect
+          try {
+            clip = await clipRect(recipe.clip, ctx, settings.viewport)
+          } catch (error) {
+            throw inRecipe(recipe, 'clip', pageMessage(error))
+          }
+          ctx.rects['clip'] = clip
+          for (const [name, query] of Object.entries(recipe.marks)) {
+            try {
+              ctx.rects[name] = (await resolveInPage(ctx.page, query, ctx)).rect
+            } catch (error) {
+              throw inRecipe(recipe, `marks.${name}`, pageMessage(error))
+            }
+          }
+
+          // Every match, not the first: a page has three avatars far more often than it
+          // has one, and a mask that covered only the first would ship the other two.
+          masks = []
+          for (const [i, query] of recipe.mask.entries()) {
+            try {
+              const found = await resolveInPage(ctx.page, query, { ...ctx, all: true })
+              for (const rect of found.rects ?? [found.rect]) {
+                masks.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+              }
+            } catch (error) {
+              throw inRecipe(recipe, `mask[${i}]`, pageMessage(error))
+            }
+          }
+
+          const skip = recipe.check === false ? [] : (recipe.check?.ignore ?? [])
+          for (const [i, query] of skip.entries()) {
+            try {
+              const found = await resolveInPage(ctx.page, query, { ...ctx, all: true })
+              for (const rect of found.rects ?? [found.rect]) {
+                ignore.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
+              }
+            } catch (error) {
+              throw inRecipe(recipe, `check.ignore[${i}]`, pageMessage(error))
+            }
+          }
+
+          // A clip is measured against the viewport, and so are the marks inside it — but a
+          // screenshot only reaches past the fold with `fullPage`, and then its clip is
+          // measured against the page. Without this, `clip: full` quietly returned one
+          // viewport: the tall half of the page was never in the picture.
+          const below = clip.y + clip.height > settings.viewport.height
+          const scrolled = below ? await ctx.page.evaluate(() => window.scrollY, undefined) : 0
+          image = await ctx.page.screenshot({
+            clip: below ? { ...clip, y: clip.y + scrolled } : clip,
+            ...(below ? { fullPage: true } : {}),
+            animations: 'disabled',
+          })
+          size = { width: clip.width, height: clip.height }
+          marks = marksFor(recipe, ctx.rects, clip)
+        } finally {
+          // Whichever way the shot went: closing the context throws away the browser,
+          // and leaves everything `setup` asked the application itself to do.
+          if (recipe.teardown.length) {
+            try {
+              await runSteps(expandSteps(recipe.teardown, library.macros), ctx)
+            } catch (error) {
+              tidying = inRecipe(recipe, 'teardown', pageMessage(error))
+            }
           }
         }
-
-        // A clip is measured against the viewport, and so are the marks inside it — but a
-        // screenshot only reaches past the fold with `fullPage`, and then its clip is
-        // measured against the page. Without this, `clip: full` quietly returned one
-        // viewport: the tall half of the page was never in the picture.
-        const below = clip.y + clip.height > settings.viewport.height
-        const scrolled = below ? await ctx.page.evaluate(() => window.scrollY, undefined) : 0
-        image = await ctx.page.screenshot({
-          clip: below ? { ...clip, y: clip.y + scrolled } : clip,
-          ...(below ? { fullPage: true } : {}),
-          animations: 'disabled',
-        })
-        size = { width: clip.width, height: clip.height }
-        marks = marksFor(recipe, ctx.rects, clip)
+        if (tidying) throw tidying
       } finally {
         await context.close()
       }

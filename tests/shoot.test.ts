@@ -1,3 +1,5 @@
+import { createServer } from 'node:http'
+import type { Server } from 'node:http'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -8,11 +10,14 @@ import {
   loadLibrary,
   loadPlaywright,
   parseConfig,
+  parseRecipe,
   shoot,
   withNumbering,
 } from '../src/index.js'
 import type { LoadedConfig } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
 
 /** A throwaway copy of the fixture project, loaded through the public API. */
 function project(): { loaded: LoadedConfig; library: ReturnType<typeof loadLibrary> } {
@@ -35,6 +40,116 @@ function pngSize(file: string): { width: number; height: number } {
 }
 
 afterAll(removeProjects)
+
+describe('teardown', () => {
+  /**
+   * Serve the fixture over http and record every path asked for.
+   *
+   * A teardown's whole point is what it leaves behind in the application rather than in
+   * the browser, and the browser is thrown away before a test could look at it. The
+   * request log is the only place the two are visible together.
+   */
+  function serve(): Promise<{ origin: string; seen: string[]; close: () => Promise<void> }> {
+    const seen: string[] = []
+    return new Promise((ready) => {
+      const server: Server = createServer((request, response) => {
+        const { pathname } = new URL(request.url ?? '/', 'http://localhost')
+        seen.push(pathname)
+        try {
+          response.end(readFileSync(join(HERE, 'fixture', pathname.replace(/^\/+/, ''))))
+        } catch {
+          response.statusCode = 404
+          response.end('not found')
+        }
+      })
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address()
+        const port = typeof address === 'object' && address ? address.port : 0
+        ready({
+          origin: `http://127.0.0.1:${port}`,
+          seen,
+          close: () => new Promise((done) => server.close(() => done())),
+        })
+      })
+    })
+  }
+
+  /**
+   * Shoot one recipe against the served fixture, and hand back what the server saw.
+   *
+   * The recipe is built from the origin because the port is only known once the server
+   * is up, and `goto` takes a whole URL. Named `dash` rather than anything with the word
+   * teardown in it: one of these asserts on an error that must not mention it.
+   */
+  async function shootServed(build: (origin: string) => Record<string, unknown>) {
+    const server = await serve()
+    const { loaded, library } = project()
+    const recipe = parseRecipe(
+      { name: 'dash', url: `${server.origin}/index.html`, ...build(server.origin) },
+      { finders: loaded.config.finders },
+    )
+    try {
+      // Settled into a value rather than rethrown, so the caller can assert on the
+      // failure and on the request log together — and so the server is still up while
+      // the shot is taken, which returning the promise would not manage.
+      return {
+        seen: server.seen,
+        ...(await shoot(recipe, library, loaded).then(
+          (result) => ({ result, why: '' }),
+          (error: unknown) => ({ result: undefined, why: (error as Error).message }),
+        )),
+      }
+    } finally {
+      await server.close()
+    }
+  }
+
+  // The modal is `hidden` until the row's button is clicked, so a clip of its card is a
+  // box with area only after the setup has run.
+  const OPEN = { click: { css: '.row button' } }
+  const CARD = { css: '#modal .card' }
+
+  it('runs after the shot has been taken, not before it', { timeout: 120_000 }, async () => {
+    // The clip is of something only the setup state has, and the teardown navigates away
+    // from the page entirely — so this shot comes back at all only if the order is right.
+    const { seen, result } = await shootServed((origin) => ({
+      setup: [OPEN],
+      clip: CARD,
+      teardown: [{ goto: `${origin}/TORN_DOWN` }],
+    }))
+    expect(existsSync(result!.file)).toBe(true)
+    expect(seen).toEqual(['/index.html', '/TORN_DOWN'])
+  })
+
+  it('runs after a shot that failed, which is when it matters most', async () => {
+    const { seen, why } = await shootServed((origin) => ({
+      clip: { css: '#nothing-here' },
+      teardown: [{ goto: `${origin}/TORN_DOWN` }],
+    }))
+    expect(why).toMatch(/clip — no element matched/)
+    expect(seen).toContain('/TORN_DOWN')
+  }, 120_000)
+
+  it('says so when it is the teardown that failed, and the shot did not', async () => {
+    const { why } = await shootServed(() => ({
+      setup: [OPEN],
+      clip: CARD,
+      teardown: [{ click: { css: '#nothing-here' } }],
+    }))
+    expect(why).toMatch(/recipe "dash": teardown — .*no element matched/s)
+  }, 120_000)
+
+  it('leaves the reason a shot failed as the reason, rather than the tidying up', async () => {
+    // Both fail here. The clip is why there is no screenshot; the teardown is a footnote
+    // about a page that was already in a state nobody planned.
+    const { why } = await shootServed(() => ({
+      clip: { css: '#nothing-here' },
+      teardown: [{ click: { css: '#also-nothing' } }],
+    }))
+    expect(why).toMatch(/clip — no element matched/)
+    expect(why).not.toMatch(/teardown/)
+  }, 120_000)
+})
 
 describe('shoot', () => {
   it(
@@ -413,7 +528,7 @@ describe('arrow placement in a real browser', () => {
 // has no file origin and a browser refuses it a `file:` subresource — silently, which is
 // worse than refusing it loudly. It is read and inlined instead, fonts and all.
 describe('a font the project ships itself', () => {
-  const FONT = join(dirname(fileURLToPath(import.meta.url)), 'fixture/JetBrainsMono-Bold.woff2')
+  const FONT = join(HERE, 'fixture/JetBrainsMono-Bold.woff2')
 
   const SHEET = `@font-face {
     font-family: 'Shotlist Mono';
