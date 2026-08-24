@@ -530,6 +530,37 @@ describe('--login', () => {
   )
 
   it(
+    'names the host and the variables before a scripted sign-in types anything',
+    { timeout: 120_000 },
+    async () => {
+      // A headless run shows nothing, and the config chooses both the host and which
+      // variables reach it — so this line is the only place a lookalike is visible.
+      process.env['FIXTURE_USER'] = 'Ada'
+      process.env['FIXTURE_PASSWORD'] = 'hunter2'
+      const { loaded, library } = project({
+        verify: '#account',
+        allowEnv: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
+      })
+      const said: string[] = []
+      await signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+        using: 'sign-in',
+        say: (line) => said.push(line),
+      })
+      // First, before the browser is even started: after the fact is after the typing.
+      expect(said[0]).toBe(
+        `Signing in at ${origin}/signin.html with \`sign-in\`, which may type ` +
+          'FIXTURE_USER, FIXTURE_PASSWORD into it.',
+      )
+    },
+  )
+
+  it('says it without a variable list when nothing granted any', { timeout: 120_000 }, async () => {
+    const made = withSignIn({ verify: '#account' }, signInAt(origin, 'Ada'))
+    const said = await login(made)
+    expect(said.split('\n')[0]).toBe(`Signing in at ${origin}/signin.html with \`via-provider\`.`)
+  })
+
+  it(
     'signs in with a macro, and writes a session that a later shot is signed in by',
     { timeout: 120_000 },
     async () => {

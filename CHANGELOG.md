@@ -101,6 +101,20 @@ expected string, received number`. The branch a step is written against always r
   when something was dropped, and only when the session has a `verify` — without one there
   is nothing to ask, and `--login` says that too.
 
+- **`--login --using <macro>` says where it is signing in, and with what**, before it types
+  anything:
+
+  ```
+  Signing in at https://app.example.com with `sign-in`, which may type WP_USER, WP_PASSWORD into it.
+  ```
+
+  That run is headless, so there was nothing to look at — and both halves of what it does
+  come out of the config: `site.url` picks the host a password is typed into, and
+  `allowEnv` picks which variables it may be typed from, neither needing a flag from
+  whoever ran the command. `--login` is also the one thing `--untrusted` cannot make safe,
+  because it refuses sessions outright. The by-hand flow already printed its URL; this is
+  the other half.
+
 - **`keep` on a session**, for the app whose sign-in really does need a provider's cookies:
 
   ```yaml

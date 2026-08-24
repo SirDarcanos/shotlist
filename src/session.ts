@@ -239,6 +239,18 @@ export async function signIn(
         'Give it a macro with `--using <macro>`.',
     )
   }
+  if (scripted) {
+    // Said before the browser starts, because this run is headless and there is nothing
+    // else to look at. Both halves of what it names come from the config — `site.url`
+    // picks the host a password is typed into, and `allowEnv` picks which variables it
+    // may be typed from — so a config nobody has read gets to choose both, and this line
+    // is where that choice becomes visible. The signed-in flow already prints its URL.
+    const granted = loaded.trust?.env ?? []
+    options.say(
+      `Signing in at ${site.url} with \`${options.using}\`` +
+        (granted.length ? `, which may type ${granted.join(', ')} into it.` : '.'),
+    )
+  }
   const browser = await loadPlaywright().chromium.launch({ headless: scripted })
   try {
     const context = await browser.newContext({ viewport: site.viewport })
