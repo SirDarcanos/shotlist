@@ -219,9 +219,21 @@ site:
 
 The file keeps this site's cookies and nothing else. Signing in through Google or another
 provider leaves that provider's session in the browser as well, and none of it is written
-— those cookies are the account itself rather than a screenshot credential. Where a
-session genuinely lives on another host, name that host in `site.allow`; `--login` says
-what it left out, so a sign-in that stops working names the host to add.
+— those cookies are the account itself rather than a screenshot credential. `--login` says
+what it left out, and, before writing anything, loads what is left into a fresh browser and
+checks `verify` against it: a session that no longer signs in is one error rather than a
+run of screenshots of the sign-in form.
+
+Almost every app is fine, because its own session is a cookie or a token under its own
+origin. For the one that genuinely needs the provider's, say so on the session:
+
+```yaml
+sessions:
+  admin:
+    path: .shotlist/admin.json
+    verify: '#account'
+    keep: [accounts.google.com] # this file now signs in as that Google account too
+```
 
 A recipe picks one by name, and the shot is taken as whoever that is:
 

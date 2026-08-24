@@ -74,7 +74,9 @@ afterEach(() => {
 })
 
 /** A throwaway project pointed at the served sign-in page, with a session and a macro. */
-function project(options: { verify?: string; allowEnv?: string[] } = {}): {
+function project(
+  options: { verify?: string; allowEnv?: string[]; keep?: string[]; siteUrl?: string } = {},
+): {
   loaded: LoadedConfig
   library: ReturnType<typeof loadLibrary>
   root: string
@@ -87,7 +89,7 @@ function project(options: { verify?: string; allowEnv?: string[] } = {}): {
   writeFileSync(
     join(root, 'shotlist.config.yaml'),
     `site:
-  url: ${origin}/signin.html
+  url: ${options.siteUrl ?? `${origin}/signin.html`}
   viewport: { width: 800, height: 600 }
   scale: 1
   # Short, because two of these tests wait this out on purpose.
@@ -95,7 +97,9 @@ function project(options: { verify?: string; allowEnv?: string[] } = {}): {
   sessions:
     admin:
       path: .shotlist/admin.json
-${options.verify === undefined ? '' : `      verify: '${options.verify}'\n`}paths:
+${options.verify === undefined ? '' : `      verify: '${options.verify}'\n`}${
+      options.keep === undefined ? '' : `      keep: [${options.keep.join(', ')}]\n`
+    }paths:
   recipes: recipes
   macros: macros
   data: data
@@ -133,14 +137,14 @@ describe('site.sessions', () => {
     const config = parseConfig({
       site: { url: SITE, sessions: { admin: '.shotlist/admin.json' } },
     })
-    expect(config.site.sessions['admin']).toEqual({ path: '.shotlist/admin.json' })
+    expect(config.site.sessions['admin']).toEqual({ path: '.shotlist/admin.json', keep: [] })
   })
 
   it('takes the mapping, with the selector that proves a session still works', () => {
     const config = parseConfig({
       site: { url: SITE, sessions: { admin: { path: 'a.json', verify: '#account' } } },
     })
-    expect(config.site.sessions['admin']).toEqual({ path: 'a.json', verify: '#account' })
+    expect(config.site.sessions['admin']).toEqual({ path: 'a.json', verify: '#account', keep: [] })
   })
 
   it('is empty rather than absent, so nothing has to check for the key', () => {
@@ -429,51 +433,99 @@ describe('what a session keeps', () => {
 })
 
 describe('--login', () => {
+  /** The fixture's sign-in, filled in at whichever origin it is pointed at. */
+  const signInAt = (at: string, who: string) => `  - goto: ${at}/signin.html
+  - fill: { css: '#username' }
+    value: ${who}
+  - fill: { css: '#password' }
+    value: hunter2
+  - click: { css: '#signin' }
+`
+
+  /** A project whose sign-in macro is on disk before the library reads the directory. */
+  function withSignIn(options: Parameters<typeof project>[0], steps: string) {
+    const made = project(options)
+    // The operator's own config, which is the only way `--login` is ever run: nothing
+    // checks the URLs a sign-in walks through, exactly as nothing checks the redirects an
+    // identity provider issues. It also puts `sessionHosts` on its fallback.
+    delete made.loaded.trust
+    writeFileSync(join(made.root, 'macros', 'via-provider.yaml'), `steps:\n${steps}`)
+    return {
+      ...made,
+      library: loadLibrary({
+        recipes: join(made.root, 'recipes'),
+        macros: join(made.root, 'macros'),
+        data: join(made.root, 'data'),
+        finders: {},
+      }),
+    }
+  }
+
+  /** Run `--login admin` with that macro, collecting what it said. */
+  async function login(made: ReturnType<typeof withSignIn>) {
+    const said: string[] = []
+    await signIn(made.loaded, made.library, sessionFor(made.loaded, 'admin', '--login'), {
+      using: 'via-provider',
+      say: (line) => said.push(line),
+    })
+    return said.join('\n')
+  }
+
+  /** What ended up on disk. */
+  const written = (root: string) =>
+    JSON.parse(readFileSync(join(root, '.shotlist/admin.json'), 'utf8')) as StorageState
+
   it(
     'writes none of what a round trip through another host left in the browser',
     { timeout: 120_000 },
     async () => {
-      const { loaded, root } = project({ verify: '#account' })
-      // The operator's own config, which is the only way `--login` is ever run: nothing
-      // checks the URLs a sign-in walks through, exactly as nothing checks the redirects
-      // an identity provider issues. It also puts `sessionHosts` on its fallback.
-      delete loaded.trust
-      writeFileSync(
-        join(root, 'macros', 'via-provider.yaml'),
-        `steps:
-  - goto: ${provider.origin}/signin.html
-  - fill: { css: '#username' }
-    value: Provider
-  - fill: { css: '#password' }
-    value: hunter2
-  - click: { css: '#signin' }
-  - goto: ${origin}/signin.html
-  - fill: { css: '#username' }
-    value: Ada
-  - fill: { css: '#password' }
-    value: hunter2
-  - click: { css: '#signin' }
-`,
+      const made = withSignIn(
+        { verify: '#account' },
+        signInAt(provider.origin, 'Provider') + signInAt(origin, 'Ada'),
       )
-      const library = loadLibrary({
-        recipes: join(root, 'recipes'),
-        macros: join(root, 'macros'),
-        data: join(root, 'data'),
-        finders: {},
-      })
-      const said: string[] = []
-      await signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
-        using: 'via-provider',
-        say: (line) => said.push(line),
-      })
+      const said = await login(made)
 
-      const written = JSON.parse(
-        readFileSync(join(root, '.shotlist/admin.json'), 'utf8'),
-      ) as StorageState
-      expect(written.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
+      const file = written(made.root)
+      expect(file.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
       // Signed in as Ada rather than as Provider: the site's own cookie survived.
-      expect(JSON.stringify(written)).toContain('Ada')
-      expect(said.join('\n')).toMatch(/left out 1 cookie for localhost/)
+      expect(JSON.stringify(file)).toContain('Ada')
+      expect(said).toMatch(/left out 1 cookie for localhost/)
+    },
+  )
+
+  it(
+    'refuses to write a session that signing in produced and narrowing broke',
+    { timeout: 120_000 },
+    async () => {
+      // The site is one host and the sign-in leaves its cookie on another, so the browser
+      // is signed in and what would be saved is not. Without the second check this writes
+      // a file that looks fine and turns every shot of the next run into the sign-in form.
+      const made = withSignIn(
+        { verify: '#account', siteUrl: `${provider.origin}/signin.html` },
+        signInAt(origin, 'Ada'),
+      )
+      await expect(login(made)).rejects.toThrow(/site\.sessions\.admin\.keep/)
+      await expect(login(made)).rejects.toThrow(/Nothing was written/)
+      expect(existsSync(join(made.root, '.shotlist/admin.json'))).toBe(false)
+    },
+  )
+
+  it(
+    'keeps another host when the session says to, and says whose account that is',
+    { timeout: 120_000 },
+    async () => {
+      const made = withSignIn(
+        { verify: '#account', keep: ['localhost'] },
+        signInAt(provider.origin, 'Provider') + signInAt(origin, 'Ada'),
+      )
+      const said = await login(made)
+
+      const domains = written(made.root)
+        .cookies.map((one) => one.domain)
+        .sort()
+      expect(domains).toEqual(['127.0.0.1', 'localhost'])
+      expect(said).toMatch(/`site\.sessions\.admin\.keep` names localhost/)
+      expect(said).toMatch(/signs in as whoever those hosts know you as/)
     },
   )
 

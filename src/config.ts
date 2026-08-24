@@ -106,6 +106,19 @@ const SessionOptions = z
      * rather than failing, and every shot of the run becomes the sign-in form.
      */
     verify: z.string().optional(),
+    /**
+     * Hosts whose cookies this session keeps besides the site's own.
+     *
+     * A sign-in through an identity provider collects that provider's session, and it is
+     * dropped: those cookies are the account itself, and a shot never sends them
+     * anywhere. Naming a host here says the sign-in genuinely needs it — and says so
+     * knowing that the file then signs in as whoever that host knows you as. `--login`
+     * says out loud what it kept because of this.
+     *
+     * Widening, so it is honored the way `site.allow` is: an `--untrusted` run loads no
+     * session at all, so there is nothing here for a config nobody vouched for to widen.
+     */
+    keep: z.array(z.string()).default([]),
   })
   .strict()
 

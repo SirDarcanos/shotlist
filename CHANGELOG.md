@@ -86,11 +86,36 @@ expected string, received number`. The branch a step is written against always r
   everything under it, plus `site.allow`. Both directions of the domain tree, because a
   cookie set on `example.com` is sent to `app.example.com` and a shot list covering only
   the app still needs it; local storage is per-origin and gets the plain test. `--login`
-  names what it left out, so a session that really does live on another host says which
-  one to add to `site.allow`.
+  names what it left out, so a session that really does live on another host names the
+  host — see `keep` below.
 
   A file written by an older version is narrowed as it is loaded, so the extra cookies
   never reach a browser again, and it is rewritten narrow the next time `--login` runs.
+
+- **`--login` proves the session it is about to write still signs in.** The check after a
+  sign-in was of the browser, which is holding everything the round trip collected; what
+  gets written is less than that, and for an app whose session lives on a host that was
+  dropped, less is not enough. The narrowed state is loaded into a context of its own and
+  asked for the session's `verify` selector before anything reaches the disk, so that case
+  is one error naming the host rather than a run of screenshots of the sign-in form. Only
+  when something was dropped, and only when the session has a `verify` — without one there
+  is nothing to ask, and `--login` says that too.
+
+- **`keep` on a session**, for the app whose sign-in really does need a provider's cookies:
+
+  ```yaml
+  site:
+    sessions:
+      admin:
+        path: .shotlist/admin.json
+        verify: '#account'
+        keep: [accounts.google.com]
+  ```
+
+  Named hosts are kept on the way in and on the way out, and `--login` says out loud every
+  time that the file now holds that account as well — because it does, and the point of
+  the default is that nobody arrives at it by accident. Widening, so it goes the way
+  `site.allow` goes: an `--untrusted` run is refused a session before this is read at all.
 
 ## [0.4.2] — 2026-08-10
 

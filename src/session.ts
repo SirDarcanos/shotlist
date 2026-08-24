@@ -11,13 +11,15 @@ import type { Library } from './recipe.js'
 import { runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
 import { loadPlaywright } from './playwright.js'
-import type { Page } from './playwright.js'
+import type { Browser, Page } from './playwright.js'
 
 /** A session as the run needs it: where it lives, and what proves it still works. */
 export interface Session {
   name: string
   file: string
   verify?: string
+  /** Hosts this session keeps cookies for besides the site's own, from `keep`. */
+  keep: readonly string[]
 }
 
 /** Find a session by name, with the path checked the way every other path is. */
@@ -35,7 +37,12 @@ export function sessionFor(loaded: LoadedConfig, name: string, where: string): S
   if (loaded.trust) checkSession(loaded.trust, name, where)
   const file = fromRoot(loaded, declared.path)
   if (loaded.trust) checkPath(loaded.trust, file, `site.sessions.${name}`)
-  return { name, file, ...(declared.verify ? { verify: declared.verify } : {}) }
+  return {
+    name,
+    file,
+    keep: declared.keep,
+    ...(declared.verify ? { verify: declared.verify } : {}),
+  }
 }
 
 /** Cookies and local storage, in the shape Playwright hands back and takes again. */
@@ -52,9 +59,16 @@ export interface Dropped {
   hosts: string[]
 }
 
-/** The hosts a session may hold state for: the ones this run is allowed to open. */
-export function sessionHosts(loaded: LoadedConfig): readonly string[] {
-  return loaded.trust?.hosts ?? hostsFor(loaded.config.site.url, loaded.config.site.allow)
+/**
+ * The hosts a session may hold state for.
+ *
+ * The ones this run is allowed to open, plus whatever the session's own `keep` names —
+ * which is the config widening its reach, and safe here because an `--untrusted` run is
+ * refused a session by `checkSession` before it ever gets this far.
+ */
+export function sessionHosts(loaded: LoadedConfig, session: Session): readonly string[] {
+  const site = loaded.trust?.hosts ?? hostsFor(loaded.config.site.url, loaded.config.site.allow)
+  return [...site, ...session.keep]
 }
 
 /** The hostname of an origin, or an empty string when it is not one — which never matches. */
@@ -77,9 +91,8 @@ function hostnameOf(origin: unknown): string {
  * credential, no shot ever sends them anywhere, and a file holding them is a much larger
  * secret than the one it was written for.
  *
- * Kept is what a run would send to a host it is allowed to open — `site.url` and
- * everything under it, plus `site.allow` — which is the same test `checkUrl` applies to a
- * navigation, so a session covers exactly the site the shot list covers.
+ * Kept is what a browser would send to one of `hosts`, which `sessionHosts` builds from
+ * the site the run may open and the session's own `keep`.
  */
 export function narrowSession(
   state: unknown,
@@ -122,11 +135,11 @@ export function narrowSession(
 }
 
 /**
- * What was left out of a session, in one line.
+ * What a session left behind, as a phrase.
  *
- * Worth saying rather than doing quietly: a site whose session really does live on
- * another host now signs in and shoots the signed-out page, and the host it needs is the
- * one named here.
+ * Said rather than done quietly, and said the same way in the report and in the failure:
+ * an app whose session really does live on another host is the one case this narrowing
+ * breaks, and the host it needs is the one named here.
  */
 function leftOut(dropped: Dropped): string {
   const counted = [
@@ -135,10 +148,50 @@ function leftOut(dropped: Dropped): string {
   ].join(' and ')
   const named = dropped.hosts.slice(0, 3).join(', ')
   const rest = dropped.hosts.length > 3 ? `, and ${dropped.hosts.length - 3} more` : ''
+  return `${counted} for ${named}${rest}`
+}
+
+/** What `keep` held on to, said every time, because it is somebody's account. */
+function kept(session: Session): string {
   return (
-    `left out ${counted} for ${named}${rest}, which are not this site — ` +
-    'name a host in `site.allow` if signing in needs it.'
+    `\`site.sessions.${session.name}.keep\` names ${session.keep.join(', ')}, so this file ` +
+    'also holds their cookies — it signs in as whoever those hosts know you as'
   )
+}
+
+/**
+ * Check the narrowed state still signs in, in a context that holds nothing else.
+ *
+ * The verify after the sign-in was of a browser carrying everything the round trip
+ * collected; this is of what will actually be on disk. An app whose session lives on a
+ * host that got dropped passes the first and fails this one, and finding that out here is
+ * the difference between one clear error and every shot of the next run being the
+ * sign-in form.
+ */
+async function proveSession(
+  browser: Browser,
+  loaded: LoadedConfig,
+  session: Session,
+  state: StorageState,
+  dropped: Dropped,
+): Promise<void> {
+  const { site } = loaded.config
+  const context = await browser.newContext({ viewport: site.viewport, storageState: state })
+  try {
+    const page = await context.newPage()
+    await page.goto(site.url, { waitUntil: 'load' })
+    await page.waitForSelector(session.verify!, { timeout: site.timeout })
+  } catch {
+    throw new ShotlistError(
+      `--login ${session.name}: the sign-in worked and what is left of it does not — ` +
+        `"${session.verify}" never appeared at ${site.url} once ${leftOut(dropped)} were ` +
+        'left out. ' +
+        `If signing in really needs one of them, add it to \`site.sessions.${session.name}.keep\`, ` +
+        'knowing the file then holds that account too. Nothing was written.',
+    )
+  } finally {
+    await context.close()
+  }
 }
 
 /** The state Playwright takes, or an error naming the command that writes it. */
@@ -160,7 +213,7 @@ export function readSession(loaded: LoadedConfig, session: Session): StorageStat
   }
   // A file written before this narrowed anything still holds whatever the sign-in swept
   // up, and loading it hands those cookies back to a browser that will send them.
-  return narrowSession(parsed, sessionHosts(loaded)).state
+  return narrowSession(parsed, sessionHosts(loaded, session)).state
 }
 
 /** Make sure the directory a session is about to be written into exists. */
@@ -233,14 +286,33 @@ export async function signIn(
         )
       }
     }
-    const { state, dropped } = narrowSession(await context.storageState(), sessionHosts(loaded))
+    const hosts = sessionHosts(loaded, session)
+    const { state, dropped } = narrowSession(await context.storageState(), hosts)
+
+    // The check above was of the browser, which still holds everything the sign-in
+    // collected. What gets written is less than that, and less might not be enough — so
+    // the narrowed state is loaded into a context of its own and asked the same question.
+    // Before the file is written, so a session that does not work leaves nothing behind.
+    if ((dropped.cookies || dropped.origins) && session.verify) {
+      await proveSession(browser, loaded, session, state, dropped)
+    }
+
     // Anyone holding this file is signed in as that account. `mode` is only honored for a
     // file being created, so an existing one — written at the default umask 0644 by an
     // older version, and readable by every other account on the machine — is set as well.
     writeFileSync(session.file, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 })
     chmodSync(session.file, 0o600)
     options.say(`  ✓ wrote ${session.file}`)
-    if (dropped.cookies || dropped.origins) options.say(`    ${leftOut(dropped)}`)
+    if (dropped.cookies || dropped.origins) {
+      options.say(`    left out ${leftOut(dropped)}, which are not this site`)
+      if (!session.verify) {
+        options.say(
+          `    ! this session has no \`verify\` selector, so nothing checked that what was ` +
+            'kept still signs in',
+        )
+      }
+    }
+    if (session.keep.length) options.say(`    ! ${kept(session)}`)
   } finally {
     await browser.close()
   }
