@@ -102,6 +102,7 @@ and `webp`, per project or per recipe.
 | [Macros and data files](https://shotlist.dev/docs/reference/macros-and-data)                     | Sharing setup, driving a shot from a list     |
 | [Command line](https://shotlist.dev/docs/reference/cli)                                          | Every flag, the API, editor and agent support |
 | [Keeping a screenshot current](https://shotlist.dev/docs/tutorials/keeping-a-screenshot-current) | `--check`, diffs, and a shot that changes     |
+| [Undo what a shot changed](https://shotlist.dev/docs/how-to/undo-what-a-shot-changed)            | `teardown`, for a recipe that writes          |
 | [What a configuration can do](https://shotlist.dev/docs/explanation/security-model)              | What a run is allowed to reach                |
 
 ## Commands
