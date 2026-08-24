@@ -517,7 +517,7 @@ export async function shoot(
         deviceScaleFactor: settings.scale,
         colorScheme: settings.theme,
         reducedMotion: config.site.reducedMotion ? 'reduce' : 'no-preference',
-        ...(session ? { storageState: readSession(session) } : {}),
+        ...(session ? { storageState: readSession(loaded, session) } : {}),
       })
       try {
         const page = await context.newPage()

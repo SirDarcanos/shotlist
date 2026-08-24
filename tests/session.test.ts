@@ -10,6 +10,7 @@ import {
   interpolate,
   loadConfig,
   loadLibrary,
+  narrowSession,
   parseConfig,
   readSession,
   sessionFor,
@@ -17,39 +18,54 @@ import {
   signIn,
   trustFrom,
 } from '../src/index.js'
-import type { LoadedConfig } from '../src/index.js'
+import type { LoadedConfig, StorageState } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SITE = 'https://example.com/'
 
-/** Serve the fixture directory, because a `file:` origin keeps no cookies. */
-let server: Server
+/**
+ * Serve the fixture directory, because a `file:` origin keeps no cookies.
+ *
+ * Two of these run under names that are genuinely different hosts, so a sign-in can pass
+ * through one and leave its cookies behind — which is what a round trip through an
+ * identity provider does, and a port would not reproduce: a cookie jar is keyed on the
+ * host and ignores the port entirely.
+ */
+function serve(host: string): Promise<{ origin: string; close: () => Promise<void> }> {
+  return new Promise((ready) => {
+    const server: Server = createServer((request, response) => {
+      const { pathname } = new URL(request.url ?? '/', 'http://localhost')
+      try {
+        response.end(readFileSync(join(HERE, 'fixture', pathname.replace(/^\/+/, ''))))
+      } catch {
+        response.statusCode = 404
+        response.end('not found')
+      }
+    })
+    server.listen(0, host, () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+      ready({
+        origin: `http://${host}:${port}`,
+        close: () => new Promise((done) => server.close(() => done())),
+      })
+    })
+  })
+}
+
+let site: Awaited<ReturnType<typeof serve>>
+let provider: Awaited<ReturnType<typeof serve>>
 let origin: string
 
-beforeAll(
-  () =>
-    new Promise<void>((ready) => {
-      server = createServer((request, response) => {
-        const { pathname } = new URL(request.url ?? '/', 'http://localhost')
-        try {
-          response.end(readFileSync(join(HERE, 'fixture', pathname.replace(/^\/+/, ''))))
-        } catch {
-          response.statusCode = 404
-          response.end('not found')
-        }
-      })
-      server.listen(0, '127.0.0.1', () => {
-        const address = server.address()
-        origin = `http://127.0.0.1:${typeof address === 'object' && address ? address.port : 0}`
-        ready()
-      })
-    }),
-)
+beforeAll(async () => {
+  ;[site, provider] = await Promise.all([serve('127.0.0.1'), serve('localhost')])
+  origin = site.origin
+})
 
 afterAll(async () => {
   removeProjects()
-  await new Promise((done) => server.close(done))
+  await Promise.all([site?.close(), provider?.close()])
 })
 
 const KEPT = { ...process.env }
@@ -158,14 +174,16 @@ describe('a recipe naming a session', () => {
 describe('a session that is not there yet', () => {
   it('names the command that writes it, rather than reporting a missing file', () => {
     const { loaded } = project()
-    expect(() => readSession(sessionFor(loaded, 'admin', 'x'))).toThrow(/shotlist --login admin/)
+    expect(() => readSession(loaded, sessionFor(loaded, 'admin', 'x'))).toThrow(
+      /shotlist --login admin/,
+    )
   })
 
   it('says the same when the file is there but is not a session', () => {
     const { loaded, root } = project()
     mkdirSync(join(root, '.shotlist'), { recursive: true })
     writeFileSync(join(root, '.shotlist/admin.json'), 'not json')
-    expect(() => readSession(sessionFor(loaded, 'admin', 'x'))).toThrow(/--login admin/)
+    expect(() => readSession(loaded, sessionFor(loaded, 'admin', 'x'))).toThrow(/--login admin/)
   })
 })
 
@@ -296,7 +314,169 @@ describe('an untrusted run', () => {
   })
 })
 
+describe('what a session keeps', () => {
+  const SITE_HOSTS = ['app.example.com']
+
+  /** A state shaped the way Playwright writes one. */
+  const state = (cookies: Array<{ domain: string }>, origins: Array<{ origin: string }> = []) => ({
+    cookies: cookies.map((one) => ({ name: 'sid', value: 'x', path: '/', ...one })),
+    origins: origins.map((one) => ({ localStorage: [{ name: 'token', value: 'x' }], ...one })),
+  })
+
+  const domainsIn = (result: ReturnType<typeof narrowSession>) =>
+    result.state.cookies.map((one) => one.domain)
+
+  it('drops the provider session an OAuth round trip swept up', () => {
+    const result = narrowSession(
+      state([
+        { domain: 'app.example.com' },
+        { domain: '.google.com' },
+        { domain: 'accounts.google.com' },
+        { domain: '.youtube.com' },
+      ]),
+      SITE_HOSTS,
+    )
+    expect(domainsIn(result)).toEqual(['app.example.com'])
+    expect(result.dropped.cookies).toBe(3)
+    expect(result.dropped.hosts).toEqual(['google.com', 'accounts.google.com', 'youtube.com'])
+  })
+
+  it('keeps a cookie set on the apex, which is where a session cookie usually is', () => {
+    // The site is `app.example.com` and the cookie is `.example.com`: dropping it is
+    // dropping the sign-in itself, which is the way this narrowing breaks a project.
+    expect(domainsIn(narrowSession(state([{ domain: '.example.com' }]), SITE_HOSTS))).toEqual([
+      '.example.com',
+    ])
+  })
+
+  it('keeps a cookie on a host under the site, because the run may open one', () => {
+    expect(
+      domainsIn(narrowSession(state([{ domain: 'api.example.com' }]), ['example.com'])),
+    ).toEqual(['api.example.com'])
+  })
+
+  it('drops a host that only ends the same way', () => {
+    // The two that a bare `endsWith` in either direction lets through: a name whose last
+    // label boundary falls in the middle of the site's, and a longer name it prefixes.
+    const result = narrowSession(
+      state([
+        { domain: 'evil-app.example.com' },
+        { domain: 'app.example.com.evil.test' },
+        { domain: 'notexample.com' },
+      ]),
+      SITE_HOSTS,
+    )
+    expect(domainsIn(result)).toEqual([])
+    expect(result.dropped.cookies).toBe(3)
+    expect(
+      domainsIn(narrowSession(state([{ domain: 'notexample.com' }]), ['example.com'])),
+    ).toEqual([])
+  })
+
+  it('keeps a host the config named in site.allow', () => {
+    const hosts = ['app.example.com', 'auth.partner.test']
+    expect(domainsIn(narrowSession(state([{ domain: 'auth.partner.test' }]), hosts))).toEqual([
+      'auth.partner.test',
+    ])
+  })
+
+  it('keeps local storage for the site and its subdomains, and no other origin', () => {
+    const result = narrowSession(
+      state(
+        [],
+        [
+          { origin: 'https://app.example.com' },
+          { origin: 'https://inner.app.example.com' },
+          { origin: 'https://accounts.google.com' },
+          { origin: 'not a url' },
+        ],
+      ),
+      SITE_HOSTS,
+    )
+    expect(result.state.origins.map((one) => one.origin)).toEqual([
+      'https://app.example.com',
+      'https://inner.app.example.com',
+    ])
+    expect(result.dropped.origins).toBe(2)
+  })
+
+  it('does not share local storage up the domain tree the way a cookie is shared', () => {
+    // `.example.com` is a cookie `app.example.com` is sent; `https://example.com` is an
+    // origin it cannot read. The two rules differ on purpose.
+    const both = narrowSession(
+      state([{ domain: '.example.com' }], [{ origin: 'https://example.com' }]),
+      SITE_HOSTS,
+    )
+    expect(both.state.cookies).toHaveLength(1)
+    expect(both.state.origins).toHaveLength(0)
+  })
+
+  it('reads a file that is not a state at all as holding nothing', () => {
+    expect(narrowSession('nonsense', SITE_HOSTS).state).toEqual({ cookies: [], origins: [] })
+    expect(narrowSession(null, SITE_HOSTS).state).toEqual({ cookies: [], origins: [] })
+  })
+
+  it('narrows a file written before it did, when that file is loaded', () => {
+    const { loaded, root } = project()
+    mkdirSync(join(root, '.shotlist'), { recursive: true })
+    writeFileSync(
+      join(root, '.shotlist/admin.json'),
+      JSON.stringify(state([{ domain: '127.0.0.1' }, { domain: '.google.com' }])),
+    )
+    const read = readSession(loaded, sessionFor(loaded, 'admin', 'x'))
+    expect(read.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
+  })
+})
+
 describe('--login', () => {
+  it(
+    'writes none of what a round trip through another host left in the browser',
+    { timeout: 120_000 },
+    async () => {
+      const { loaded, root } = project({ verify: '#account' })
+      // The operator's own config, which is the only way `--login` is ever run: nothing
+      // checks the URLs a sign-in walks through, exactly as nothing checks the redirects
+      // an identity provider issues. It also puts `sessionHosts` on its fallback.
+      delete loaded.trust
+      writeFileSync(
+        join(root, 'macros', 'via-provider.yaml'),
+        `steps:
+  - goto: ${provider.origin}/signin.html
+  - fill: { css: '#username' }
+    value: Provider
+  - fill: { css: '#password' }
+    value: hunter2
+  - click: { css: '#signin' }
+  - goto: ${origin}/signin.html
+  - fill: { css: '#username' }
+    value: Ada
+  - fill: { css: '#password' }
+    value: hunter2
+  - click: { css: '#signin' }
+`,
+      )
+      const library = loadLibrary({
+        recipes: join(root, 'recipes'),
+        macros: join(root, 'macros'),
+        data: join(root, 'data'),
+        finders: {},
+      })
+      const said: string[] = []
+      await signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+        using: 'via-provider',
+        say: (line) => said.push(line),
+      })
+
+      const written = JSON.parse(
+        readFileSync(join(root, '.shotlist/admin.json'), 'utf8'),
+      ) as StorageState
+      expect(written.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
+      // Signed in as Ada rather than as Provider: the site's own cookie survived.
+      expect(JSON.stringify(written)).toContain('Ada')
+      expect(said.join('\n')).toMatch(/left out 1 cookie for localhost/)
+    },
+  )
+
   it(
     'signs in with a macro, and writes a session that a later shot is signed in by',
     { timeout: 120_000 },
@@ -317,7 +497,7 @@ describe('--login', () => {
       expect(existsSync(file)).toBe(true)
       expect(said.join('\n')).toContain(file)
       // The cookie is what the next run is signed in by, so it has to be in there.
-      expect(JSON.stringify(readSession(sessionFor(loaded, 'admin', 'x')))).toContain(
+      expect(JSON.stringify(readSession(loaded, sessionFor(loaded, 'admin', 'x')))).toContain(
         'fixture-session',
       )
       // Windows has no mode bits to set, so there is nothing to assert there.

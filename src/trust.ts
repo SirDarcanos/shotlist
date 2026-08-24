@@ -104,7 +104,7 @@ function refuse(where: string, part: string): ShotlistError {
 }
 
 /** Whether a host is the one named, or something under it. */
-function covers(pattern: string, host: string): boolean {
+export function covers(pattern: string, host: string): boolean {
   const wanted = pattern.replace(/^\*\./, '').toLowerCase()
   const found = host.toLowerCase()
   return found === wanted || found.endsWith(`.${wanted}`)

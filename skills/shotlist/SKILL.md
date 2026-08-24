@@ -217,6 +217,12 @@ site:
     admin: { path: .shotlist/admin.json, verify: '#account' }
 ```
 
+The file keeps this site's cookies and nothing else. Signing in through Google or another
+provider leaves that provider's session in the browser as well, and none of it is written
+— those cookies are the account itself rather than a screenshot credential. Where a
+session genuinely lives on another host, name that host in `site.allow`; `--login` says
+what it left out, so a sign-in that stops working names the host to add.
+
 A recipe picks one by name, and the shot is taken as whoever that is:
 
 ```yaml

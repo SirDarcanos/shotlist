@@ -58,6 +58,10 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   recipe affected by this was already getting nothing out of them. Drop the steps, or drop
   `source: file`.
 
+- **`readSession` takes the loaded config first**, because narrowing a session needs to
+  know what the site is. A project calling the API rather than the command line passes
+  `readSession(loaded, session)`.
+
 ### Fixed
 
 - **A known verb with a bad value reported every branch of the step union.** `press: 5`
@@ -67,6 +71,26 @@ expected string, received number`. The branch a step is written against always r
   verb it was given; picking the branch that way, the way `checkVerb` already does before
   zod runs, was the fix `numbered: Unrecognized key: "badgee"` in 0.4.0 needed but did not
   cover.
+
+### Security
+
+- **A session file holds this site's cookies and nothing else.** `--login` wrote back
+  everything the browser had collected, so a sign-in that goes through an identity
+  provider saved that provider's session too: one round trip through Google left 41
+  cookies for `google.com`, `accounts.google.com`, `google.ro` and `youtube.com` in a
+  16.9 KB file whose whole purpose was one site's session. Those cookies are the person's
+  actual account, they outlive the password, and no shot ever sends them anywhere — a
+  file gitignore protects from a commit and from nothing else.
+
+  Kept now is what a run would send to a host it is allowed to open: `site.url` and
+  everything under it, plus `site.allow`. Both directions of the domain tree, because a
+  cookie set on `example.com` is sent to `app.example.com` and a shot list covering only
+  the app still needs it; local storage is per-origin and gets the plain test. `--login`
+  names what it left out, so a session that really does live on another host says which
+  one to add to `site.allow`.
+
+  A file written by an older version is narrowed as it is loaded, so the extra cookies
+  never reach a browser again, and it is rewritten narrow the next time `--login` runs.
 
 ## [0.4.2] — 2026-08-10
 

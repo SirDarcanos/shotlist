@@ -66,14 +66,15 @@ export {
   checkPath,
   checkSession,
   checkUrl,
+  covers,
   envFor,
   hostsFor,
   secretIn,
   trustFrom,
 } from './trust.js'
 export type { Trust } from './trust.js'
-export { readSession, sessionFor, signIn } from './session.js'
-export type { Session } from './session.js'
+export { narrowSession, readSession, sessionFor, sessionHosts, signIn } from './session.js'
+export type { Dropped, Session, StorageState } from './session.js'
 export { startServer, tokenize, withServer } from './serve.js'
 export type { Server } from './serve.js'
 export { countDocuments, formatProblems, lint } from './lint.js'
