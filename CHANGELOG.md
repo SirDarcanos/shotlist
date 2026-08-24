@@ -10,6 +10,16 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A known verb with a bad value reported every branch of the step union.** `press: 5`
+  printed one line per verb — some twenty-odd — instead of `setup.0.press: Invalid input:
+expected string, received number`. The branch a step is written against always reports
+  fewer unrecognized keys than every branch it is not, because only that branch knows the
+  verb it was given; picking the branch that way, the way `checkVerb` already does before
+  zod runs, was the fix `numbered: Unrecognized key: "badgee"` in 0.4.0 needed but did not
+  cover.
+
 ## [0.4.2] — 2026-08-10
 
 ### Security

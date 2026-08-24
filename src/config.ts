@@ -343,14 +343,12 @@ function explain(
               (each.code === 'invalid_type' || each.code === 'invalid_value') && !each.path.length,
           ),
       )
-      // Of what is left, a branch complaining only about extra keys knew everything else
-      // that was written — and the one that knew most of it names the fewest.
-      const shapely = branches.filter((branch) =>
-        branch.every((each) => each.code === 'unrecognized_keys'),
-      )
-      const chosen = shapely.length
-        ? [shapely.reduce((best, branch) => (unknownIn(branch) < unknownIn(best) ? branch : best))]
-        : branches
+      // Of what is left, the branch being written is the one that did not have to
+      // reject one of the author's own keys as unrecognized: every other branch rejects
+      // the key that named the one meant, on top of whatever else it has to say about
+      // the rest of the value. checkVerb picks the same way, before zod ever runs.
+      const fewest = Math.min(...branches.map(unknownIn))
+      const chosen = branches.filter((branch) => unknownIn(branch) === fewest)
       if (chosen.length) {
         return [...new Set(chosen.flatMap((branch) => explain(branch, path, depth + 1, known)))]
       }

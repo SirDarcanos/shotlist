@@ -71,6 +71,18 @@ describe('parseRecipe', () => {
     expect(() => parseRecipe({ numbered: 5 }, { name: 'x' })).toThrow(/numbered: Invalid input/)
   })
 
+  it('reports the one step being written, not every branch of the step union', () => {
+    // Every other branch in the union rejects `press` itself as unrecognized, on top of
+    // missing its own required key — so none of them was "only" complaining about extra
+    // keys, and the old shapely-branches filter left every branch standing.
+    expect(() => parseRecipe({ setup: [{ press: 5 }] }, { name: 'x' })).toThrow(
+      /^invalid recipe —\n {2}setup\.0\.press: Invalid input: expected string, received number$/,
+    )
+    expect(() => parseRecipe({ setup: [{ repeat: 'lots', steps: [] }] }, { name: 'x' })).toThrow(
+      /^invalid recipe —\n {2}setup\.0\.repeat: Invalid input: expected number, received string$/,
+    )
+  })
+
   it('shoots once unless the recipe asks for retries', () => {
     expect(parseRecipe({}, { name: 'x' }).retries).toBe(0)
     expect(parseRecipe({ retries: 3 }, { name: 'x' }).retries).toBe(3)
