@@ -236,5 +236,5 @@ pull request, or in a service shooting what somebody submitted. A way past `--un
 a path or host check that can be walked around, or anything that gets a run to touch what
 it should not, is worth reporting privately first: use GitHub's **Report a vulnerability**
 on the Security tab rather than opening an issue. What is already known and deliberate,
-including the two things the checks do not cover, is at
+including what the checks do not cover, is at
 **[shotlist.dev/docs/explanation/security-model](https://shotlist.dev/docs/explanation/security-model)**.

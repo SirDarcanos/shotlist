@@ -135,7 +135,7 @@ writes `.env`, `.git`, `.ssh` and their like — in every mode, with no flag to 
 rest, `--untrusted` starts no processes, opens nothing on the runner's own network, and
 stays inside the project.
 
-Full detail, and the two things it does not cover, at
+Full detail, and what it does not cover, at
 **[shotlist.dev/docs/explanation/security-model](https://shotlist.dev/docs/explanation/security-model)**.
 
 ## Contributing

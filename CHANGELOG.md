@@ -62,6 +62,13 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   know what the site is. A project calling the API rather than the command line passes
   `readSession(loaded, session)`.
 
+- **The README and CONTRIBUTING no longer count what the security model does not cover.**
+  Both said "the two things", and the page they point at lists four — DNS rebinding, what
+  a browser can do at all, a hosted runner becoming a proxy for attacks on what it was
+  pointed at, and a shell reading the variables `SHOTLIST_ENV_DENY` fences off. A number
+  written in one repository about a page in another is wrong as soon as either moves, so
+  neither carries one now.
+
 ### Fixed
 
 - **A known verb with a bad value reported every branch of the step union.** `press: 5`
