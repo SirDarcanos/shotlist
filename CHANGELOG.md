@@ -10,6 +10,8 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-24
+
 ### Added
 
 - **`dialog: accept` and `dialog: dismiss`**, for the dialogs the browser draws itself —
@@ -560,7 +562,8 @@ The layers that turn a validated recipe into a PNG — running steps against Pla
 drawing the callouts, capturing and installing, and `--check` for staleness — plus the
 `shotlist` CLI itself. The README documents them; nothing in 0.0.1 runs them.
 
-[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.4.2...HEAD
+[unreleased]: https://github.com/SirDarcanos/shotlist/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/SirDarcanos/shotlist/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/SirDarcanos/shotlist/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/SirDarcanos/shotlist/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/SirDarcanos/shotlist/compare/v0.3.0...v0.4.0
