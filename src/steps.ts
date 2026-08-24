@@ -7,6 +7,13 @@ import type { QueryInput, Rect } from './query.js'
 import type { ResolvedStep, StepInput } from './recipe.js'
 import type { ElementHandle, Frame, Page, QueryTarget } from './playwright.js'
 
+/** How the run answers the browser's own dialogs, from the `dialog:` step onwards. */
+export interface DialogPolicy {
+  action: 'accept' | 'dismiss'
+  /** What a `prompt()` is answered with. An `alert` or a `confirm` has nothing to type. */
+  value?: string
+}
+
 /** What the runner carries between steps: the pages open, and what has been read so far. */
 export interface RunContext {
   pages: Map<string, Page>
@@ -18,6 +25,30 @@ export interface RunContext {
   newPage(): Promise<Page>
   /** What this recipe may reach, when the operator said the config is not theirs. */
   trust?: Trust
+  /** Set by `dialog:`. Unset, nothing is listening and the browser's own default holds. */
+  dialog?: DialogPolicy
+}
+
+/** Pages already answering from the run's policy, so a listener is added once each. */
+const ANSWERING = new WeakSet<Page>()
+
+/**
+ * Have this page answer its dialogs the way the run currently says to.
+ *
+ * A dialog blocks the script that opened it, and Playwright dismisses one when nothing is
+ * listening — which is why a `confirm()` behind a click silently took the cancel branch
+ * before there was a verb for this. The handler reads the policy as the dialog arrives
+ * rather than closing over it, so a later `dialog:` step changes what an already-wired
+ * page does, and both a page and the dialog can be gone by the time the answer lands.
+ */
+function answerDialogs(page: Page, ctx: RunContext): void {
+  if (ANSWERING.has(page)) return
+  ANSWERING.add(page)
+  page.on('dialog', (dialog) => {
+    const policy = ctx.dialog
+    const answered = policy?.action === 'accept' ? dialog.accept(policy.value) : dialog.dismiss()
+    void answered.catch(() => {})
+  })
 }
 
 const LOCATOR_SOURCES = ['role', 'label', 'placeholder', 'testid'] as const
@@ -218,6 +249,9 @@ async function runStep(
   const step = interpolate(own, scope) as StepInput
   const opts = { timeout: ctx.timeout }
   const page = ctx.page
+  // Here rather than in the `dialog:` branch, because a page opened or switched to after
+  // the policy was set has to answer the same way, and every step passes through here.
+  if (ctx.dialog) answerDialogs(page, ctx)
 
   const query = (key: string) => step[key] as QueryInput
   const text = (key: string) => String(step[key])
@@ -291,6 +325,17 @@ async function runStep(
       return
     }
     await waitFor(page, query('wait'), ctx)
+    return
+  }
+  if ('dialog' in step) {
+    // Standing rather than armed for the next one: a recipe that accepts a dialog once
+    // usually accepts every dialog after it, and `dialog: dismiss` is how it stops. An
+    // arm that no dialog ever consumed would sit waiting for an unrelated one instead.
+    ctx.dialog = {
+      action: text('dialog') as DialogPolicy['action'],
+      ...(step['value'] === undefined ? {} : { value: text('value') }),
+    }
+    answerDialogs(page, ctx)
     return
   }
   if ('readValue' in step) {

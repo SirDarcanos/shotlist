@@ -30,6 +30,10 @@
     <button id="btnDouble">Double</button>
     <button id="btnHover">Hover</button>
 
+    <button id="btnConfirm">Confirm</button>
+    <button id="btnPrompt">Prompt</button>
+    <button id="btnAlert">Alert</button>
+
     <label for="inpPreset">Preset</label>
     <input id="inpPreset" value="already here" />
 
@@ -55,6 +59,19 @@
       }
       btnDouble.addEventListener('dblclick', () => note('doubled'))
       btnHover.addEventListener('mouseenter', () => note('hovered'))
+      // Each records which branch it took, so a test can tell an accepted dialog from a
+      // dismissed one — the two differ only in what the page does next.
+      btnConfirm.addEventListener('click', () => {
+        note(confirm('Delete this?') ? 'confirmed' : 'cancelled')
+      })
+      btnPrompt.addEventListener('click', () => {
+        const answer = prompt('Name?')
+        note(`prompt=${answer === null ? 'none' : answer}`)
+      })
+      btnAlert.addEventListener('click', () => {
+        alert('Saved.')
+        note('alerted')
+      })
       inpTyped.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') note('entered')
       })

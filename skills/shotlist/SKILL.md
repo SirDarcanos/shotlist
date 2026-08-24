@@ -102,6 +102,26 @@ same queries: `click: { frame: { css: 'iframe' }, css: '#pay' }`.
 `within:` naming a mark from the outer page is refused inside a frame; that rect belongs to
 a document the frame knows nothing about.
 
+## Getting past the browser's own dialogs
+
+`alert`, `confirm` and `prompt` are drawn by the browser, not by the page, so no query
+reaches one and no click closes one. Left alone they are dismissed — which means a click
+on a control guarded by `confirm()` quietly takes the cancel branch, and the shot is of
+the page that never changed. Say what to do with them before the step that raises one:
+
+```yaml
+setup:
+  - dialog: accept
+  - click: { role: button, name: Delete }
+```
+
+It stands until another `dialog:` step replaces it, so a recipe that accepts one dialog
+and dismisses the next writes both. `dialog: accept` takes a `value:` for a `prompt()`.
+
+This is the failure that looks like a working recipe: nothing errors, and the screenshot
+is simply of the wrong state. If a shot comes back looking like the click did nothing,
+this is the first thing to check.
+
 ## Masking what the shot must not check
 
 A shot holding a clock, a live total or a face differs on every re-shoot, so `--check` on

@@ -49,7 +49,7 @@ export { drawAnnotations } from './annotate.js'
 export type { AnnotationSpec, Badge, DrawStyle, Mark, Place } from './annotate.js'
 export { loadPlaywright } from './playwright.js'
 export { runSteps } from './steps.js'
-export type { RunContext } from './steps.js'
+export type { DialogPolicy, RunContext } from './steps.js'
 export { check } from './check.js'
 export type { CheckResult } from './check.js'
 export {

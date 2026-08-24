@@ -43,6 +43,10 @@ function makeStep(aliases: Readonly<Record<string, unknown>>): z.ZodType<StepInp
       z.object({ blur: Query, ...StepBase }).strict(),
       z.object({ scrollIntoView: Query, ...StepBase }).strict(),
       z.object({ wait: z.union([z.number(), Query]), ...StepBase }).strict(),
+      // Two branches rather than one with an optional `value`, so `dialog: dismiss` cannot
+      // carry a value nothing types: a key with no effect looks exactly like a broken one.
+      z.object({ dialog: z.literal('accept'), value: Ref.optional(), ...StepBase }).strict(),
+      z.object({ dialog: z.literal('dismiss'), ...StepBase }).strict(),
       z.object({ readValue: Query, as: z.string(), ...StepBase }).strict(),
       z
         .object({
@@ -94,6 +98,7 @@ export const VERBS = [
   'blur',
   'scrollIntoView',
   'wait',
+  'dialog',
   'readValue',
   'use',
   'repeat',

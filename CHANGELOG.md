@@ -10,6 +10,26 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Added
+
+- **`dialog: accept` and `dialog: dismiss`**, for the dialogs the browser draws itself —
+  `alert`, `confirm`, `prompt`. Nothing was listening for one, and Playwright dismisses a
+  dialog nothing is listening for, so a click on a control that raises `confirm()` went
+  down the cancel branch without a word and the shot was of the page that never changed:
+
+  ```yaml
+  setup:
+    - dialog: accept
+    - click: { role: button, name: Delete }
+  ```
+
+  It stands from the step that sets it until another replaces it, rather than arming the
+  next dialog only — a recipe that accepts one usually accepts the rest, and an arm no
+  dialog ever consumed would be waiting for an unrelated one later in the run. A page
+  opened after it answers the same way. `dialog: accept` takes a `value:`, which is what a
+  `prompt()` is answered with; `dismiss` takes none, because a dialog being closed has
+  nothing to type into.
+
 ### Fixed
 
 - **A known verb with a bad value reported every branch of the step union.** `press: 5`

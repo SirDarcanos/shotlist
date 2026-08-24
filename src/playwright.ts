@@ -48,8 +48,23 @@ export interface Frame extends QueryTarget {
   url(): string
 }
 
+/**
+ * One of the browser's own dialogs — `alert`, `confirm`, `prompt`, `beforeunload`.
+ *
+ * Not part of the page, so no query reaches one: it is drawn by the browser, it blocks
+ * the script that opened it, and the only way past it is to answer it.
+ */
+export interface Dialog {
+  type(): string
+  message(): string
+  /** `promptText` is what a `prompt()` is answered with, and nothing to the other kinds. */
+  accept(promptText?: string): Promise<void>
+  dismiss(): Promise<void>
+}
+
 export interface Page extends QueryTarget {
   goto(url: string, options?: Record<string, unknown>): Promise<unknown>
+  on(event: 'dialog', handler: (dialog: Dialog) => void): void
   setContent(html: string, options?: Record<string, unknown>): Promise<void>
   setViewportSize(size: { width: number; height: number }): Promise<void>
   waitForSelector(selector: string, options?: Record<string, unknown>): Promise<unknown>

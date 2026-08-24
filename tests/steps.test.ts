@@ -160,6 +160,77 @@ describe('control-flow verbs', () => {
   })
 })
 
+describe('dialog', () => {
+  it("takes the browser's own default when a recipe says nothing, which is to dismiss", async () => {
+    // Not the behavior anybody wants, but it is the behavior every recipe written before
+    // this verb has: a `confirm()` behind a click goes down the cancel branch in silence.
+    const { page } = await run([{ click: { css: '#btnConfirm' } }])
+    expect(await logOf(page)).toBe('cancelled')
+    await page.close()
+  })
+
+  it('accepts the confirm a later click raises', async () => {
+    const { page } = await run([{ dialog: 'accept' }, { click: { css: '#btnConfirm' } }])
+    expect(await logOf(page)).toBe('confirmed')
+    await page.close()
+  })
+
+  it('stands until another dialog step replaces it', async () => {
+    const { page } = await run([
+      { dialog: 'accept' },
+      { click: { css: '#btnConfirm' } },
+      { click: { css: '#btnConfirm' } },
+      { dialog: 'dismiss' },
+      { click: { css: '#btnConfirm' } },
+    ])
+    expect(await logOf(page)).toBe('confirmed confirmed cancelled')
+    await page.close()
+  })
+
+  it('answers a prompt with the value, and with nothing typed when there is none', async () => {
+    const { page } = await run([
+      { dialog: 'accept', value: 'Ada' },
+      { click: { css: '#btnPrompt' } },
+      { dialog: 'accept' },
+      { click: { css: '#btnPrompt' } },
+      { dialog: 'dismiss' },
+      { click: { css: '#btnPrompt' } },
+    ])
+    expect(await logOf(page)).toBe('prompt=Ada prompt= prompt=none')
+    await page.close()
+  })
+
+  it('gets past an alert, which blocks the page until something answers it', async () => {
+    const { page } = await run([{ dialog: 'accept' }, { click: { css: '#btnAlert' } }])
+    expect(await logOf(page)).toBe('alerted')
+    await page.close()
+  })
+
+  it('answers on a page opened after it was set', async () => {
+    const { page, ctx } = await run([
+      { dialog: 'accept' },
+      { openPage: VERBS, as: 'second' },
+      { click: { css: '#btnConfirm' } },
+    ])
+    const second = ctx.pages.get('second')!
+    expect(await logOf(second)).toBe('confirmed')
+    await second.close()
+    await page.close()
+  })
+
+  it('refuses a value on dismiss, which types nothing anywhere', async () => {
+    expect(() =>
+      parseRecipe({ setup: [{ dialog: 'dismiss', value: 'Ada' }] }, { name: 'x' }),
+    ).toThrow()
+  })
+
+  it('refuses a word that is neither', async () => {
+    expect(() => parseRecipe({ setup: [{ dialog: 'accpet' }] }, { name: 'x' })).toThrow(
+      /expected "accept"/,
+    )
+  })
+})
+
 describe('navigation verbs', () => {
   it('goes to another page', async () => {
     const { page } = await run([{ goto: INDEX }, { click: { css: '.row button' } }])
