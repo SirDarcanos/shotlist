@@ -1,11 +1,7 @@
-This project keeps a single source of truth for contributors and agents alike in
-**`CONTRIBUTING.md`**.
+# Claude
 
-👉 **Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before working in this codebase.** Setup,
-the commands, the rules, where things live and what "done" means are all there.
+Read [`AGENTS.md`](./AGENTS.md). It is the canonical agent entry point and links to the
+human contributor guide and branch-specific agent context.
 
-Then read [`AGENTS.md`](./AGENTS.md) for what does not belong in a contributor's guide:
-what shotlist is for, why the recipe format is closed, and the traps this codebase has.
-
-Do not add separate guidance here — update one of those two instead, so they never drift
-apart.
+Keep agent guidance in `AGENTS.md` or the documents it points to, so this compatibility
+file cannot drift into a second set of instructions.

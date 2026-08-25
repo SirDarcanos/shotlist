@@ -2,10 +2,10 @@
 
 Bug reports, recipes that don't work, and missing vocabulary are all welcome.
 
-Everything you need is in this file: setup, the commands, the code style, what "done"
-means, and how a release is cut. You should not have to read anything else to open a good
-pull request. [`AGENTS.md`](./AGENTS.md) has the reasoning behind the rules and the traps
-this codebase has — worth a read once you are deeper in, but not a prerequisite.
+This is the human contributor guide: setup, commands, rules, repository layout, what
+"done" means, and how a release is cut. It contains everything needed to open a good pull
+request. Agents start at [`AGENTS.md`](./AGENTS.md), which routes them back here for this
+workflow and into branch-specific context only when the work needs it.
 
 ## Setup
 
@@ -60,18 +60,15 @@ One concern per pull request. Commit subjects are `Area: what changed` — imper
 sentence case after the prefix. The body explains why. The project is MIT; the LICENSE
 file is the whole of it, so source files carry no license headers.
 
-## Contributing with AI
+## Working with an agent
 
-AI-assisted fixes are very welcome, and no pull request will be judged on how it was
-written. Two things make the difference between one that lands and one that wastes
-everybody's time:
+[`AGENTS.md`](./AGENTS.md) is the canonical agent entry point. Give the agent the repository
+rather than copying sections of this guide into a prompt; its context pointers load the
+language, runtime, imaging, security, or test material the task needs without creating a
+second source of truth.
 
-- **Have it read the codebase first**, along with the Markdown files, and the website at [shotlist.dev](https://shotlist.dev): this one,
-  [`README.md`](./README.md) for what every key does, and [`AGENTS.md`](./AGENTS.md) for
-  the rules and the traps. Most rejected patches are a second definition of a shape that
-  already exists, or a verb that duplicates a primitive the model did not know about.
-- **You are the author.** Read the diff, run the gate yourself, and be ready to explain
-  why the change is right. A patch nobody has read is not ready, whoever typed it.
+You remain the author. Read the diff, run the gate yourself, and be ready to explain why
+the change is right. A patch nobody has read is not ready, whoever typed it.
 
 ## What "done" means
 
@@ -134,22 +131,27 @@ All of these, not most of them.
 
 ## Where things live
 
-| Path              | What it is                                                  |
-| ----------------- | ----------------------------------------------------------- |
-| `src/config.ts`   | config schema, defaults, loading, merge                     |
-| `src/recipe.ts`   | recipe schema, loading, macro expansion, interpolation      |
-| `src/query.ts`    | the element query language: schema, aliases, page evaluator |
-| `src/steps.ts`    | the step vocabulary, run against a Playwright page          |
-| `src/annotate.ts` | the drawing layer, injected into the page                   |
-| `src/capture.ts`  | clip, scale, canvas growth, write                           |
-| `src/image.ts`    | the formats a shot is written in, and reading one back      |
-| `src/check.ts`    | perceptual diff against the committed image                 |
-| `src/serve.ts`    | starting the site and stopping it again                     |
-| `src/trust.ts`    | what a config may reach: hosts, paths, forbidden names      |
-| `src/baseline.ts` | what the committed images were taken with                   |
-| `src/init.ts`     | the scaffold `--init` writes                                |
-| `src/cli.ts`      | the `shotlist` binary                                       |
-| `tests/fixture/`  | the two pages the browser-driven tests shoot                |
+| Path                | What it is                                                  |
+| ------------------- | ----------------------------------------------------------- |
+| `src/config.ts`     | config schema, defaults, loading, merge                     |
+| `src/recipe.ts`     | recipe schema, loading, macro expansion, interpolation      |
+| `src/query.ts`      | the element query language: schema, finders, page evaluator |
+| `src/steps.ts`      | the step vocabulary, run against a Playwright page          |
+| `src/annotate.ts`   | the drawing layer, injected into the page                   |
+| `src/capture.ts`    | clip, scale, canvas growth, encode, write                   |
+| `src/image.ts`      | encoded format detection and image dimensions               |
+| `src/check.ts`      | pixel comparison against the committed image                |
+| `src/session.ts`    | login, storage-state narrowing, verification                |
+| `src/serve.ts`      | starting the site and stopping its process tree             |
+| `src/trust.ts`      | what a config may reach: hosts, paths, commands, sessions   |
+| `src/baseline.ts`   | what the committed images were taken with                   |
+| `src/playwright.ts` | resolving the optional Playwright peer at run time          |
+| `src/lint.ts`       | aggregate validation without starting a browser             |
+| `src/init.ts`       | the scaffold `--init` writes                                |
+| `src/schemas.ts`    | runtime schemas exported to the build generator             |
+| `src/index.ts`      | the public library surface                                  |
+| `src/cli.ts`        | the `shotlist` binary                                       |
+| `tests/fixture/`    | neutral pages used by jsdom and browser-driven tests        |
 
 ## Adding a step verb or a query primitive
 
@@ -159,7 +161,7 @@ All of these, not most of them.
    nearest matching ancestor could not reach a modal's card. It combines with every other
    filter. A `modalCard:` verb would not have.
 3. **Not specific to one site, framework or design system.** Those belong in a project's
-   own `finders` aliases.
+   own finders.
 4. **A fixture shape and a test to match.**
 
 ## The fixtures
@@ -183,8 +185,12 @@ cookies. The session tests start a server for it themselves.
 
 `tests/fixture/framed.html` holds an iframe, offset from the page and given a border and
 padding — the two things a rect measured inside a frame does not know about. Its `?src=`
-decides where the frame loads from, so one file covers a same-origin frame and a
+decides where `framed-inner.html` loads from, so one pair covers a same-origin frame and a
 cross-origin one; the frame tests start two servers to make the second real.
+
+`tests/fixture/verbs.html` holds controls and an event log for the step vocabulary. It
+keeps action semantics out of the query fixture, because a button used to prove `press`
+does not need hand-maintained jsdom geometry.
 
 Nothing in any of them comes from a real product. If you need a new shape to test against,
 add a neutral one.
@@ -228,7 +234,7 @@ what a key means breaks every recipe in every project using it:
 ## Reporting a bug
 
 **A recipe that fails.** Include the recipe, the `finders` section of the config if it uses
-an alias, and the error. Errors are meant to name the file, the path inside it, and the
+a finder, and the error. Errors are meant to name the file, the path inside it, and the
 fix. If yours did not, report that too.
 
 **Something security-shaped.** shotlist runs other people's configs — in CI on a fork's

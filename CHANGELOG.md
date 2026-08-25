@@ -10,6 +10,13 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
+### Added
+
+- **Repository-local agent context**, with a canonical glossary and branch-specific guides
+  for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
+  now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these
+  boundaries from imports or carrying every rule into every task.
+
 ## [0.5.0] — 2026-08-24
 
 ### Added
