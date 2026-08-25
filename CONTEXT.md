@@ -80,6 +80,16 @@ _Avoid_: Mask
 
 ## Outputs and state
 
+**Operator authority**:
+The declaration of whether the Project is trusted and which hosts, paths, and environment
+names the operator grants or denies. It comes from the caller rather than the Project.
+_Avoid_: Config trust, permissions
+
+**Run**:
+One invocation of shotlist against a Project under explicit Operator authority. Every
+Recipe selected by the invocation belongs to the same Run.
+_Avoid_: Executable Project, Recipe run
+
 **Output image**:
 The image written to the project's output directory by a capture.
 _Avoid_: Installed image, committed image
