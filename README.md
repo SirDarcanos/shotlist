@@ -3,36 +3,30 @@
 Take annotated UI screenshots from YAML recipes, using Playwright.
 
 shotlist opens your running site, drives it to the state you describe, clips a region,
-draws callouts on it, and writes the image where you want it. Each screenshot is a YAML
-file. There is no per-screenshot code.
+draws callouts, and writes the image where you want it. You describe each screenshot in a
+YAML recipe.
 
-**[shotlist.dev/docs](https://shotlist.dev/docs) is the reference** — every key, every step
-verb, every query primitive. This file is the short version.
+**[shotlist.dev/docs](https://shotlist.dev/docs) is the reference.** It covers each key,
+step verb, and query primitive. This README covers setup and common commands.
 
 ## Install
 
-This is a [Node.js](https://nodejs.org/en/) module available through the
-[npm registry](https://www.npmjs.com/).
+shotlist requires [Node.js](https://nodejs.org/en/download/) 20 or newer and a project
+with a `package.json`. Create one with
+[`npm init`](https://docs.npmjs.com/creating-a-package-json-file) if needed.
 
-Before installing, [download and install Node.js](https://nodejs.org/en/download/).
-Node.js 20 or higher is required.
-
-If this is a brand new project, make sure to create a `package.json` first with
-the [`npm init` command](https://docs.npmjs.com/creating-a-package-json-file).
-
-Installation is done using the
-[`npm install` command](https://docs.npmjs.com/downloading-and-installing-packages-locally):
+Install shotlist and Playwright from the [npm registry](https://www.npmjs.com/):
 
 ```bash
 npm install -D shotlist playwright
 ```
 
-pnpm and yarn work the same way.
+Use the equivalent pnpm or Yarn command if your project uses one of them.
 
-Playwright is an optional peer dependency — shotlist does not install it, because its
-postinstall downloads browsers. You need it whenever shotlist writes an image, which
-includes `--check` and a `source: file` recipe, since the callouts are drawn in a page.
-`--init`, `--help` and listing recipes need no browser and launch none.
+shotlist keeps Playwright optional because Playwright downloads browsers during package
+installation. Install it when shotlist writes an image, including runs with `--check` or a
+`source: file` recipe. shotlist draws file-recipe callouts in a page. The `--init`,
+`--help`, and recipe-listing commands do not launch a browser.
 
 ## Quick start
 
@@ -40,9 +34,10 @@ includes `--check` and a `source: file` recipe, since the callouts are drawn in 
 npx shotlist --init
 ```
 
-writes a commented `shotlist.config.yaml` and a first recipe. Or set the two up by hand:
+shotlist writes a commented `shotlist.config.yaml` and a starter recipe. You can create
+them by hand instead.
 
-**1. Configure the project once** — `shotlist.config.yaml` in the project root:
+**1. Configure the project once** in `shotlist.config.yaml` at the project root:
 
 ```yaml
 site:
@@ -55,7 +50,7 @@ install:
   guide: content/guide/images
 ```
 
-**2. Write a recipe** — `screenshots/recipes/order-row.yaml`:
+**2. Write a recipe** in `screenshots/recipes/order-row.yaml`:
 
 ```yaml
 name: order-row
@@ -84,9 +79,9 @@ callouts:
 npx shotlist order-row --install
 ```
 
-The image is written to `screenshots/out/order-row.png`, and `--install` copies it to
-`content/guide/images/order-row.png`. PNG is the default; `image.format` also takes `jpeg`
-and `webp`, per project or per recipe.
+shotlist writes the image to `screenshots/out/order-row.png`. With `--install`, it copies
+the image to `content/guide/images/order-row.png`. PNG is the default. Set `image.format`
+to `jpeg` or `webp` in the project config or recipe.
 
 ## Documentation
 
@@ -124,27 +119,29 @@ npx shotlist --help               # the full list, from the tool
 
 ## A recipe is data
 
-A recipe is data. There is no step that evaluates JavaScript and there will not be one: if
-a screenshot cannot be described, that is a missing verb or query primitive, and it gets
-added. See [CONTRIBUTING.md](./CONTRIBUTING.md#adding-a-step-verb-or-a-query-primitive).
+Describe screenshots with recipe vocabulary rather than JavaScript. Contributors add a
+step verb or query primitive for screenshots the vocabulary cannot express. shotlist does
+not support `eval:` or other executable recipe fields. See
+[CONTRIBUTING.md](./CONTRIBUTING.md#adding-a-step-verb-or-a-query-primitive).
 
 ## Running a config you did not write
 
-shotlist also runs in automation, where the config may come from a fork's pull request or
-from whoever submitted it. A shot list only ever opens its own site, and never reads or
-writes `.env`, `.git`, `.ssh` and their like — in every mode, with no flag to set. For the
-rest, `--untrusted` starts no processes, opens nothing on the runner's own network, and
-stays inside the project.
+Automation may run a config from a fork or another contributor. In every mode, shotlist
+blocks secret-looking paths such as `.env`, `.git`, and `.ssh`. In `--untrusted` mode,
+shotlist starts no configured process, loads no stored session, accepts approved HTTP(S)
+hosts, and confines paths to approved roots.
 
-Full detail, and what it does not cover, at
-**[shotlist.dev/docs/explanation/security-model](https://shotlist.dev/docs/explanation/security-model)**.
+Read the full policy and its limits in the
+**[security model](https://shotlist.dev/docs/explanation/security-model)**.
 
 ## Contributing
 
-Any constructive contribution is welcome! You may contribute in any way you feel comfortable, from code for bug fixes and enhancements, to additions and fixes to documentation, additional tests, fixing a typo, and more!
+You can contribute code or documentation, from bug fixes and tests to new features and
+typo corrections.
 
-Everything you need is in [CONTRIBUTING.md](./CONTRIBUTING.md): setup, the commands, the code style, and what "done" means.
+[CONTRIBUTING.md](./CONTRIBUTING.md) covers setup, commands, code style, and the completion
+criteria.
 
 ## License
 
-MIT © Nicola Mustone — see [LICENSE](./LICENSE).
+MIT © Nicola Mustone. See [LICENSE](./LICENSE).
