@@ -383,7 +383,7 @@ function checkKind(raw: unknown, kind: 'recipe' | 'macro', file?: string): void 
 /** Validate one macro document, checking its verbs the way a recipe's setup is checked. */
 export function parseMacro(
   raw: unknown,
-  options: { finders?: Record<string, unknown>; file?: string } = {},
+  options: { finders?: Readonly<Record<string, unknown>>; file?: string } = {},
 ): Macro {
   checkKind(raw, 'macro', options.file)
   if (typeof raw === 'object' && raw !== null && 'steps' in raw) {
@@ -395,7 +395,7 @@ export function parseMacro(
 /** Validate one recipe document against this project's aliases. */
 export function parseRecipe(
   raw: unknown,
-  options: { finders?: Record<string, unknown>; file?: string; name?: string } = {},
+  options: { finders?: Readonly<Record<string, unknown>>; file?: string; name?: string } = {},
 ): Recipe {
   checkKind(raw, 'recipe', options.file)
   for (const key of ['setup', 'teardown'] as const) {
@@ -483,9 +483,53 @@ export function documentFiles(dir: string): Array<{ name: string; file: string }
     .map((entry) => ({ name: basename(entry, extname(entry)), file: join(dir, entry) }))
 }
 
+export interface LibraryDocument {
+  name: string
+  /** The authored path used in diagnostics, which may name a symlink. */
+  file: string
+  raw: unknown
+}
+
+export interface LibraryDocuments {
+  recipes: readonly LibraryDocument[]
+  macros: readonly LibraryDocument[]
+  data: readonly LibraryDocument[]
+}
+
 /** Every document in a directory, keyed by filename without its extension. */
-function documentsIn(dir: string): Array<{ name: string; file: string; raw: unknown }> {
+function documentsIn(dir: string): LibraryDocument[] {
   return documentFiles(dir).map(({ name, file }) => ({ name, file, raw: readDocument(file) }))
+}
+
+/** Parse a complete set of already-read Library documents. */
+export function parseLibrary(
+  documents: LibraryDocuments,
+  finders: Readonly<Record<string, unknown>> = {},
+): Library {
+  const macros = new Map<string, Macro>()
+  for (const { name, file, raw } of documents.macros) {
+    const macro = parseMacro(raw, { finders, file })
+    macros.set(macro.name ?? name, macro)
+  }
+
+  const data: Record<string, unknown> = {}
+  for (const { name, raw } of documents.data) {
+    // Assignment treats `__proto__` as a prototype setter rather than a document name.
+    Object.defineProperty(data, name, {
+      value: raw,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+  }
+
+  const recipes = new Map<string, Recipe>()
+  for (const { name, file, raw } of documents.recipes) {
+    const recipe = withNumbering(parseRecipe(raw, { finders, file, name }))
+    recipes.set(recipe.name!, recipe)
+  }
+
+  return { recipes, macros, data }
 }
 
 /** Load a project's recipes, macros and data from the directories its config names. */
@@ -493,26 +537,16 @@ export function loadLibrary(paths: {
   recipes: string
   macros: string
   data: string
-  finders?: Record<string, unknown>
+  finders?: Readonly<Record<string, unknown>>
 }): Library {
-  const finders = paths.finders ?? {}
-
-  const macros = new Map<string, Macro>()
-  for (const { name, file, raw } of documentsIn(paths.macros)) {
-    const macro = parseMacro(raw, { finders, file })
-    macros.set(macro.name ?? name, macro)
-  }
-
-  const data: Record<string, unknown> = {}
-  for (const { name, raw } of documentsIn(paths.data)) data[name] = raw
-
-  const recipes = new Map<string, Recipe>()
-  for (const { name, file, raw } of documentsIn(paths.recipes)) {
-    const recipe = withNumbering(parseRecipe(raw, { finders, file, name }))
-    recipes.set(recipe.name!, recipe)
-  }
-
-  return { recipes, macros, data }
+  return parseLibrary(
+    {
+      macros: documentsIn(paths.macros),
+      data: documentsIn(paths.data),
+      recipes: documentsIn(paths.recipes),
+    },
+    paths.finders,
+  )
 }
 
 export interface ResolvedStep {

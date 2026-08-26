@@ -400,14 +400,23 @@ export function pageMessage(error: unknown): string {
   return first.replace(/^page\.\w+:\s*/, '').replace(/^Error:\s*/, '')
 }
 
-/** Parse a YAML or JSON document, reporting the file and the parser's own line and column. */
-export function readDocument(file: string): unknown {
-  const text = readFileSync(file, 'utf8')
+/** Parse YAML or JSON text against the filename an author knows. */
+function parseDocumentText(text: string, file: string): unknown {
   try {
     return file.endsWith('.json') ? JSON.parse(text) : parseYaml(text)
   } catch (error) {
     throw new ShotlistError((error as Error).message, file)
   }
+}
+
+/** Read an authorized document target while reporting its authored filename. */
+export function readDocumentAt(target: string, file: string): unknown {
+  return parseDocumentText(readFileSync(target, 'utf8'), file)
+}
+
+/** Parse a YAML or JSON document, reporting the file and the parser's own line and column. */
+export function readDocument(file: string): unknown {
+  return readDocumentAt(file, file)
 }
 
 /** Validate a raw config object, filling every default. */

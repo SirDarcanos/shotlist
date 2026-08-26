@@ -73,6 +73,8 @@ export {
   trustFrom,
 } from './trust.js'
 export type { Trust } from './trust.js'
+export { openRun } from './run.js'
+export type { DeepReadonly, OperatorAuthority, Project, ProjectLibrary, Run } from './run.js'
 export { narrowSession, readSession, sessionFor, sessionHosts, signIn } from './session.js'
 export type { Dropped, Session, StorageState } from './session.js'
 export { startServer, tokenize, withServer } from './serve.js'

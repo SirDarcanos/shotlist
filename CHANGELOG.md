@@ -12,6 +12,11 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ### Added
 
+- **Explicit Run opening** through `openRun(authority, configFile)`. The opener authorizes
+  each configured Library directory before enumeration and each document before reading.
+  It returns frozen authority, environment, config, and Library snapshots for the Run.
+  Existing loaders remain available while callers migrate to the Run interface.
+
 - **Repository-local agent context**, with a canonical glossary and branch-specific guides
   for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
   now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these
