@@ -17,6 +17,12 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   It returns frozen authority, environment, config, and Library snapshots for the Run.
   Existing loaders remain available while callers migrate to the Run interface.
 
+- **Run-based runtime interfaces** for browser steps and managed site startup. Steps
+  authorize interpolated navigation URLs and read environment values from the Run snapshot.
+  Site startup authorizes its command, working directory, and readiness URL, and interpolates
+  configured environment values from the same snapshot. Existing config-based interfaces
+  remain available until the Run migration contracts the public interface.
+
 - **Repository-local agent context**, with a canonical glossary and branch-specific guides
   for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
   now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these

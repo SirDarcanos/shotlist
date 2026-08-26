@@ -1,9 +1,10 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { Macro, expandSteps, loadPlaywright, parseRecipe, runSteps } from '../src/index.js'
-import type { RunContext } from '../src/index.js'
+import { Macro, expandSteps, loadPlaywright, openRun, parseRecipe, runSteps } from '../src/index.js'
+import type { OperatorAuthority, Run, RunContext } from '../src/index.js'
 import type { Browser, BrowserContext, Page } from '../src/playwright.js'
+import { removeProjects, tempProject } from './tempProject.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const VERBS = pathToFileURL(join(HERE, 'fixture/verbs.html')).href
@@ -20,10 +21,21 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close()
+  removeProjects()
 })
 
+/** Open the fixture Project under explicit Operator authority. */
+function fixtureRun(authority: OperatorAuthority = { untrusted: false }): Run {
+  return openRun(authority, join(tempProject(), 'shotlist.config.yaml'))
+}
+
 /** Drive the verbs fixture through a recipe's setup, and hand back the page. */
-async function run(setup: unknown[], url = VERBS, macros = new Map<string, Macro>()) {
+async function run(
+  setup: unknown[],
+  url = VERBS,
+  macros = new Map<string, Macro>(),
+  domainRun = fixtureRun(),
+) {
   const page: Page = await context.newPage()
   await page.goto(url, { waitUntil: 'load' })
   const ctx: RunContext = {
@@ -37,7 +49,7 @@ async function run(setup: unknown[], url = VERBS, macros = new Map<string, Macro
   }
   // Through the schema, so a test also proves the step it writes is one a recipe may use.
   const recipe = parseRecipe({ setup }, { name: 'steps' })
-  await runSteps(expandSteps(recipe.setup, macros), ctx)
+  await runSteps(domainRun, expandSteps(recipe.setup, macros), ctx)
   return { page, ctx }
 }
 
@@ -232,6 +244,110 @@ describe('dialog', () => {
 })
 
 describe('navigation verbs', () => {
+  it('interpolates environment values from the Run snapshot', async () => {
+    process.env['SHOTLIST_STEP_VALUE'] = 'at opening'
+    const domainRun = fixtureRun({ untrusted: false, env: ['SHOTLIST_STEP_VALUE'] })
+    process.env['SHOTLIST_STEP_VALUE'] = 'after opening'
+    try {
+      const { page } = await run(
+        [{ fill: { css: '#inpTyped' }, value: '${env.SHOTLIST_STEP_VALUE}' }],
+        VERBS,
+        new Map(),
+        domainRun,
+      )
+      expect(
+        await page.evaluate(
+          () => (document.getElementById('inpTyped') as HTMLInputElement).value,
+          undefined,
+        ),
+      ).toBe('at opening')
+      await page.close()
+    } finally {
+      delete process.env['SHOTLIST_STEP_VALUE']
+    }
+  })
+
+  it('keeps the Run environment namespace when a loop binds the same name', async () => {
+    process.env['SHOTLIST_STEP_VALUE'] = 'from the Run'
+    const domainRun = fixtureRun({ untrusted: false, env: ['SHOTLIST_STEP_VALUE'] })
+    try {
+      const { page } = await run(
+        [
+          {
+            each: ['shadow'],
+            as: 'env',
+            steps: [{ fill: { css: '#inpTyped' }, value: '${env.SHOTLIST_STEP_VALUE}' }],
+          },
+        ],
+        VERBS,
+        new Map(),
+        domainRun,
+      )
+      expect(
+        await page.evaluate(
+          () => (document.getElementById('inpTyped') as HTMLInputElement).value,
+          undefined,
+        ),
+      ).toBe('from the Run')
+      await page.close()
+    } finally {
+      delete process.env['SHOTLIST_STEP_VALUE']
+    }
+  })
+
+  it('authorizes an interpolated goto URL before navigation', async () => {
+    const domainRun = fixtureRun({
+      untrusted: false,
+      hosts: ['example.test'],
+      deny: ['secrets-area'],
+    })
+    const { page } = await run([], VERBS, new Map(), domainRun)
+    const ctx: RunContext = {
+      pages: new Map([['main', page]]),
+      page,
+      vars: { destination: 'https://example.test/secrets-area/account' },
+      rects: {},
+      viewport: VIEWPORT,
+      timeout: 10_000,
+      newPage: () => context.newPage(),
+    }
+    const recipe = parseRecipe({ setup: [{ goto: '$destination' }] }, { name: 'steps' })
+
+    await expect(runSteps(domainRun, expandSteps(recipe.setup, new Map()), ctx)).rejects.toThrow(
+      /`goto`.*secrets-area.*forbidden path/s,
+    )
+    expect(page.url()).toBe(VERBS)
+    await page.close()
+  })
+
+  it('authorizes an interpolated openPage URL before navigation', async () => {
+    const domainRun = fixtureRun({
+      untrusted: false,
+      hosts: ['example.test'],
+      deny: ['secrets-area'],
+    })
+    const { page } = await run([], VERBS, new Map(), domainRun)
+    const recipe = parseRecipe(
+      { setup: [{ openPage: '$destination', as: 'other' }] },
+      { name: 'steps' },
+    )
+    const ctx: RunContext = {
+      pages: new Map([['main', page]]),
+      page,
+      vars: { destination: 'https://example.test/secrets-area/account' },
+      rects: {},
+      viewport: VIEWPORT,
+      timeout: 10_000,
+      newPage: () => context.newPage(),
+    }
+
+    await expect(runSteps(domainRun, expandSteps(recipe.setup, new Map()), ctx)).rejects.toThrow(
+      /`openPage`.*secrets-area.*forbidden path/s,
+    )
+    expect(ctx.pages.has('other')).toBe(false)
+    await page.close()
+  })
+
   it('goes to another page', async () => {
     const { page } = await run([{ goto: INDEX }, { click: { css: '.row button' } }])
     expect(

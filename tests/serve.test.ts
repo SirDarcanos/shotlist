@@ -3,8 +3,8 @@ import { createServer } from 'node:http'
 import { createConnection, createServer as createTcpServer } from 'node:net'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseConfig, run, startServer, tokenize } from '../src/index.js'
-import type { LoadedConfig, Server } from '../src/index.js'
+import { openRun, parseConfig, run, startServer, tokenize } from '../src/index.js'
+import type { LoadedConfig, OperatorAuthority, Run, Server } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 /** A config holding just enough for `startServer`, rooted where the tests run. */
@@ -14,6 +14,17 @@ function config(site: Record<string, unknown>): LoadedConfig {
     root: process.cwd(),
     file: 'shotlist.config.yaml',
   }
+}
+
+/** Open a temporary Project with the site settings under test. */
+function domainRun(
+  site: Record<string, unknown>,
+  authority: OperatorAuthority = { untrusted: false },
+): Run {
+  const root = tempProject()
+  const file = join(root, 'runtime.config.json')
+  writeFileSync(file, JSON.stringify({ site }))
+  return openRun(authority, file)
 }
 
 /** A port nothing is listening on, taken by binding one and letting it go again. */
@@ -67,8 +78,8 @@ afterEach(async () => {
 })
 
 /** Start a server and remember it, so a failing assertion cannot leave one running. */
-async function start(loaded: LoadedConfig): Promise<Server | null> {
-  const server = await startServer(loaded)
+async function start(input: LoadedConfig | Run): Promise<Server | null> {
+  const server = 'project' in input ? await startServer(input) : await startServer(input)
   if (server) started.push(server)
   return server
 }
@@ -92,6 +103,91 @@ describe('tokenize', () => {
 describe('startServer', () => {
   it('starts nothing when the config asks for no server', async () => {
     expect(await start(config({}))).toBeNull()
+  })
+
+  it('refuses to start a process for an untrusted Run', async () => {
+    const marker = join(tempProject(), 'started.txt')
+    const port = await freePort()
+    const domain = domainRun(
+      {
+        url: `http://localtest.me:${port}/`,
+        serve: `node -e "require('fs').writeFileSync('${marker}','yes')"`,
+      },
+      { untrusted: true },
+    )
+
+    await expect(start(domain)).rejects.toThrow(/untrusted run does not start processes/)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it('authorizes the working directory before starting the process', async () => {
+    const marker = join(tempProject(), 'started.txt')
+    const domain = domainRun(
+      {
+        url: 'http://127.0.0.1:1/',
+        serve: {
+          command: `node -e "require('fs').writeFileSync('${marker}','yes')"`,
+          cwd: 'secrets-area',
+        },
+      },
+      { untrusted: false, deny: ['secrets-area'] },
+    )
+
+    await expect(start(domain)).rejects.toThrow(/site\.serve\.cwd.*forbidden path/s)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it('authorizes a readiness URL before starting the process', async () => {
+    const marker = join(tempProject(), 'started.txt')
+    const domain = domainRun({
+      url: 'http://127.0.0.1:1/',
+      serve: {
+        command: `node -e "require('fs').writeFileSync('${marker}','yes')"`,
+        ready: 'https://elsewhere.example/',
+      },
+    })
+
+    await expect(start(domain)).rejects.toThrow(/site\.serve\.ready.*not this site/s)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it('interpolates configured environment from the Run snapshot', async () => {
+    process.env['SHOTLIST_SERVE_VALUE'] = 'at opening'
+    const domain = domainRun(
+      {
+        url: 'http://127.0.0.1:1/',
+        serve: {
+          command: `node -e "console.log(process.env.RUNTIME_VALUE);setTimeout(()=>{},5000)"`,
+          env: { RUNTIME_VALUE: '${env.SHOTLIST_SERVE_VALUE}' },
+          ready: { log: 'at opening' },
+        },
+      },
+      { untrusted: false, env: ['SHOTLIST_SERVE_VALUE'] },
+    )
+    process.env['SHOTLIST_SERVE_VALUE'] = 'after opening'
+    try {
+      expect(await start(domain)).not.toBeNull()
+    } finally {
+      delete process.env['SHOTLIST_SERVE_VALUE']
+    }
+  }, 30_000)
+
+  it('reuses an existing site for an untrusted Run without starting its command', async () => {
+    const port = await freePort()
+    const running = createServer((_, response) => response.end('ok'))
+    await new Promise<void>((resolve) => running.listen(port, '127.0.0.1', resolve))
+    try {
+      const domain = domainRun(
+        {
+          url: `http://localtest.me:${port}/`,
+          serve: 'node --not-a-real-flag',
+        },
+        { untrusted: true },
+      )
+      expect(await start(domain)).toBeNull()
+    } finally {
+      await new Promise((resolve) => running.close(resolve))
+    }
   })
 
   it('uses a server that is already running rather than starting a second', async () => {

@@ -55,6 +55,16 @@ export interface Run {
   readonly env: Readonly<Record<string, string>>
 }
 
+/** Full process environment snapshots retained without exposing ungranted values to recipes. */
+const ENVIRONMENTS = new WeakMap<Run, Readonly<Record<string, string | undefined>>>()
+
+/** Return the process environment captured for a Run-owned process. */
+export function environmentSnapshot(run: Run): Readonly<Record<string, string | undefined>> {
+  const environment = ENVIRONMENTS.get(run)
+  if (!environment) throw new ShotlistError('A Run opened by shotlist is required')
+  return environment
+}
+
 /** Copy and validate an Operator authority declaration from a TypeScript or JavaScript caller. */
 function snapshotAuthority(value: unknown): Readonly<OperatorAuthority> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -240,5 +250,7 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
       }),
     ),
   )
-  return Object.freeze({ project, authority, trust: frozenTrust, env })
+  const run = Object.freeze({ project, authority, trust: frozenTrust, env })
+  ENVIRONMENTS.set(run, environment)
+  return run
 }

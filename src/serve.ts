@@ -3,8 +3,16 @@ import type { ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { createConnection } from 'node:net'
 import { ShotlistError, fromRoot } from './config.js'
-import { checkCommand } from './trust.js'
+import { ENV, interpolate } from './recipe.js'
+import { environmentSnapshot } from './run.js'
+import type { Run } from './run.js'
+import { authorizePath, checkCommand, checkUrl } from './trust.js'
 import type { LoadedConfig, Serve } from './config.js'
+
+/** Whether an input uses the immutable Run interface. */
+function isRun(input: Run | LoadedConfig): input is Run {
+  return 'project' in input
+}
 
 /** A server shotlist started, and is therefore responsible for stopping. */
 export interface Server {
@@ -141,11 +149,29 @@ function quoted(output: readonly string[]): string {
  * usually already up in another terminal, and starting a second would only fail to bind
  * the port the first one holds.
  */
-export async function startServer(loaded: LoadedConfig): Promise<Server | null> {
+export function startServer(run: Run): Promise<Server | null>
+/** Compatibility interface for callers migrating to the Run seam. */
+export function startServer(loaded: LoadedConfig): Promise<Server | null>
+/** Start a Run's site, retaining the old config form until interface contraction. */
+export async function startServer(input: Run | LoadedConfig): Promise<Server | null> {
+  const run = isRun(input) ? input : undefined
+  const loaded = isRun(input) ? input.project : input
   const { serve, url } = loaded.config.site
   if (!serve) return null
-  if (loaded.trust) checkCommand(loaded.trust, 'site.serve')
+  const trust = run?.trust ?? ('trust' in loaded ? loaded.trust : undefined)
+  if (trust && isHttp(url)) checkUrl(trust, url, 'site.url')
   if (isHttp(url) && (await answers(url))) return null
+  if (trust) checkCommand(trust, 'site.serve')
+
+  const cwd = serve.cwd ? fromRoot(loaded, serve.cwd) : loaded.root
+  const authorizedCwd = trust ? authorizePath(trust, cwd, 'site.serve.cwd') : cwd
+  const ready = serve.ready ?? url
+  if (trust && typeof ready === 'string' && isHttp(ready)) {
+    checkUrl(trust, ready, 'site.serve.ready')
+  }
+  const configuredEnvironment = run
+    ? (interpolate(serve.env, { [ENV]: run.env }) as Record<string, string>)
+    : serve.env
 
   const { tokens, bare } = parseCommand(serve.command)
   refuseShellSyntax(bare, tokens)
@@ -158,8 +184,8 @@ export async function startServer(loaded: LoadedConfig): Promise<Server | null> 
   }
 
   const child = spawn(program!, args, {
-    cwd: serve.cwd ? fromRoot(loaded, serve.cwd) : loaded.root,
-    env: { ...process.env, ...serve.env },
+    cwd: authorizedCwd,
+    env: { ...(run ? environmentSnapshot(run) : process.env), ...configuredEnvironment },
     // Its own process group. `npm run dev` is npm, which spawns node, which is the
     // server: killing only what we spawned would leave the one holding the port.
     detached: true,
@@ -170,7 +196,7 @@ export async function startServer(loaded: LoadedConfig): Promise<Server | null> 
 
   const server = manage(child, serve.command)
   try {
-    await waitUntilReady(child, serve, readinessProbe(serve.ready ?? url, output), output)
+    await waitUntilReady(child, serve, readinessProbe(ready, output), output)
   } catch (error) {
     await server.stop()
     throw error
@@ -285,8 +311,12 @@ function manage(child: ChildProcess, command: string): Server {
 }
 
 /** Run `body` with the site up, stopping afterwards whatever happens. */
-export async function withServer<T>(loaded: LoadedConfig, body: () => Promise<T>): Promise<T> {
-  const server = await startServer(loaded)
+export function withServer<T>(run: Run, body: () => Promise<T>): Promise<T>
+/** Compatibility interface for callers migrating to the Run seam. */
+export function withServer<T>(loaded: LoadedConfig, body: () => Promise<T>): Promise<T>
+/** Run a body with a Run's site up, retaining the old form until interface contraction. */
+export async function withServer<T>(input: Run | LoadedConfig, body: () => Promise<T>): Promise<T> {
+  const server = isRun(input) ? await startServer(input) : await startServer(input)
   try {
     return await body()
   } finally {
