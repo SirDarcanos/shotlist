@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -100,6 +100,86 @@ describe('a suggestion', () => {
 })
 
 describe('--lint', () => {
+  it('does not enumerate a configured directory denied by Operator authority', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'shotlist-lint-outside-'))
+    made.push(outside)
+    writeFileSync(join(outside, 'unread.yaml'), 'name: [not valid')
+    const root = project({
+      'shotlist.config.yaml':
+        'site:\n  url: http://localhost:3000\npaths:\n  recipes: outside\n  macros: macros\n  data: data\n',
+    })
+    symlinkSync(outside, join(root, 'outside'))
+
+    const problems = lint({ untrusted: true }, config(root))
+
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toMatchObject({ file: join(root, 'outside'), level: 'error' })
+    expect(problems[0]!.message).toMatch(/paths\.recipes: .*outside the project/)
+    expect(problems[0]!.message).not.toMatch(/unread\.yaml|not valid/)
+  })
+
+  it('reports a configured path that cannot be enumerated and continues', () => {
+    const root = project({
+      recipes: 'not a directory',
+      'macros/broken.yaml': 'steps: [{ clik: button }]',
+    })
+
+    const problems = lint({ untrusted: false }, config(root))
+
+    expect(problems).toHaveLength(2)
+    expect(problems[0]!.file).toBe(join(root, 'macros/broken.yaml'))
+    expect(problems[1]).toMatchObject({ file: join(root, 'recipes'), level: 'error' })
+    expect(problems[1]!.message).toMatch(/ENOTDIR|not a directory/)
+  })
+
+  it('does not enumerate a directory denied by the operator', () => {
+    const root = project({ 'recipes/unread.yaml': 'name: [not valid' })
+
+    const problems = lint({ untrusted: false, deny: ['recipes'] }, config(root))
+
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toMatchObject({ file: join(root, 'recipes'), level: 'error' })
+    expect(problems[0]!.message).toMatch(/"recipes" is a forbidden path/)
+    expect(problems[0]!.message).not.toMatch(/unread\.yaml|not valid/)
+  })
+
+  it('reads a configured directory under an operator-granted root', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'shotlist-lint-outside-'))
+    made.push(outside)
+    writeFileSync(join(outside, 'broken.yaml'), 'name: [not valid')
+    const root = project({
+      'shotlist.config.yaml':
+        `site:\n  url: http://localhost:3000\npaths:\n  recipes: ${outside}\n` +
+        '  macros: macros\n  data: data\n',
+    })
+
+    const problems = lint({ untrusted: true, paths: [outside] }, config(root))
+
+    expect(problems).toHaveLength(1)
+    expect(problems[0]!.file).toBe(join(outside, 'broken.yaml'))
+    expect(problems[0]!.message).not.toMatch(/outside the project/)
+  })
+
+  it('does not read a denied document and continues with the rest', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'shotlist-lint-outside-'))
+    made.push(outside)
+    writeFileSync(join(outside, 'secret.yaml'), 'name: [not valid')
+    const root = project({
+      'recipes/a-broken.yaml': 'name: [also invalid',
+    })
+    symlinkSync(join(outside, 'secret.yaml'), join(root, 'recipes/z-secret.yaml'))
+
+    const problems = lint({ untrusted: true }, config(root))
+
+    expect(problems).toHaveLength(2)
+    expect(problems.map((problem) => problem.file)).toEqual([
+      join(root, 'recipes/a-broken.yaml'),
+      join(root, 'recipes/z-secret.yaml'),
+    ])
+    expect(problems[1]!.message).toMatch(/paths\.recipes: .*outside the project/)
+    expect(problems[1]!.message).not.toMatch(/not valid/)
+  })
+
   it('reports every file, rather than stopping at the first that fails', () => {
     const root = project({
       'recipes/one.yaml': `name: one\nclip: { css: '.a', marching: 'x' }\n`,
@@ -150,6 +230,12 @@ describe('warnings', () => {
       'install: "nowhere" is not a destination the config names',
     ])
   })
+
+  it('remain available through the explicit Operator authority interface', () => {
+    const found = lint({ untrusted: false }, config(suspect()), { warnings: true })
+
+    expect(found.map((one) => one.level)).toEqual(['warning', 'warning'])
+  })
 })
 
 describe('the exit code', () => {
@@ -157,6 +243,59 @@ describe('the exit code', () => {
     const lines: string[] = []
     return { io: { out: (l: string) => lines.push(l), err: (l: string) => lines.push(l) }, lines }
   }
+
+  it('uses explicit untrusted authority and does not count a denied directory', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'shotlist-lint-outside-'))
+    made.push(outside)
+    writeFileSync(join(outside, 'unread.yaml'), 'clip: viewport')
+    const root = project({
+      'shotlist.config.yaml':
+        'site:\n  url: http://localhost:3000\npaths:\n  recipes: outside\n  macros: macros\n  data: data\n',
+    })
+    symlinkSync(outside, join(root, 'outside'))
+    const { io, lines } = say()
+
+    expect(await run(['--lint', '--untrusted', '--config', config(root)], io)).toBe(1)
+
+    expect(lines.join('\n')).toMatch(/paths\.recipes: .*outside the project/)
+    expect(lines.join('\n')).toMatch(/1 error in 1 file$/)
+  })
+
+  it('honors an operator path grant for untrusted lint', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'shotlist-lint-outside-'))
+    made.push(outside)
+    writeFileSync(join(outside, 'broken.yaml'), 'name: [not valid')
+    const root = project({
+      'shotlist.config.yaml':
+        `site:\n  url: http://localhost:3000\npaths:\n  recipes: ${outside}\n` +
+        '  macros: macros\n  data: data\n',
+    })
+    const { io, lines } = say()
+
+    expect(
+      await run(['--lint', '--untrusted', '--allow-path', outside, '--config', config(root)], io),
+    ).toBe(1)
+
+    expect(lines.join('\n')).not.toMatch(/outside the project/)
+    expect(lines.join('\n')).toMatch(/1 error in 2 files$/)
+  })
+
+  it('keeps ordinary lint trusted by default', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'shotlist-lint-outside-'))
+    made.push(outside)
+    writeFileSync(join(outside, 'broken.yaml'), 'name: [not valid')
+    const root = project({
+      'shotlist.config.yaml':
+        `site:\n  url: http://localhost:3000\npaths:\n  recipes: ${outside}\n` +
+        '  macros: macros\n  data: data\n',
+    })
+    const { io, lines } = say()
+
+    expect(await run(['--lint', '--config', config(root)], io)).toBe(1)
+
+    expect(lines.join('\n')).not.toMatch(/outside the project/)
+    expect(lines.join('\n')).toMatch(/1 error in 2 files$/)
+  })
 
   it('is non-zero when something is refused', async () => {
     const root = project({ 'recipes/one.yaml': `name: one\nclip: { css: '.a', marching: 'x' }\n` })

@@ -1,6 +1,6 @@
 import { basename, join } from 'node:path'
 import { ShotlistError, fromRoot, loadConfig, readDocumentAt } from './config.js'
-import type { Config } from './config.js'
+import type { Config, LoadedConfig } from './config.js'
 import { documentFiles, parseLibrary } from './recipe.js'
 import type { Library, LibraryDocument, Macro, Recipe } from './recipe.js'
 import { authorizePath, trustFromEnvironment } from './trust.js'
@@ -53,6 +53,13 @@ export interface Run {
   readonly trust: DeepReadonly<Trust>
   /** Allowed environment values captured while the Run opened. */
   readonly env: Readonly<Record<string, string>>
+}
+
+/** Policy state shared by Run opening and incomplete Project discovery. */
+export interface ProjectPolicy {
+  readonly authority: DeepReadonly<OperatorAuthority>
+  readonly trust: DeepReadonly<Trust>
+  readonly environment: Readonly<Record<string, string | undefined>>
 }
 
 /** Full process environment snapshots retained without exposing ungranted values to recipes. */
@@ -178,29 +185,50 @@ interface PendingDocument {
   target: string
 }
 
+/** Derive immutable policy state from snapshots owned by shotlist. */
+function policyFrom(
+  authority: DeepReadonly<OperatorAuthority>,
+  loaded: LoadedConfig,
+  environment: Readonly<Record<string, string | undefined>>,
+): ProjectPolicy {
+  const config = loaded.config
+  const trust = deepFreeze(
+    trustFromEnvironment(
+      {
+        root: loaded.root,
+        siteUrl: config.site.url,
+        allow: config.site.allow,
+        deny: config.deny,
+        allowEnv: config.allowEnv,
+        granted: {
+          hosts: authority.hosts ?? [],
+          paths: authority.paths ?? [],
+          deny: authority.deny ?? [],
+          env: authority.env ?? [],
+        },
+      },
+      authority.untrusted,
+      environment,
+    ),
+  )
+  return Object.freeze({ authority, trust, environment })
+}
+
+/** Derive immutable policy state for a loaded Project under explicit Operator authority. */
+export function projectPolicy(
+  authorityValue: OperatorAuthority,
+  loaded: LoadedConfig,
+): ProjectPolicy {
+  return policyFrom(snapshotAuthority(authorityValue), loaded, Object.freeze({ ...process.env }))
+}
+
 /** Open a complete immutable Run after authorizing its config-directed Library reads. */
 export function openRun(authorityValue: OperatorAuthority, configFile?: string): Run {
   const authority = snapshotAuthority(authorityValue)
   const environment = Object.freeze({ ...process.env })
   const loaded = loadConfig(configFile)
   const config = loaded.config
-  const trust = trustFromEnvironment(
-    {
-      root: loaded.root,
-      siteUrl: config.site.url,
-      allow: config.site.allow,
-      deny: config.deny,
-      allowEnv: config.allowEnv,
-      granted: {
-        hosts: authority.hosts ?? [],
-        paths: authority.paths ?? [],
-        deny: authority.deny ?? [],
-        env: authority.env ?? [],
-      },
-    },
-    authority.untrusted,
-    environment,
-  )
+  const { trust } = policyFrom(authority, loaded, environment)
 
   const directories = (['macros', 'data', 'recipes'] as const).map((kind) => {
     const authored = fromRoot(loaded, config.paths[kind])
@@ -241,16 +269,15 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
     file: loaded.file,
     library,
   })
-  const frozenTrust = deepFreeze(trust)
   const env = Object.freeze(
     Object.fromEntries(
-      frozenTrust.env.flatMap((name) => {
+      trust.env.flatMap((name) => {
         const value = environment[name]
         return value === undefined || value === '' ? [] : [[name, value]]
       }),
     ),
   )
-  const run = Object.freeze({ project, authority, trust: frozenTrust, env })
+  const run = Object.freeze({ project, authority, trust, env })
   ENVIRONMENTS.set(run, environment)
   return run
 }

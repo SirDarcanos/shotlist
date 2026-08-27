@@ -174,8 +174,17 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
   // Before the config is loaded, because a config that will not load is the first thing
   // this has to be able to report rather than die of.
   if (values.lint) {
-    const problems = lint(values.config, { warnings: values.warnings })
-    for (const line of formatProblems(problems, countDocuments(values.config))) io.out(line)
+    const authority = {
+      untrusted: values.untrusted,
+      hosts: values.allow ?? [],
+      paths: values['allow-path'] ?? [],
+      deny: values.deny ?? [],
+      env: values['allow-env'] ?? [],
+    }
+    const problems = lint(authority, values.config, { warnings: values.warnings })
+    for (const line of formatProblems(problems, countDocuments(authority, values.config))) {
+      io.out(line)
+    }
     return problems.some((one) => one.level === 'error') ? 1 : 0
   }
 

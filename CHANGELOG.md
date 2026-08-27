@@ -33,6 +33,12 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   Retries keep the same Run and open a fresh browser context. Existing config-based capture
   remains available during migration.
 
+- **Run-policy linting** that accepts explicit Operator authority while continuing past
+  malformed or unauthorized Library documents. Lint authorizes each configured directory
+  before enumeration and each document before reading; the command remains trusted unless
+  the operator selects `--untrusted`. Existing lint interfaces remain available during
+  migration.
+
 - **Run-based checking and Baseline access** for comparing Output images with Committed
   images and recording their rendering environment. Checking authorizes canonical image and
   diff paths, then re-shoots each Recipe through the same Run. Baseline reads and writes use

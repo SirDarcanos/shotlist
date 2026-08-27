@@ -80,6 +80,6 @@ export type { Dropped, Session, SignInOptions, StorageState } from './session.js
 export { startServer, tokenize, withServer } from './serve.js'
 export type { Server } from './serve.js'
 export { countDocuments, formatProblems, lint } from './lint.js'
-export type { Problem } from './lint.js'
+export type { LintOptions, Problem } from './lint.js'
 export { SCHEMA_FILES } from './schemas.js'
 export { run } from './cli.js'
