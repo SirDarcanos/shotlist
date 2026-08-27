@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -16,16 +15,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   Recipe,
   interpolate,
-  narrowSession,
   openRun,
   parseConfig,
   readSession,
-  sessionFor,
-  sessionHosts,
   shoot,
   signIn,
 } from '../src/index.js'
-import type { OperatorAuthority, Run, StorageState } from '../src/index.js'
+import type { OperatorAuthority, Run } from '../src/index.js'
 import { envFor, trustFrom } from '../src/trust.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
@@ -94,6 +90,7 @@ function project(
     verify?: string
     allowEnv?: string[]
     keep?: string[]
+    allow?: string[]
     siteUrl?: string
     sessionPath?: string
   } = {},
@@ -110,7 +107,7 @@ function project(
   url: ${options.siteUrl ?? `${origin}/signin.html`}
   viewport: { width: 800, height: 600 }
   scale: 1
-  # Short, because two of these tests wait this out on purpose.
+${options.allow === undefined ? '' : `  allow: [${options.allow.join(', ')}]\n`}  # Short, because two of these tests wait this out on purpose.
   timeout: 2000
   sessions:
     admin:
@@ -173,33 +170,27 @@ describe('site.sessions', () => {
   })
 })
 
-describe('a recipe naming a session', () => {
+describe('a recipe naming a Session', () => {
   it('carries the name through', () => {
     expect(Recipe.parse({ name: 'dash', session: 'admin' }).session).toBe('admin')
   })
 
-  it('says which sessions there are when it names one that is not declared', () => {
+  it('says which Sessions there are when it names one that is not declared', () => {
     const { run } = project()
-    expect(() => sessionFor(run, 'editor', 'recipe "dash"')).toThrow(/no session named "editor"/)
-    expect(() => sessionFor(run, 'editor', 'recipe "dash"')).toThrow(/"admin"/)
+    expect(() => readSession(run, 'editor')).toThrow(/no session named "editor"/)
+    expect(() => readSession(run, 'editor')).toThrow(/"admin"/)
+  })
+
+  it('does not mistake an inherited object key for a configured Session', () => {
+    const { run } = project()
+    expect(() => readSession(run, 'toString')).toThrow(/no session named "toString"/)
   })
 
   it('resolves the file from the config, not the working directory', () => {
     const { run, root } = project()
-    expect(sessionFor(run, 'admin', 'x').file).toBe(
-      join(realpathSync(root), '.shotlist/admin.json'),
+    expect(() => readSession(run, 'admin')).toThrow(
+      new RegExp(`${join(root, '.shotlist/admin.json')}.*is not there`, 's'),
     )
-  })
-
-  it('resolves a Session through the Run', () => {
-    const { run, root } = projectRun({ verify: '#account', keep: ['accounts.example.test'] })
-
-    expect(sessionFor(run, 'admin', 'recipe "dash"')).toEqual({
-      name: 'admin',
-      file: join(realpathSync(root), '.shotlist/admin.json'),
-      verify: '#account',
-      keep: ['accounts.example.test'],
-    })
   })
 
   it('authorizes a dangling Session symlink to a missing root-level target', () => {
@@ -212,56 +203,37 @@ describe('a recipe naming a session', () => {
       join(made.root, 'shotlist.config.yaml'),
     )
 
-    expect(() => sessionFor(run, 'admin', 'recipe "dash"')).toThrow(
-      new RegExp(`${denied}.*forbidden path`, 's'),
-    )
+    expect(() => readSession(run, 'admin')).toThrow(new RegExp(`${denied}.*forbidden path`, 's'))
   })
 
   it('refuses an untrusted Run before observing its Session path', () => {
     const { run } = projectRun({}, { untrusted: true })
 
-    expect(() => sessionFor(run, 'admin', 'recipe "dash"')).toThrow(/does not load sessions/)
+    expect(() => readSession(run, 'admin')).toThrow(/does not load sessions/)
   })
 })
 
-describe('a session that is not there yet', () => {
+describe('a Session that is not there yet', () => {
   it('names the command through the Run that writes it', () => {
     const { run } = projectRun()
 
-    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/shotlist --login admin/)
+    expect(() => readSession(run, 'admin')).toThrow(/shotlist --login admin/)
   })
 
-  it('uses configured keep hosts rather than a fabricated Session value', () => {
-    const { run } = projectRun()
-    const fabricated = {
-      name: 'admin',
-      file: 'elsewhere.json',
-      keep: ['accounts.example.test'],
-    }
-
-    expect(sessionHosts(run, fabricated)).not.toContain('accounts.example.test')
-  })
-
-  it('reauthorizes a public Session before reading its file', () => {
-    const { run, root } = projectRun(
+  it('authorizes the configured Session path before reading its file', () => {
+    const { run } = projectRun(
       { sessionPath: 'credential-vault/admin.json' },
       { untrusted: false, deny: ['credential-vault'] },
     )
-    const fabricated = { name: 'admin', file: join(root, 'elsewhere.json'), keep: [] }
 
-    expect(() => readSession(run, fabricated)).toThrow(/credential-vault.*forbidden path/s)
+    expect(() => readSession(run, 'admin')).toThrow(/credential-vault.*forbidden path/s)
   })
 
-  it('names the command that writes it, rather than reporting a missing file', () => {
-    const { run } = project()
-    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/shotlist --login admin/)
-  })
-
-  it('says the same when the file is there but is not a session', () => {
+  it('says the same when the file is there but is not a Session', () => {
     const { run, root } = project()
     mkdirSync(join(root, '.shotlist'), { recursive: true })
     writeFileSync(join(root, '.shotlist/admin.json'), 'not json')
-    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/--login admin/)
+    expect(() => readSession(run, 'admin')).toThrow(/--login admin/)
   })
 })
 
@@ -385,80 +357,89 @@ describe('an untrusted run', () => {
     expect(envFor(trust)).toEqual({})
   })
 
-  it('loads no session, because the browser carrying one is signed in as somebody', () => {
+  it('loads no Session, because the browser carrying one is signed in as somebody', () => {
     const { run } = project({}, { untrusted: true })
-    expect(() => sessionFor(run, 'admin', 'recipe "dash"')).toThrow(/does not load sessions/)
+    expect(() => readSession(run, 'admin')).toThrow(/does not load sessions/)
   })
 })
 
-describe('what a session keeps', () => {
-  const SITE_HOSTS = ['app.example.com']
-
+describe('what a Session keeps', () => {
   /** A state shaped the way Playwright writes one. */
   const state = (cookies: Array<{ domain: string }>, origins: Array<{ origin: string }> = []) => ({
     cookies: cookies.map((one) => ({ name: 'sid', value: 'x', path: '/', ...one })),
     origins: origins.map((one) => ({ localStorage: [{ name: 'token', value: 'x' }], ...one })),
   })
 
-  const domainsIn = (result: ReturnType<typeof narrowSession>) =>
-    result.state.cookies.map((one) => one.domain)
+  /** Write raw browser state, then read it through the named Session interface. */
+  function readState(
+    raw: unknown,
+    options: { siteUrl?: string; allow?: string[]; keep?: string[] } = {},
+  ): ReturnType<typeof readSession> {
+    const { run, root } = projectRun({
+      siteUrl: options.siteUrl ?? 'https://app.example.com',
+      allow: options.allow,
+      keep: options.keep,
+    })
+    mkdirSync(join(root, '.shotlist'), { recursive: true })
+    writeFileSync(join(root, '.shotlist/admin.json'), JSON.stringify(raw))
+    return readSession(run, 'admin')
+  }
 
-  it('drops the provider session an OAuth round trip swept up', () => {
-    const result = narrowSession(
+  const domainsIn = (result: ReturnType<typeof readSession>) =>
+    result.cookies.map((one) => one.domain)
+
+  it('drops the provider Session an OAuth round trip swept up', () => {
+    const read = readState(
       state([
         { domain: 'app.example.com' },
         { domain: '.google.com' },
         { domain: 'accounts.google.com' },
         { domain: '.youtube.com' },
       ]),
-      SITE_HOSTS,
     )
-    expect(domainsIn(result)).toEqual(['app.example.com'])
-    expect(result.dropped.cookies).toBe(3)
-    expect(result.dropped.hosts).toEqual(['google.com', 'accounts.google.com', 'youtube.com'])
+    expect(domainsIn(read)).toEqual(['app.example.com'])
   })
 
-  it('keeps a cookie set on the apex, which is where a session cookie usually is', () => {
+  it('keeps a cookie set on the apex, which is where a Session cookie usually is', () => {
     // The site is `app.example.com` and the cookie is `.example.com`: dropping it is
-    // dropping the sign-in itself, which is the way this narrowing breaks a project.
-    expect(domainsIn(narrowSession(state([{ domain: '.example.com' }]), SITE_HOSTS))).toEqual([
-      '.example.com',
-    ])
+    // dropping the sign-in itself, which is the way this narrowing breaks a Project.
+    expect(domainsIn(readState(state([{ domain: '.example.com' }])))).toEqual(['.example.com'])
   })
 
-  it('keeps a cookie on a host under the site, because the run may open one', () => {
-    expect(
-      domainsIn(narrowSession(state([{ domain: 'api.example.com' }]), ['example.com'])),
-    ).toEqual(['api.example.com'])
+  it('keeps a cookie on a host under the site, because the Run may open one', () => {
+    const read = readState(state([{ domain: 'api.example.com' }]), {
+      siteUrl: 'https://example.com',
+    })
+    expect(domainsIn(read)).toEqual(['api.example.com'])
   })
 
   it('drops a host that only ends the same way', () => {
     // The two that a bare `endsWith` in either direction lets through: a name whose last
     // label boundary falls in the middle of the site's, and a longer name it prefixes.
-    const result = narrowSession(
+    const read = readState(
       state([
         { domain: 'evil-app.example.com' },
         { domain: 'app.example.com.evil.test' },
         { domain: 'notexample.com' },
       ]),
-      SITE_HOSTS,
     )
-    expect(domainsIn(result)).toEqual([])
-    expect(result.dropped.cookies).toBe(3)
+    expect(domainsIn(read)).toEqual([])
     expect(
-      domainsIn(narrowSession(state([{ domain: 'notexample.com' }]), ['example.com'])),
+      domainsIn(
+        readState(state([{ domain: 'notexample.com' }]), { siteUrl: 'https://example.com' }),
+      ),
     ).toEqual([])
   })
 
   it('keeps a host the config named in site.allow', () => {
-    const hosts = ['app.example.com', 'auth.partner.test']
-    expect(domainsIn(narrowSession(state([{ domain: 'auth.partner.test' }]), hosts))).toEqual([
-      'auth.partner.test',
-    ])
+    const read = readState(state([{ domain: 'auth.partner.test' }]), {
+      allow: ['auth.partner.test'],
+    })
+    expect(domainsIn(read)).toEqual(['auth.partner.test'])
   })
 
   it('keeps local storage for the site and its subdomains, and no other origin', () => {
-    const result = narrowSession(
+    const read = readState(
       state(
         [],
         [
@@ -468,41 +449,24 @@ describe('what a session keeps', () => {
           { origin: 'not a url' },
         ],
       ),
-      SITE_HOSTS,
     )
-    expect(result.state.origins.map((one) => one.origin)).toEqual([
+    expect(read.origins.map((one) => one.origin)).toEqual([
       'https://app.example.com',
       'https://inner.app.example.com',
     ])
-    expect(result.dropped.origins).toBe(2)
   })
 
   it('does not share local storage up the domain tree the way a cookie is shared', () => {
     // `.example.com` is a cookie `app.example.com` is sent; `https://example.com` is an
     // origin it cannot read. The two rules differ on purpose.
-    const both = narrowSession(
-      state([{ domain: '.example.com' }], [{ origin: 'https://example.com' }]),
-      SITE_HOSTS,
-    )
-    expect(both.state.cookies).toHaveLength(1)
-    expect(both.state.origins).toHaveLength(0)
+    const read = readState(state([{ domain: '.example.com' }], [{ origin: 'https://example.com' }]))
+    expect(read.cookies).toHaveLength(1)
+    expect(read.origins).toHaveLength(0)
   })
 
   it('reads a file that is not a state at all as holding nothing', () => {
-    expect(narrowSession('nonsense', SITE_HOSTS).state).toEqual({ cookies: [], origins: [] })
-    expect(narrowSession(null, SITE_HOSTS).state).toEqual({ cookies: [], origins: [] })
-  })
-
-  it('reads and narrows a Session through the Run', () => {
-    const { run, root } = projectRun()
-    mkdirSync(join(root, '.shotlist'), { recursive: true })
-    writeFileSync(
-      join(root, '.shotlist/admin.json'),
-      JSON.stringify(state([{ domain: '127.0.0.1' }, { domain: '.google.com' }])),
-    )
-
-    const read = readSession(run, sessionFor(run, 'admin', 'x'))
-    expect(read.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
+    expect(readState('nonsense')).toEqual({ cookies: [], origins: [] })
+    expect(readState(null)).toEqual({ cookies: [], origins: [] })
   })
 
   it('narrows a file written before it did, when that file is loaded', () => {
@@ -512,7 +476,7 @@ describe('what a session keeps', () => {
       join(root, '.shotlist/admin.json'),
       JSON.stringify(state([{ domain: '127.0.0.1' }, { domain: '.google.com' }])),
     )
-    const read = readSession(run, sessionFor(run, 'admin', 'x'))
+    const read = readSession(run, 'admin')
     expect(read.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
   })
 })
@@ -552,7 +516,9 @@ describe('--login', () => {
 
   /** What ended up on disk. */
   const written = (root: string) =>
-    JSON.parse(readFileSync(join(root, '.shotlist/admin.json'), 'utf8')) as StorageState
+    JSON.parse(readFileSync(join(root, '.shotlist/admin.json'), 'utf8')) as ReturnType<
+      typeof readSession
+    >
 
   it('uses the Run environment snapshot for a scripted login', { timeout: 120_000 }, async () => {
     process.env['FIXTURE_USER'] = 'Ada'
@@ -806,9 +772,7 @@ describe('--login', () => {
       expect(existsSync(file)).toBe(true)
       expect(said.join('\n')).toContain(file)
       // The cookie is what the next run is signed in by, so it has to be in there.
-      expect(JSON.stringify(readSession(run, sessionFor(run, 'admin', 'x')))).toContain(
-        'fixture-session',
-      )
+      expect(JSON.stringify(readSession(run, 'admin'))).toContain('fixture-session')
       // Windows has no mode bits to set, so there is nothing to assert there.
       if (process.platform !== 'win32') {
         expect(statSync(file).mode & 0o777).toBe(0o600)

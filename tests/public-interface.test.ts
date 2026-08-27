@@ -15,7 +15,6 @@ import {
   readBaseline,
   readSession,
   runSteps,
-  sessionFor,
   shoot,
   signIn,
   startServer,
@@ -35,8 +34,10 @@ if (false) {
   void shoot({}, {}, {}, {})
   // @ts-expect-error Checking no longer accepts Recipe, Library, and config arguments.
   void check([], {}, {}, {})
-  // @ts-expect-error Session access no longer accepts a loaded config.
-  sessionFor({}, 'admin', 'x')
+  // @ts-expect-error Session access requires a Run.
+  readSession({}, 'admin')
+  // @ts-expect-error Session access takes a configured name rather than Session details.
+  readSession(run, { name: 'admin', file: 'elsewhere', keep: [] })
   // @ts-expect-error Login no longer accepts loaded config, Library, and Session arguments.
   void signIn({}, {}, {}, {})
   // @ts-expect-error Serving requires a Run.
@@ -53,6 +54,12 @@ if (false) {
   shotlist.loadLibrary
   // @ts-expect-error Raw trust construction is not public.
   shotlist.trustFrom
+  // @ts-expect-error Session paths are not a package-root type.
+  void ({} as shotlist.Session)
+  // @ts-expect-error Session narrowing details are not a package-root type.
+  void ({} as shotlist.Dropped)
+  // @ts-expect-error Session storage internals are not a package-root type.
+  void ({} as shotlist.StorageState)
   // @ts-expect-error The CLI runner is not a package-root interface.
   shotlist.run
 
@@ -62,11 +69,14 @@ if (false) {
 afterAll(removeProjects)
 
 describe('the contracted public interface', () => {
-  it('does not expose unrestricted loaders, raw trust controls, or the CLI runner', () => {
+  it('does not expose unrestricted loaders, raw trust controls, Session internals, or the CLI runner', () => {
     expect('loadConfig' in shotlist).toBe(false)
     expect('loadLibrary' in shotlist).toBe(false)
     expect('trustFrom' in shotlist).toBe(false)
     expect('checkPath' in shotlist).toBe(false)
+    expect('sessionFor' in shotlist).toBe(false)
+    expect('sessionHosts' in shotlist).toBe(false)
+    expect('narrowSession' in shotlist).toBe(false)
     expect('run' in shotlist).toBe(false)
   })
 
@@ -106,10 +116,7 @@ describe('the contracted public interface', () => {
     expect(() => baselineFile(forged)).toThrow(/A Run opened by shotlist is required/)
     expect(() => readBaseline(forged)).toThrow(/A Run opened by shotlist is required/)
     expect(() => writeBaseline(forged, {})).toThrow(/A Run opened by shotlist is required/)
-    expect(() => sessionFor(forged, 'admin', 'x')).toThrow(/A Run opened by shotlist is required/)
-    expect(() => readSession(forged, { name: 'admin', file: 'elsewhere', keep: [] })).toThrow(
-      /A Run opened by shotlist is required/,
-    )
+    expect(() => readSession(forged, 'admin')).toThrow(/A Run opened by shotlist is required/)
     await expect(runSteps(forged, [], context)).rejects.toThrow(
       /A Run opened by shotlist is required/,
     )
