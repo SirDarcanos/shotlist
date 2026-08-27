@@ -2,13 +2,13 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
-import { checkPath, checkUrl, envFor } from './trust.js'
+import { authorizePath, checkUrl } from './trust.js'
 import { readSession, sessionFor } from './session.js'
 import { MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
 import type { Format } from './image.js'
 import type { Config, LoadedConfig, Style } from './config.js'
-import { ENV, expandSteps } from './recipe.js'
-import type { Library, Recipe } from './recipe.js'
+import { expandSteps } from './recipe.js'
+import type { Recipe } from './recipe.js'
 import { resolve as resolveInPage, runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
 import { drawAnnotations } from './annotate.js'
@@ -16,6 +16,20 @@ import type { DrawStyle, Mark } from './annotate.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
 import type { QueryInput, Rect } from './query.js'
+import { assertRecipe, assertRun } from './run.js'
+import type { DeepReadonly, Run } from './run.js'
+
+/** Optional behavior for capturing a Recipe through its Run. */
+export interface ShootOptions {
+  install?: boolean
+  browser?: Browser
+  onRetry?: (retry: Retry) => void
+}
+
+/** Authorize a Run path to its canonical target. */
+function capturePath(run: Run, path: string, where: string): string {
+  return authorizePath(run.trust, path, where)
+}
 
 export interface ShotResult {
   name: string
@@ -79,7 +93,11 @@ function settingsFor(recipe: Recipe, config: Config) {
 }
 
 /** Where a recipe's image is installed, refusing a destination the config never named. */
-function destinationFor(recipe: Recipe, loaded: LoadedConfig): string | undefined {
+function destinationFor(
+  run: Run,
+  recipe: Recipe,
+  loaded: LoadedConfig,
+): { authored: string; target: string } | undefined {
   if (!recipe.install || recipe.install === 'none') return undefined
   const target = loaded.config.install[recipe.install]
   if (!target) {
@@ -93,10 +111,10 @@ function destinationFor(recipe: Recipe, loaded: LoadedConfig): string | undefine
     fromRoot(loaded, target),
     `${recipe.name}${extensionOf(recipe.format ?? loaded.config.image.format)}`,
   )
-  if (loaded.trust) {
-    checkPath(loaded.trust, destination, `recipe "${recipe.name}": install."${recipe.install}"`)
+  return {
+    authored: destination,
+    target: capturePath(run, destination, `recipe "${recipe.name}": install."${recipe.install}"`),
   }
-  return destination
 }
 
 /** Turn the recipe's callouts into what the drawing layer needs, once the rects are known. */
@@ -167,16 +185,18 @@ function namedFamily(stack: string): string | undefined {
  * and the font files it points at are inlined into it, because a relative `url()` in an
  * inlined sheet would resolve against a page that is nowhere.
  */
-function fontSheet(style: Style, loaded: LoadedConfig): FontSheet {
+function fontSheet(run: Run, style: Style, loaded: LoadedConfig): FontSheet {
   const named = style.label.fontUrl
   if (!named) return {}
 
   let path = named
   try {
     const url = new URL(named)
-    if (url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'data:') {
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      checkUrl(run.trust, named, 'style.label.fontUrl')
       return { href: named }
     }
+    if (url.protocol === 'data:') return { href: named }
     if (url.protocol !== 'file:') {
       throw new ShotlistError(
         `style.label.fontUrl: ${url.protocol} is not something to load a stylesheet from`,
@@ -188,11 +208,11 @@ function fontSheet(style: Style, loaded: LoadedConfig): FontSheet {
     // Not a URL at all, so it is a path — relative to the config, like every other path.
   }
 
-  const file = fromRoot(loaded, path)
-  if (loaded.trust) checkPath(loaded.trust, file, 'style.label.fontUrl')
+  const authoredFile = fromRoot(loaded, path)
+  const file = capturePath(run, authoredFile, 'style.label.fontUrl')
   if (!existsSync(file)) {
     throw new ShotlistError(
-      `style.label.fontUrl: nothing at ${file} — a relative path is resolved from the ` +
+      `style.label.fontUrl: nothing at ${authoredFile} — a relative path is resolved from the ` +
         "config file's directory",
     )
   }
@@ -221,12 +241,16 @@ function fontSheet(style: Style, loaded: LoadedConfig): FontSheet {
   const css = readFileSync(file, 'utf8').replace(
     /url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
     (whole, _quote: string, target: string) => {
-      if (/^(https?:|data:)/i.test(target)) return whole
-      const asset = fromRoot({ root: dirname(file) }, target.split(/[?#]/)[0]!)
-      if (loaded.trust) checkPath(loaded.trust, asset, 'style.label.fontUrl')
+      if (/^https?:/i.test(target)) {
+        checkUrl(run.trust, target, 'style.label.fontUrl')
+        return whole
+      }
+      if (/^data:/i.test(target)) return whole
+      const authoredAsset = fromRoot({ root: dirname(authoredFile) }, target.split(/[?#]/)[0]!)
+      const asset = capturePath(run, authoredAsset, 'style.label.fontUrl')
       if (!existsSync(asset)) {
         throw new ShotlistError(
-          `style.label.fontUrl: ${basename(file)} points at ${target}, and there is no file there`,
+          `style.label.fontUrl: ${basename(authoredFile)} points at ${target}, and there is no file there`,
         )
       }
       return `url(data:${fontType(asset)};base64,${readFileSync(asset).toString('base64')})`
@@ -398,16 +422,17 @@ async function reEncode(
  * before being reported.
  */
 function sourceImage(
+  run: Run,
   recipe: Recipe,
   loaded: LoadedConfig,
 ): { image: Buffer; pixels: { width: number; height: number }; format: Format } {
-  const path = fromRoot(loaded, recipe.file!)
-  if (loaded.trust) checkPath(loaded.trust, path, `recipe "${recipe.name}": \`file:\``)
+  const authoredPath = fromRoot(loaded, recipe.file!)
+  const path = capturePath(run, authoredPath, `recipe "${recipe.name}": \`file:\``)
   if (!existsSync(path)) {
     throw inRecipe(
       recipe,
       '`file:`',
-      `no file at ${path} — a relative path is resolved from the config file's directory`,
+      `no file at ${authoredPath} — a relative path is resolved from the config file's directory`,
     )
   }
   const image = readFileSync(path)
@@ -434,31 +459,30 @@ function sourceImage(
  * scripted one carry identical callouts.
  */
 export async function shoot(
-  recipe: Recipe,
-  library: Library,
-  loaded: LoadedConfig,
-  options: { install?: boolean; browser?: Browser; onRetry?: (retry: Retry) => void } = {},
+  run: Run,
+  candidate: DeepReadonly<Recipe>,
+  options: ShootOptions = {},
 ): Promise<ShotResult> {
+  assertRun(run)
+  assertRecipe(run, candidate)
+  // A Run freezes the Recipe rather than changing its shape; capture only reads it.
+  const recipe = candidate as Recipe
+  const library = run.project.library
+  const loaded = run.project as unknown as LoadedConfig
   const { config } = loaded
   const style = mergeStyle(config.style, recipe.style as never)
   const settings = settingsFor(recipe, config)
-  // A `source: file` recipe never opens the site, so it is not asked to justify a URL.
-  if (loaded.trust && recipe.source === 'app') {
-    checkUrl(
-      loaded.trust,
-      settings.url,
-      `recipe "${recipe.name}": ${recipe.url ? '`url`' : '`site.url`'}`,
-    )
-  }
   const session =
     recipe.session === undefined
       ? undefined
-      : sessionFor(loaded, recipe.session, `recipe "${recipe.name}": \`session\``)
-  const outDir = fromRoot(loaded, config.paths.out)
-  if (loaded.trust) checkPath(loaded.trust, outDir, 'paths.out')
+      : sessionFor(run, recipe.session, `recipe "${recipe.name}": \`session\``)
+  const storageState = session ? readSession(run, session) : undefined
+  const authoredOutDir = fromRoot(loaded, config.paths.out)
+  const outDir = capturePath(run, authoredOutDir, 'paths.out')
   mkdirSync(outDir, { recursive: true })
-  const file = join(outDir, `${recipe.name}${extensionOf(settings.format)}`)
-  const source = recipe.source === 'file' ? sourceImage(recipe, loaded) : undefined
+  const file = join(authoredOutDir, `${recipe.name}${extensionOf(settings.format)}`)
+  const outputTarget = capturePath(run, file, `recipe "${recipe.name}": output`)
+  const source = recipe.source === 'file' ? sourceImage(run, recipe, loaded) : undefined
 
   // A caller shooting a whole set passes its own browser: launching one per recipe costs
   // about a second each, which over a project's worth of recipes is most of the run.
@@ -517,19 +541,18 @@ export async function shoot(
         deviceScaleFactor: settings.scale,
         colorScheme: settings.theme,
         reducedMotion: config.site.reducedMotion ? 'reduce' : 'no-preference',
-        ...(session ? { storageState: readSession(loaded, session) } : {}),
+        ...(storageState ? { storageState } : {}),
       })
       try {
         const page = await context.newPage()
         const ctx: RunContext = {
           pages: new Map<string, Page>([['main', page]]),
           page,
-          vars: { ...library.data, [ENV]: envFor(loaded.trust) },
+          vars: { ...library.data },
           rects: {},
           viewport: settings.viewport,
           timeout: config.site.timeout,
           newPage: () => context.newPage(),
-          ...(loaded.trust ? { trust: loaded.trust } : {}),
         }
         // Held rather than thrown from the `finally`, because a shot that already failed
         // is the more useful thing to report: an error about tidying up a page that never
@@ -538,6 +561,11 @@ export async function shoot(
         try {
           // The site not being up is the first thing a new project gets wrong, and
           // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
+          checkUrl(
+            run.trust,
+            settings.url,
+            `recipe "${recipe.name}": ${recipe.url ? '`url`' : '`site.url`'}`,
+          )
           try {
             await page.goto(settings.url, { waitUntil: 'load' })
           } catch (error) {
@@ -576,7 +604,8 @@ export async function shoot(
           if (config.site.settle) await page.waitForTimeout(config.site.settle)
 
           try {
-            await runSteps(expandSteps(recipe.setup, library.macros), ctx)
+            const steps = expandSteps(recipe.setup, library.macros)
+            await runSteps(run, steps, ctx)
           } catch (error) {
             throw inRecipe(recipe, 'setup', pageMessage(error))
           }
@@ -640,7 +669,8 @@ export async function shoot(
           // and leaves everything `setup` asked the application itself to do.
           if (recipe.teardown.length) {
             try {
-              await runSteps(expandSteps(recipe.teardown, library.macros), ctx)
+              const steps = expandSteps(recipe.teardown, library.macros)
+              await runSteps(run, steps, ctx)
             } catch (error) {
               tidying = inRecipe(recipe, 'teardown', pageMessage(error))
             }
@@ -664,7 +694,7 @@ export async function shoot(
             style,
             marks,
             masks,
-            fontSheet(style, loaded),
+            fontSheet(run, style, loaded),
             source ? MEDIA[source.format] : MEDIA.png,
             config.site.timeout,
           )
@@ -690,16 +720,16 @@ export async function shoot(
       ? drawn.png
       : await reEncode(browser, drawn.png, settings.format, settings.quality)
 
-    writeFileSync(file, written)
-    const destination = destinationFor(recipe, loaded)
+    writeFileSync(outputTarget, written)
+    const destination = destinationFor(run, recipe, loaded)
     if (options.install && destination) {
-      mkdirSync(dirname(destination), { recursive: true })
-      copyFileSync(file, destination)
+      mkdirSync(dirname(destination.target), { recursive: true })
+      copyFileSync(outputTarget, destination.target)
     }
     return {
       name: recipe.name!,
       file,
-      ...(options.install && destination ? { installed: destination } : {}),
+      ...(options.install && destination ? { installed: destination.authored } : {}),
       size: drawn.size,
       ...(ignored.length ? { ignored } : {}),
       ...(drawn.warnings.length ? { warnings: drawn.warnings } : {}),

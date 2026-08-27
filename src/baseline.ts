@@ -2,8 +2,10 @@ import { createRequire } from 'node:module'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ShotlistError } from './config.js'
-import type { LoadedConfig } from './config.js'
 import type { Browser } from './playwright.js'
+import { authorizePath } from './trust.js'
+import { assertRun } from './run.js'
+import type { Run } from './run.js'
 
 /**
  * What the committed images were taken with.
@@ -45,22 +47,31 @@ export function describeEnvironment(browser?: Browser): Environment {
   }
 }
 
-/** Where the record lives for a given project. */
-export function baselineFile(loaded: Pick<LoadedConfig, 'root'>): string {
-  return join(loaded.root, BASELINE_FILE)
+/** Where the Baseline record lives for a Run's Project. */
+export function baselineFile(run: Run): string {
+  assertRun(run)
+  return join(run.project.root, BASELINE_FILE)
 }
 
-/** Record what this run was taken with, beside the config. */
-export function writeBaseline(loaded: Pick<LoadedConfig, 'root'>, environment: Environment): void {
-  writeFileSync(baselineFile(loaded), `${JSON.stringify(environment, null, 2)}\n`)
+/** Canonical Baseline path authorized for an immediate filesystem effect. */
+function baselineTarget(run: Run): string {
+  return authorizePath(run.trust, baselineFile(run), BASELINE_FILE)
 }
 
-/** Read the record, or null when a project has never installed anything. */
-export function readBaseline(loaded: Pick<LoadedConfig, 'root'>): Environment | null {
-  const file = baselineFile(loaded)
-  if (!existsSync(file)) return null
+/** Record what this Run was taken with, beside the config. */
+export function writeBaseline(run: Run, environment: Environment): void {
+  assertRun(run)
+  writeFileSync(baselineTarget(run), `${JSON.stringify(environment, null, 2)}\n`)
+}
+
+/** Read the record, or null when a Project has never installed anything. */
+export function readBaseline(run: Run): Environment | null {
+  assertRun(run)
+  const file = baselineFile(run)
+  const target = baselineTarget(run)
+  if (!existsSync(target)) return null
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as Environment
+    return JSON.parse(readFileSync(target, 'utf8')) as Environment
   } catch (error) {
     throw new ShotlistError((error as Error).message, file)
   }

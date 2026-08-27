@@ -1,7 +1,8 @@
 import { ShotlistError, pageMessage } from './config.js'
 import { checkUrl } from './trust.js'
-import type { Trust } from './trust.js'
-import { interpolate } from './recipe.js'
+import { ENV, interpolate } from './recipe.js'
+import { assertRun } from './run.js'
+import type { Run } from './run.js'
 import { resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
 import type { ResolvedStep, StepInput } from './recipe.js'
@@ -23,8 +24,6 @@ export interface RunContext {
   viewport: { width: number; height: number }
   timeout: number
   newPage(): Promise<Page>
-  /** What this recipe may reach, when the operator said the config is not theirs. */
-  trust?: Trust
   /** Set by `dialog:`. Unset, nothing is listening and the browser's own default holds. */
   dialog?: DialogPolicy
 }
@@ -217,15 +216,18 @@ async function elementFor(
  * steps two levels down still need the outer loop's variable.
  */
 export async function runSteps(
+  run: Run,
   steps: readonly ResolvedStep[],
   ctx: RunContext,
   scope: Readonly<Record<string, unknown>> = {},
 ): Promise<void> {
-  for (const resolved of steps) await runStep(resolved, ctx, scope)
+  assertRun(run)
+  for (const resolved of steps) await runStep(run, resolved, ctx, scope)
 }
 
 /** Run one step, with `$name` resolved against the variables in scope where it was written. */
 async function runStep(
+  run: Run,
   resolved: ResolvedStep,
   ctx: RunContext,
   outer: Readonly<Record<string, unknown>>,
@@ -236,9 +238,10 @@ async function runStep(
   // They are resolved here rather than where the frame was built, because an argument may
   // name a loop variable — `use: set-hp` `with: {who: $foe}` inside an `each` — and the
   // frames are built when the file loads, before `$foe` stands for anything.
-  const enclosing = { ...ctx.vars, ...outer }
+  const environment = { [ENV]: run.env }
+  const enclosing = { ...ctx.vars, ...outer, ...environment }
   const args = interpolate(resolved.vars, enclosing, 'keep') as Record<string, unknown>
-  const scope = { ...enclosing, ...args }
+  const scope = { ...enclosing, ...args, ...environment }
   // A block's own keys resolve now; the steps inside it do not. `each` binds its loop
   // variable when it runs, so interpolating its children here would look for a value
   // that only exists one level down.
@@ -258,7 +261,7 @@ async function runStep(
 
   if ('goto' in step) {
     const to = text('goto')
-    if (ctx.trust) checkUrl(ctx.trust, to, '`goto`')
+    checkUrl(run.trust, to, '`goto`')
     await page.goto(to, { waitUntil: 'load' })
     return
   }
@@ -345,7 +348,9 @@ async function runStep(
   }
   if ('repeat' in step) {
     const times = Number(step['repeat'])
-    for (let i = 0; i < times; i++) await runSteps(resolved.nested ?? [], ctx, outer)
+    for (let i = 0; i < times; i++) {
+      await runSteps(run, resolved.nested ?? [], ctx, outer)
+    }
     return
   }
   if ('each' in step) {
@@ -355,13 +360,13 @@ async function runStep(
     }
     const name = text('as')
     for (const item of items) {
-      await runSteps(resolved.nested ?? [], ctx, { ...outer, [name]: item })
+      await runSteps(run, resolved.nested ?? [], ctx, { ...outer, [name]: item })
     }
     return
   }
   if ('optional' in step) {
     try {
-      await runSteps(resolved.nested ?? [], ctx, outer)
+      await runSteps(run, resolved.nested ?? [], ctx, outer)
     } catch {
       // `optional` exists for the dialog that is sometimes already closed.
     }
@@ -372,7 +377,7 @@ async function runStep(
     const viewport = step['viewport'] as { width: number; height: number } | undefined
     if (viewport) await opened.setViewportSize(viewport)
     const to = text('openPage')
-    if (ctx.trust) checkUrl(ctx.trust, to, '`openPage`')
+    checkUrl(run.trust, to, '`openPage`')
     await opened.goto(to, { waitUntil: 'load' })
     ctx.pages.set(text('as'), opened)
     ctx.page = opened

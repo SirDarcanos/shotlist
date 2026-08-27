@@ -3,8 +3,11 @@ import type { ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { createConnection } from 'node:net'
 import { ShotlistError, fromRoot } from './config.js'
-import { checkCommand } from './trust.js'
-import type { LoadedConfig, Serve } from './config.js'
+import { ENV, interpolate } from './recipe.js'
+import { assertRun, environmentSnapshot } from './run.js'
+import type { Run } from './run.js'
+import { authorizePath, checkCommand, checkUrl } from './trust.js'
+import type { Serve } from './config.js'
 
 /** A server shotlist started, and is therefore responsible for stopping. */
 export interface Server {
@@ -141,11 +144,22 @@ function quoted(output: readonly string[]): string {
  * usually already up in another terminal, and starting a second would only fail to bind
  * the port the first one holds.
  */
-export async function startServer(loaded: LoadedConfig): Promise<Server | null> {
+export async function startServer(run: Run): Promise<Server | null> {
+  assertRun(run)
+  const loaded = run.project
   const { serve, url } = loaded.config.site
   if (!serve) return null
-  if (loaded.trust) checkCommand(loaded.trust, 'site.serve')
+  if (isHttp(url)) checkUrl(run.trust, url, 'site.url')
   if (isHttp(url) && (await answers(url))) return null
+  checkCommand(run.trust, 'site.serve')
+
+  const cwd = serve.cwd ? fromRoot(loaded, serve.cwd) : loaded.root
+  const authorizedCwd = authorizePath(run.trust, cwd, 'site.serve.cwd')
+  const ready = serve.ready ?? url
+  if (typeof ready === 'string' && isHttp(ready)) {
+    checkUrl(run.trust, ready, 'site.serve.ready')
+  }
+  const configuredEnvironment = interpolate(serve.env, { [ENV]: run.env }) as Record<string, string>
 
   const { tokens, bare } = parseCommand(serve.command)
   refuseShellSyntax(bare, tokens)
@@ -158,8 +172,8 @@ export async function startServer(loaded: LoadedConfig): Promise<Server | null> 
   }
 
   const child = spawn(program!, args, {
-    cwd: serve.cwd ? fromRoot(loaded, serve.cwd) : loaded.root,
-    env: { ...process.env, ...serve.env },
+    cwd: authorizedCwd,
+    env: { ...environmentSnapshot(run), ...configuredEnvironment },
     // Its own process group. `npm run dev` is npm, which spawns node, which is the
     // server: killing only what we spawned would leave the one holding the port.
     detached: true,
@@ -170,7 +184,7 @@ export async function startServer(loaded: LoadedConfig): Promise<Server | null> 
 
   const server = manage(child, serve.command)
   try {
-    await waitUntilReady(child, serve, readinessProbe(serve.ready ?? url, output), output)
+    await waitUntilReady(child, serve, readinessProbe(ready, output), output)
   } catch (error) {
     await server.stop()
     throw error
@@ -285,8 +299,9 @@ function manage(child: ChildProcess, command: string): Server {
 }
 
 /** Run `body` with the site up, stopping afterwards whatever happens. */
-export async function withServer<T>(loaded: LoadedConfig, body: () => Promise<T>): Promise<T> {
-  const server = await startServer(loaded)
+export async function withServer<T>(run: Run, body: () => Promise<T>): Promise<T> {
+  assertRun(run)
+  const server = await startServer(run)
   try {
     return await body()
   } finally {

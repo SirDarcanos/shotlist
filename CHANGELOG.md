@@ -5,17 +5,61 @@ Notable changes to shotlist. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 **The recipe format is public API.** Renaming a step verb, removing a query key, or
-changing what an existing key means is a breaking change, and says here exactly what to
-edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
+changing what an existing key means is a breaking change. Each breaking-change entry tells
+recipe authors what to edit. See
+[CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 
 ## [Unreleased]
 
 ### Added
 
+- **Explicit Run opening** through `openRun(authority, configFile)`. shotlist authorizes
+  each configured Library directory before it lists the directory and each document before
+  it reads the document. The Run holds frozen authority, environment, config, and Library
+  snapshots.
+
+- **Run-based browser and server interfaces.** Pass the Run to browser steps and managed
+  site startup. shotlist checks interpolated navigation URLs, server commands, working
+  directories, and readiness URLs against the Run. Both interfaces read interpolated
+  environment values from the Run snapshot.
+
+- **Run-owned Session access** for login and authenticated capture. shotlist checks the
+  canonical path for each Session read or write against the Run. Scripted login uses the
+  environment snapshot that `openRun` captured.
+
+- **Run-based capture** for Application and File Recipes. shotlist checks navigation URLs,
+  source images, output and install destinations, and local font files against the Run.
+  Each retry uses the same Run with a fresh browser context.
+
+- **Run-policy linting** under explicit Operator authority. Lint reports malformed or
+  unauthorized Library documents without stopping at the first one. shotlist checks each
+  configured directory before listing it and each document before reading it. The operator
+  can select `--untrusted`; lint otherwise uses the trusted default.
+
+- **Run-based checking and Baseline access.** Checking compares Output images with
+  Committed images, checks canonical image and diff paths, and re-shoots each Recipe through
+  the same Run. Baseline reads and writes follow the Run's path policy.
+
 - **Repository-local agent context**, with a canonical glossary and branch-specific guides
-  for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
-  now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these
-  boundaries from imports or carrying every rule into every task.
+  for language, runtime, imaging, security, tests, tracker use, and writing. Agents start at
+  `AGENTS.md` and load the guide for their task instead of reconstructing project rules from
+  imports.
+
+### Changed
+
+- **Effectful library calls require an authentic Run.** Callers open a Run with explicit
+  Operator authority, then pass the Run and its Recipes to capture, checking, Session,
+  server, step, and Baseline interfaces. shotlist rejects missing or forged Runs and copied
+  or foreign Recipes before an effect. Pass Operator authority to lint because malformed
+  Projects cannot open a complete Run. Parse Config, Recipe, Macro, Library-document, and
+  Query values in memory without Operator authority.
+
+### Removed
+
+- **Config-plus-Library compatibility interfaces and mutable config trust.** shotlist
+  removed optional trust from `LoadedConfig`. The package root no longer exports
+  unrestricted config or Library loaders, raw trust checks, or the CLI runner. Use
+  `openRun` for Project effects and the parse functions for values already in memory.
 
 ## [0.5.0] — 2026-08-24
 

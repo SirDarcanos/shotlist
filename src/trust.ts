@@ -1,5 +1,5 @@
-import { realpathSync } from 'node:fs'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { ShotlistError } from './config.js'
 
 /**
@@ -146,39 +146,43 @@ const METADATA = /^(metadata\.google\.internal|metadata\.goog|instance-data)$/i
  * administrator setting up a machine or a CI image can set this, and no recipe, config
  * or flag can take it back out.
  */
-function denyFromEnv(): string[] {
-  return (process.env['SHOTLIST_DENY'] ?? '')
+function denyFromEnv(environment: Readonly<Record<string, string | undefined>>): string[] {
+  return (environment['SHOTLIST_DENY'] ?? '')
     .split(/[,:]/)
     .map((name) => name.trim().replace(/^\/+|\/+$/g, ''))
     .filter(Boolean)
 }
 
 /** Whether the operator asked for the untrusted rules, from the flag or the environment. */
-export function trustFrom(
-  where: {
-    root: string
-    siteUrl: string
-    allow?: readonly string[]
-    /** The project's own forbidden names, which hold whether it is trusted or not. */
+export interface TrustSource {
+  root: string
+  siteUrl: string
+  allow?: readonly string[]
+  /** The project's own forbidden names, which hold whether it is trusted or not. */
+  deny?: readonly string[]
+  /** Variable names the config asks for, which only a trusted one gets. */
+  allowEnv?: readonly string[]
+  /** What the operator granted or forbade, which outlives `--untrusted`. */
+  granted?: {
+    hosts?: readonly string[]
+    paths?: readonly string[]
     deny?: readonly string[]
-    /** Variable names the config asks for, which only a trusted one gets. */
-    allowEnv?: readonly string[]
-    /** What the operator granted or forbade, which outlives `--untrusted`. */
-    granted?: {
-      hosts?: readonly string[]
-      paths?: readonly string[]
-      deny?: readonly string[]
-      env?: readonly string[]
-    }
-  },
+    env?: readonly string[]
+  }
+}
+
+/** Derive one Run's policy from an environment snapshot. */
+export function trustFromEnvironment(
+  where: TrustSource,
   flag: boolean,
+  environment: Readonly<Record<string, string | undefined>>,
 ): Trust {
-  const fromEnv = process.env['SHOTLIST_UNTRUSTED']
+  const fromEnv = environment['SHOTLIST_UNTRUSTED']
   const untrusted = flag || (fromEnv !== undefined && fromEnv !== '' && fromEnv !== '0')
   // `site.allow` is the config widening its own reach, which is only worth anything when
   // the config is one you wrote. Untrusted, the scope is the site it declared and no more.
   const granted = where.granted ?? {}
-  const forbiddenEnv = envDenyFromEnv()
+  const forbiddenEnv = envDenyFromEnv(environment)
   return {
     untrusted,
     root: where.root,
@@ -188,14 +192,19 @@ export function trustFrom(
     ]),
     paths: (granted.paths ?? []).map((path) => resolve(where.root, path)),
     // Both, always: neither can do anything but refuse more.
-    deny: [...(where.deny ?? []), ...(granted.deny ?? []), ...denyFromEnv()],
+    deny: [...(where.deny ?? []), ...(granted.deny ?? []), ...denyFromEnv(environment)],
     // Dropped whole rather than narrowed: a partial grant reads like a safe one. The
     // config's own list is widening, so it goes the way `site.allow` goes.
     env: (untrusted
       ? []
-      : [...(where.allowEnv ?? []), ...(granted.env ?? []), ...envFromEnv()]
+      : [...(where.allowEnv ?? []), ...(granted.env ?? []), ...envFromEnv(environment)]
     ).filter((name) => !forbiddenEnv.some((pattern) => pattern.test(name))),
   }
+}
+
+/** Derive policy from the machine's current environment for focused policy callers. */
+export function trustFrom(where: TrustSource, flag: boolean): Trust {
+  return trustFromEnvironment(where, flag, process.env)
 }
 
 /**
@@ -211,8 +220,8 @@ export function trustFrom(
  * shotlist is close to the only thing that runs — a container built to shoot configs that
  * came from somewhere else — and worth nothing as a control over a person at a terminal.
  */
-function envDenyFromEnv(): RegExp[] {
-  return (process.env['SHOTLIST_ENV_DENY'] ?? '')
+function envDenyFromEnv(environment: Readonly<Record<string, string | undefined>>): RegExp[] {
+  return (environment['SHOTLIST_ENV_DENY'] ?? '')
     .split(/[,:\s]+/)
     .map((name) => name.trim())
     .filter(Boolean)
@@ -220,8 +229,8 @@ function envDenyFromEnv(): RegExp[] {
 }
 
 /** Names granted through `SHOTLIST_ENV`, for CI that sets its secrets there anyway. */
-function envFromEnv(): string[] {
-  return (process.env['SHOTLIST_ENV'] ?? '')
+function envFromEnv(environment: Readonly<Record<string, string | undefined>>): string[] {
+  return (environment['SHOTLIST_ENV'] ?? '')
     .split(/[,:\s]+/)
     .map((name) => name.trim())
     .filter(Boolean)
@@ -305,46 +314,69 @@ export function checkUrl(trust: Trust, url: string, where: string): void {
  * A destination is usually a directory that has not been made yet, so this climbs to the
  * nearest part that does exist and resolves that: what is not there cannot be a link.
  */
-function realpathOf(path: string): string {
+function realpathOf(path: string, followed = new Set<string>()): string {
   let here = path
   const rest: string[] = []
   for (;;) {
     try {
       return resolve(realpathSync(here), ...rest.reverse())
     } catch {
+      try {
+        if (lstatSync(here).isSymbolicLink()) {
+          if (followed.has(here)) return path
+          followed.add(here)
+          const target = resolve(dirname(here), readlinkSync(here), ...[...rest].reverse())
+          return realpathOf(target, followed)
+        }
+      } catch {
+        // This component does not exist; its nearest existing ancestor decides policy.
+      }
       const up = dirname(here)
       if (up === here) return path
-      rest.push(here.slice(up.length + 1))
+      rest.push(basename(here))
       here = up
     }
   }
 }
 
-/** Refuse a path that holds a secret, or — untrusted — one that leaves the project. */
-export function checkPath(trust: Trust, path: string, where: string): void {
+declare const authorizedPath: unique symbol
+
+/** A canonical path returned by the policy gateway for an immediate filesystem effect. */
+export type AuthorizedPath = string & { readonly [authorizedPath]: true }
+
+/** Authorize a path and return the canonical target that the caller may touch. */
+export function authorizePath(trust: Trust, path: string, where: string): AuthorizedPath {
   if (CONTROL.test(path)) {
     throw new ShotlistError(`${where}: ${JSON.stringify(path)} holds a control character`)
   }
   const full = isAbsolute(path) ? path : resolve(trust.root, path)
 
-  // Always, in every mode: these are not things anybody screenshots.
-  const secret = secretIn(full, trust.deny)
-  if (secret !== null) throw refuse(where, secret)
-
-  if (!trust.untrusted) return
-  // Where the path really goes: a link committed in the project points wherever it likes,
-  // and comparing the name would confine a run to a doormat. `realpath` walks the parts
-  // that exist, which is enough — what does not exist yet cannot be a link.
+  // Check both spellings. A harmless-looking link can point at a secret name, and trusted
+  // mode does not make `.env` or `.git` screenshot material.
+  const lexicalSecret = secretIn(full, trust.deny)
+  if (lexicalSecret !== null) throw refuse(where, lexicalSecret)
   const real = realpathOf(full)
-  const within = (root: string) => {
-    const inside = relative(realpathOf(root), real)
-    return inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))
+  const targetSecret = secretIn(real, trust.deny)
+  if (targetSecret !== null) throw refuse(where, targetSecret)
+
+  if (trust.untrusted) {
+    const within = (root: string) => {
+      const inside = relative(realpathOf(root), real)
+      return inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))
+    }
+    if (!within(trust.root) && !trust.paths.some(within)) {
+      throw new ShotlistError(
+        `${where}: ${path} is outside the project, and this run is --untrusted. ` +
+          'Pass --allow-path to let it out.',
+      )
+    }
   }
-  if (within(trust.root) || trust.paths.some(within)) return
-  throw new ShotlistError(
-    `${where}: ${path} is outside the project, and this run is --untrusted. ` +
-      'Pass --allow-path to let it out.',
-  )
+  return real as AuthorizedPath
+}
+
+/** Refuse a path that holds a secret, or — untrusted — one that leaves the project. */
+export function checkPath(trust: Trust, path: string, where: string): void {
+  authorizePath(trust, path, where)
 }
 
 /** Refuse to start a process, which is the one thing a strange config must never do. */

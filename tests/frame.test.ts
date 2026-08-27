@@ -4,9 +4,11 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { loadPlaywright, runSteps } from '../src/index.js'
+import { loadPlaywright, openRun, runSteps } from '../src/index.js'
+import type { Run } from '../src/index.js'
 import type { Browser, Page } from '../src/playwright.js'
 import { resolve } from '../src/steps.js'
+import { removeProjects, tempProject } from './tempProject.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -37,9 +39,11 @@ let browser: Browser
 let page: Page
 let here: Awaited<ReturnType<typeof serve>>
 let elsewhere: Awaited<ReturnType<typeof serve>>
+let domainRun: Run
 
 beforeAll(async () => {
   ;[here, elsewhere] = await Promise.all([serve(), serve()])
+  domainRun = openRun({ untrusted: false }, join(tempProject(), 'shotlist.config.yaml'))
   browser = await loadPlaywright().chromium.launch()
   page = await (await browser.newContext({ viewport: { width: 900, height: 600 } })).newPage()
 }, 120_000)
@@ -48,6 +52,7 @@ afterAll(async () => {
   await browser?.close()
   await here?.close()
   await elsewhere?.close()
+  removeProjects()
 })
 
 const ctx = { rects: {}, viewport: { width: 900, height: 600 }, timeout: 5000 }
@@ -122,7 +127,7 @@ describe('a query naming a frame', () => {
       newPage: () => Promise.reject(new Error('not needed')),
     }
     const step = { click: { frame: { css: 'iframe#panel' }, css: '#pay' } }
-    await runSteps([{ step, vars: {} }], run)
+    await runSteps(domainRun, [{ step, vars: {} }], run)
     const found = await resolve(page, { frame: { css: 'iframe#panel' }, css: '#paid' }, ctx)
     expect(found.element).not.toBeNull()
   })

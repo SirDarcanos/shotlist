@@ -1,64 +1,60 @@
 # Contributing to shotlist
 
-Bug reports, recipes that don't work, and missing vocabulary are all welcome.
+Report bugs, broken recipes, and missing vocabulary through GitHub Issues.
 
-This is the human contributor guide: setup, commands, rules, repository layout, what
-"done" means, and how a release is cut. It contains everything needed to open a good pull
-request. Agents start at [`AGENTS.md`](./AGENTS.md), which routes them back here for this
-workflow and into branch-specific context only when the work needs it.
+Use this guide to set up the repository, make changes, open a pull request, or cut a release.
+Agents start at [`AGENTS.md`](./AGENTS.md), then read this workflow and the context their task
+requires.
 
 ## Setup
 
-Node 20 or newer.
+Use Node 20 or newer.
 
 ```bash
 npm install
-npm i -D playwright   # only for the browser-driven layers
+npm i -D playwright   # browser-driven layers
 ```
 
-Playwright is an optional peer dependency, so `npm install` does not pull it in. The
-config, recipe, macro and query layers have no browser dependency, and their tests run in
-Node and jsdom.
+Playwright is an optional peer dependency, so `npm install` does not pull it in. You can
+test the config, recipe, macro, and query layers in Node and jsdom without a browser.
 
 ## Commands
 
 | Command                | What it does                                     |
 | ---------------------- | ------------------------------------------------ |
 | `npm test`             | Run the suite once                               |
-| `npm run test:watch`   | Run the suite on every save                      |
+| `npm run test:watch`   | Run the suite after each save                    |
 | `npm run typecheck`    | `tsc --noEmit` over `src`, `tests` and `scripts` |
 | `npm run lint`         | ESLint's promise rules over `src` and `tests`    |
 | `npm run format`       | Format everything with Prettier                  |
 | `npm run format:check` | Fail if anything is unformatted                  |
 | `npm run build`        | Compile to `dist/` and generate the JSON Schemas |
 
-- Prettier decides formatting. Do not hand-align code or fight it. `tests/fixture/` is
-  excluded: its `data-rect` attributes are aligned with the CSS by hand.
-- ESLint runs three rules about unawaited promises and nothing else. `tsc` cannot see
-  those, and a step that has not finished produces a wrong screenshot rather than an error.
-- Run `npm run build` after changing any schema. The JSON Schemas that drive editor
-  autocomplete are generated from the zod ones, so a new field only reaches editors once
-  they are regenerated.
+- Let Prettier format the files. Keep `tests/fixture/` hand-aligned because its `data-rect`
+  attributes correspond to the CSS.
+- Use ESLint to catch unawaited promises that `tsc` cannot see. An unfinished step produces
+  a wrong screenshot rather than an error.
+- Run `npm run build` after changing a schema. The build derives JSON Schemas from the Zod
+  schemas, and editors need those generated files for autocomplete.
 
 ## Steps for contributing
 
 1. Create an issue for the bug you want to fix or the feature you want to add.
-2. Create your own fork on GitHub, then check out your fork. A branch per issue is good
-   practice, though not mandatory.
-3. Write your code, and a test for it.
-4. Run the gate. Run it unpiped — `npm test | grep …` reports grep's exit code, so a `&&`
-   chain carries on past a suite that failed:
+2. Create your own fork on GitHub, check it out, and use a branch for the issue.
+3. Write the code and its test.
+4. Run the gate without a pipe. `npm test | grep …` reports grep's exit code, so a `&&`
+   chain continues after a test failure:
 
    ```bash
    npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
    ```
 
-5. If everything is green, commit to your fork and open a pull request from there. Make
-   sure to reference your issue by number, e.g. `#123`.
+5. After the gate passes, commit to your fork and open a pull request. Reference the issue
+   by number, such as `#123`.
 
-One concern per pull request. Commit subjects are `Area: what changed` — imperative,
-sentence case after the prefix. The body explains why. The project is MIT; the LICENSE
-file is the whole of it, so source files carry no license headers.
+Keep each pull request focused on one concern. Write commit subjects as `Area: what
+changed`, using an imperative verb and sentence case after the prefix. Use the body to
+explain why. The MIT license applies without source-file headers.
 
 ## Working with an agent
 
@@ -67,67 +63,59 @@ rather than copying sections of this guide into a prompt; its context pointers l
 language, runtime, imaging, security, or test material the task needs without creating a
 second source of truth.
 
-You remain the author. Read the diff, run the gate yourself, and be ready to explain why
-the change is right. A patch nobody has read is not ready, whoever typed it.
+You remain the author. Read the diff, run the gate, and explain why the change is right
+before you submit it.
 
 ## What "done" means
 
-All of these, not most of them.
+Meet each criterion before you submit a pull request.
 
-- [ ] The gate is green: `format:check`, `lint`, `typecheck`, `test`, `build`.
-- [ ] New or changed behavior has a test. A bug fix has a test that failed before it.
-- [ ] Anything counting, indexing or measuring was checked by breaking it: change the
-      implementation, watch the test fail, put it back. A test that cannot fail is not one,
-      and a fixture the same length as the index under test hides an off-by-one — `nth: -2`
-      and `nth: 0` are the same element in a list of two.
-- [ ] A new query primitive has a shape in `tests/fixture/` and a test against it. A new
-      step verb is in the `VERBS` array in `src/recipe.ts`, which is what gives a typo of
-      it a "did you mean" suggestion.
-- [ ] [`CHANGELOG.md`](./CHANGELOG.md) has an entry under `## [Unreleased]`, in the right
-      section.
-- [ ] A change to the recipe format, the step vocabulary or the query language is in the
-      reference at [shotlist.dev/docs](https://shotlist.dev/docs), which lives in its own
-      repository. The README is the short version and links there; `skills/shotlist/` ships
-      with the package and needs anything an agent writing recipes would have to know.
-- [ ] The change went into the right part of those docs. They follow
-      [Diátaxis](https://diataxis.fr/), so a new key is a row in `reference/`, the reason
-      behind it belongs in `explanation/`, and the task it makes possible is a page in
-      `how-to/`. One change often touches more than one, and those are not duplicates of
-      each other. See that repository's `AGENTS.md`.
-- [ ] Nothing is documented that does not work yet, unless it is marked as not built.
+- [ ] Run the full gate: `format:check`, `lint`, `typecheck`, `test`, `build`.
+- [ ] Test new or changed behavior. For a bug fix, add a test that fails against the old
+      implementation.
+- [ ] Check counting, indexing, and measurement tests by breaking the implementation,
+      watching the test fail, and restoring the code. Use fixtures that expose boundary
+      errors: `nth: -2` and `nth: 0` select the same element in a list of two.
+- [ ] Add a shape in `tests/fixture/` and a test for each new query primitive. Add each new
+      step verb to the `VERBS` array in `src/recipe.ts` so typos receive a "did you mean"
+      suggestion.
+- [ ] Add an entry to the correct `## [Unreleased]` section in
+      [`CHANGELOG.md`](./CHANGELOG.md).
+- [ ] Document recipe format, step vocabulary, and query language changes in the separate
+      [shotlist.dev/docs](https://shotlist.dev/docs) repository. Keep this README brief, and
+      update `skills/shotlist/` with facts an agent needs to write recipes.
+- [ ] Put each documentation change in its [Diátaxis](https://diataxis.fr/) section: keys in
+      `reference/`, reasons in `explanation/`, and tasks in `how-to/`. A change may require
+      more than one section. Follow that repository's `AGENTS.md`.
+- [ ] Document working behavior. Mark planned behavior as not built.
 
 ## The rules
 
-1. **A recipe is data.** If a screenshot needs code, the vocabulary is missing a verb or a
-   query primitive — add that instead. Do not add an `eval:` step, or any other way to run
-   JavaScript from a recipe. Pull requests that do will not be merged.
-2. **Nothing site-specific ships in the package.** No color that only suits a dark app, no
-   selector, no domain word, no assumption about what a screenshot is for. Values like that
-   are config, with a neutral default.
-3. **One definition per shape.** The zod schemas in `config.ts` and `recipe.ts` are the
-   source: TypeScript types are inferred from them, and the JSON Schemas are generated from
-   them at build time. Do not hand-write either.
-4. **Errors name the file, the path inside it, and the fix.** The person reading them is
-   editing YAML, not TypeScript. `unknown step "clik" — did you mean "click"?` is the
-   standard; a zod dump is not.
-5. **Every path goes through `checkPath`, every URL through `checkUrl`**, both in
-   `src/trust.ts`. A run may be given a config nobody vouched for, and those two are the
-   whole of what keeps it to the project and its own site. A new caller that skips them
-   fails no test.
-6. **A control never comes from the config.** `--untrusted`, `--allow`, `--allow-path` and
-   `SHOTLIST_*` are the operator's. A config may narrow what it is allowed — `deny:` is
-   honored in every mode — and may only widen it when it is trusted.
-7. **Every Playwright call is awaited**, and Playwright itself is resolved at run time. A
-   missed await does not throw: the step has not finished when the screenshot is taken, and
-   a wrong image is written silently. Consuming projects must not pay for the browser
-   download on every install, so when Playwright is missing, print the command that
-   installs it.
-8. **`evaluateQuery` is pure.** No imports, no closure over anything. It is serialized into
-   the page to run, and tested in jsdom.
-9. **Every named function opens with a one-line JSDoc**, so editors show it on hover. No
-   other comments unless the code cannot say it: a non-obvious why, a gotcha, a workaround.
-10. **Tests live in `tests/`, mirroring `src/`.** The pure layers run in Node, the drawing
-    layer in jsdom, the browser path against `tests/fixture/`.
+1. **Keep recipes declarative.** Add a verb or query primitive when the vocabulary cannot
+   describe a screenshot. Reject `eval:` and any other recipe field that runs JavaScript.
+2. **Keep the package independent of sites.** Put product colors, selectors, domain terms,
+   and screenshot purposes in config. Give each setting a neutral default.
+3. **Define each shape once.** Define Zod schemas in `config.ts` and `recipe.ts`, infer the
+   TypeScript types, and generate the JSON Schemas during the build. Do not hand-write the
+   derived types or schemas.
+4. **Write errors for someone editing YAML.** Name the file, the path inside it, and the
+   fix. Use `unknown step "clik" — did you mean "click"?` rather than a Zod dump.
+5. **Guard each path and URL.** Route each path through `checkPath` and each URL through
+   `checkUrl` in `src/trust.ts`. A run may receive a config that no maintainer reviewed,
+   and new callers can bypass the trust boundary without failing a test.
+6. **Keep controls under operator authority.** The operator owns `--untrusted`, `--allow`,
+   `--allow-path`, and `SHOTLIST_*`. A config can narrow authority through `deny:` in any
+   mode. It can widen authority in trusted mode.
+7. **Await each Playwright call and resolve Playwright at run time.** If you miss an await,
+   shotlist captures the page before the step finishes and writes the wrong image without
+   an error. Keep Playwright optional so consuming projects avoid a browser download during
+   installation. If Playwright is missing, print the installation command.
+8. **Keep `evaluateQuery` pure.** Playwright serializes it into the page, so it cannot use
+   imports or close over module state. Test it in jsdom.
+9. **Open each named function with a one-line JSDoc.** Editors show that line on hover. Add
+   other comments for a non-obvious reason, gotcha, or workaround.
+10. **Place tests in `tests/`, mirroring `src/`.** Run pure-layer tests in Node, drawing
+    tests in jsdom, and browser tests against `tests/fixture/`.
 
 ## Where things live
 
@@ -155,57 +143,51 @@ All of these, not most of them.
 
 ## Adding a step verb or a query primitive
 
-1. **A real screenshot that cannot be described today.** Most gaps turn out to be an
-   existing primitive that was hard to find.
-2. **Composable, not special-cased.** `pick: outermost` was added because climbing to the
-   nearest matching ancestor could not reach a modal's card. It combines with every other
-   filter. A `modalCard:` verb would not have.
-3. **Not specific to one site, framework or design system.** Those belong in a project's
-   own finders.
-4. **A fixture shape and a test to match.**
+1. Start with a screenshot the current vocabulary cannot describe. Check whether an
+   existing primitive solves it before adding one.
+2. Add a primitive that composes with existing filters. `pick: outermost` can reach a
+   modal's card when the nearest matching ancestor cannot; a `modalCard:` verb would serve
+   one structure.
+3. Keep site, framework, and design-system details in project finders.
+4. Add a fixture shape and a matching test.
 
 ## The fixtures
 
-`tests/fixture/index.html` is a three-column app — list, detail pane, controls, modal —
-that exists to exercise query primitives. The browser-driven tests shoot it; the jsdom
-tests query it. Every element carries `data-rect="x,y,width,height"`, because jsdom has no
-layout engine and a real browser ignores the attribute. Change that file's CSS and you
-update the attributes too, or the jsdom tests pass against numbers the page no longer has.
+Use `tests/fixture/index.html` to exercise query primitives against a list, detail pane,
+controls, and modal. Browser tests shoot it, while jsdom tests query it. Each element has a
+`data-rect="x,y,width,height"` attribute because jsdom lacks a layout engine and browsers
+ignore the attribute. Update the attributes when you change the CSS, or jsdom will test
+stale geometry.
 
-`tests/fixture/site.html` is a product page — brand, nav, hero, pricing, table, footer —
-for tests that need a page shaped like the ones recipes are really written against. It is
-only ever shot in a real browser, so it carries no `data-rect` and must not grow any. Its
-"last seen" column is redrawn on every load on purpose: it is what `mask` and
-`check.ignore` are tested against.
+Use `tests/fixture/site.html` for browser tests that need a product page with a brand, nav,
+hero, pricing, table, and footer. Do not add `data-rect`; jsdom does not use this fixture.
+Its script redraws the "last seen" column after each load so tests can exercise `mask` and
+`check.ignore`.
 
-`tests/fixture/signin.html` has two states — a sign-in form, and what somebody signed in
-sees — chosen by a cookie the form sets itself. It is the only fixture served over http
-rather than opened from disk, because a `file:` origin keeps no cookies and a session is
-cookies. The session tests start a server for it themselves.
+Use `tests/fixture/signin.html` to test a sign-in form and the signed-in state. The form sets
+a cookie that selects the state. Session tests serve this fixture over HTTP because a
+`file:` origin cannot retain cookies.
 
-`tests/fixture/framed.html` holds an iframe, offset from the page and given a border and
-padding — the two things a rect measured inside a frame does not know about. Its `?src=`
-decides where `framed-inner.html` loads from, so one pair covers a same-origin frame and a
-cross-origin one; the frame tests start two servers to make the second real.
+Use `tests/fixture/framed.html` to test an iframe with an offset, border, and padding. A
+rectangle measured inside the frame excludes those values. The `?src=` parameter loads
+`framed-inner.html` from the same origin or another origin; frame tests start two servers
+for the cross-origin case.
 
-`tests/fixture/verbs.html` holds controls and an event log for the step vocabulary. It
-keeps action semantics out of the query fixture, because a button used to prove `press`
-does not need hand-maintained jsdom geometry.
+Use `tests/fixture/verbs.html` for controls and the step-vocabulary event log. Keeping those
+controls separate prevents action tests from requiring hand-maintained jsdom geometry.
 
-Nothing in any of them comes from a real product. If you need a new shape to test against,
-add a neutral one.
+Add neutral fixture shapes rather than copying a product.
 
-`JetBrainsMono-Bold.woff2` beside them is for the tests that load a font from disk. It is
-SIL Open Font License 1.1, `JetBrainsMono-OFL.txt` is the license, and it is not
-published — `files` in `package.json` ships only `dist`, `skills`, the README and the
-license.
+Tests use `JetBrainsMono-Bold.woff2` to load a font from disk. See
+`JetBrainsMono-OFL.txt` for its SIL Open Font License 1.1. The package excludes the font
+because `files` in `package.json` includes `dist`, `skills`, the README, and the license.
 
 ## Releasing
 
-Maintainers only. Publishing runs from GitHub Actions through npm Trusted Publishing —
-there is no token, and provenance is attached automatically.
+Maintainers release shotlist through GitHub Actions and npm Trusted Publishing. The job
+uses no token, and npm attaches provenance.
 
-1. Run the gate — all green.
+1. Run the full gate.
 2. In [`CHANGELOG.md`](./CHANGELOG.md), move the `## [Unreleased]` entries under a new
    version heading with today's date, and leave an empty `Unreleased` above it.
 3. Bump and tag. npm's default commit message is a bare version number, so override it:
@@ -217,15 +199,13 @@ there is no token, and provenance is attached automatically.
 4. Push, including the tag: `git push --follow-tags`.
 5. Draft a GitHub release tagged `v<version>` and publish it.
 
-The workflow refuses to run if the tag and `package.json` disagree, or if `CHANGELOG.md`
-has no heading for the version being released — step 2 is easy to skip, and a release
-whose notes still say "unreleased" is the result. `prepublishOnly` re-runs the whole gate
-inside that job, so a release cannot ship what a pull request could not merge.
+GitHub Actions stops if the tag and `package.json` disagree or `CHANGELOG.md` lacks a
+heading for the release version. `prepublishOnly` runs the full gate in the publishing job.
 
 ### Breaking changes
 
-The recipe format is public API. Renaming a step verb, removing a query key, or changing
-what a key means breaks every recipe in every project using it:
+The recipe format is public API. Renaming a step verb, removing a query key, or changing a
+key's meaning breaks recipes that use it:
 
 - Before 1.0: a **minor** bump, plus a `Changed` entry saying what to edit.
 - After 1.0: a **major** bump.
@@ -234,13 +214,11 @@ what a key means breaks every recipe in every project using it:
 ## Reporting a bug
 
 **A recipe that fails.** Include the recipe, the `finders` section of the config if it uses
-a finder, and the error. Errors are meant to name the file, the path inside it, and the
-fix. If yours did not, report that too.
+a finder, and the error. shotlist should name the file, the path inside it, and the fix. If
+the error omits one, include that omission in your report.
 
-**Something security-shaped.** shotlist runs other people's configs — in CI on a fork's
-pull request, or in a service shooting what somebody submitted. A way past `--untrusted`,
-a path or host check that can be walked around, or anything that gets a run to touch what
-it should not, is worth reporting privately first: use GitHub's **Report a vulnerability**
-on the Security tab rather than opening an issue. What is already known and deliberate,
-including what the checks do not cover, is at
-**[shotlist.dev/docs/explanation/security-model](https://shotlist.dev/docs/explanation/security-model)**.
+**A security issue.** shotlist runs configs from forked pull requests and submitted jobs.
+Use GitHub's **Report a vulnerability** on the Security tab if you can bypass
+`--untrusted`, evade a path or host check, or make a run touch a denied resource. The
+**[security model](https://shotlist.dev/docs/explanation/security-model)** lists the known
+limits.

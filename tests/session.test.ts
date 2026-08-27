@@ -1,24 +1,32 @@
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   Recipe,
-  envFor,
   interpolate,
-  loadConfig,
-  loadLibrary,
   narrowSession,
+  openRun,
   parseConfig,
   readSession,
   sessionFor,
+  sessionHosts,
   shoot,
   signIn,
-  trustFrom,
 } from '../src/index.js'
-import type { LoadedConfig, StorageState } from '../src/index.js'
+import type { OperatorAuthority, Run, StorageState } from '../src/index.js'
+import { envFor, trustFrom } from '../src/trust.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -35,7 +43,14 @@ const SITE = 'https://example.com/'
 function serve(host: string): Promise<{ origin: string; close: () => Promise<void> }> {
   return new Promise((ready) => {
     const server: Server = createServer((request, response) => {
-      const { pathname } = new URL(request.url ?? '/', 'http://localhost')
+      const requested = new URL(request.url ?? '/', 'http://localhost')
+      const { pathname } = requested
+      if (pathname === '/bounce.html') {
+        response.end(
+          `<script>location.href=${JSON.stringify(requested.searchParams.get('to'))}</script>`,
+        )
+        return
+      }
       try {
         response.end(readFileSync(join(HERE, 'fixture', pathname.replace(/^\/+/, ''))))
       } catch {
@@ -75,12 +90,15 @@ afterEach(() => {
 
 /** A throwaway project pointed at the served sign-in page, with a session and a macro. */
 function project(
-  options: { verify?: string; allowEnv?: string[]; keep?: string[]; siteUrl?: string } = {},
-): {
-  loaded: LoadedConfig
-  library: ReturnType<typeof loadLibrary>
-  root: string
-} {
+  options: {
+    verify?: string
+    allowEnv?: string[]
+    keep?: string[]
+    siteUrl?: string
+    sessionPath?: string
+  } = {},
+  authority: OperatorAuthority = { untrusted: false, env: options.allowEnv ?? [] },
+) {
   const root = tempProject()
   // The copied recipes lean on `finders` this config drops; these write their own.
   rmSync(join(root, 'recipes'), { recursive: true, force: true })
@@ -96,7 +114,7 @@ function project(
   timeout: 2000
   sessions:
     admin:
-      path: .shotlist/admin.json
+      path: ${options.sessionPath ?? '.shotlist/admin.json'}
 ${options.verify === undefined ? '' : `      verify: '${options.verify}'\n`}${
       options.keep === undefined ? '' : `      keep: [${options.keep.join(', ')}]\n`
     }paths:
@@ -117,19 +135,16 @@ ${options.verify === undefined ? '' : `      verify: '${options.verify}'\n`}${
   - click: { css: '#signin' }
 `,
   )
-  const loaded = loadConfig(join(root, 'shotlist.config.yaml'))
-  loaded.trust = trustFrom(
-    { root, siteUrl: loaded.config.site.url, granted: { env: options.allowEnv ?? [] } },
-    false,
-  )
-  const { paths, finders } = loaded.config
-  const library = loadLibrary({
-    recipes: join(root, paths.recipes),
-    macros: join(root, paths.macros),
-    data: join(root, paths.data),
-    finders,
-  })
-  return { loaded, library, root }
+  const run = openRun(authority, join(root, 'shotlist.config.yaml'))
+  return { run, loaded: run.project, library: run.project.library, root }
+}
+
+/** Open the temporary Project as an immutable Run. */
+function projectRun(
+  options: Parameters<typeof project>[0] = {},
+  authority: OperatorAuthority = { untrusted: false },
+): ReturnType<typeof project> & { run: Run } {
+  return project(options, authority)
 }
 
 describe('site.sessions', () => {
@@ -164,30 +179,89 @@ describe('a recipe naming a session', () => {
   })
 
   it('says which sessions there are when it names one that is not declared', () => {
-    const { loaded } = project()
-    expect(() => sessionFor(loaded, 'editor', 'recipe "dash"')).toThrow(/no session named "editor"/)
-    expect(() => sessionFor(loaded, 'editor', 'recipe "dash"')).toThrow(/"admin"/)
+    const { run } = project()
+    expect(() => sessionFor(run, 'editor', 'recipe "dash"')).toThrow(/no session named "editor"/)
+    expect(() => sessionFor(run, 'editor', 'recipe "dash"')).toThrow(/"admin"/)
   })
 
   it('resolves the file from the config, not the working directory', () => {
-    const { loaded, root } = project()
-    expect(sessionFor(loaded, 'admin', 'x').file).toBe(join(root, '.shotlist/admin.json'))
+    const { run, root } = project()
+    expect(sessionFor(run, 'admin', 'x').file).toBe(
+      join(realpathSync(root), '.shotlist/admin.json'),
+    )
+  })
+
+  it('resolves a Session through the Run', () => {
+    const { run, root } = projectRun({ verify: '#account', keep: ['accounts.example.test'] })
+
+    expect(sessionFor(run, 'admin', 'recipe "dash"')).toEqual({
+      name: 'admin',
+      file: join(realpathSync(root), '.shotlist/admin.json'),
+      verify: '#account',
+      keep: ['accounts.example.test'],
+    })
+  })
+
+  it('authorizes a dangling Session symlink to a missing root-level target', () => {
+    const made = project()
+    const denied = `shotlist-denied-${basename(made.root)}`
+    mkdirSync(join(made.root, '.shotlist'), { recursive: true })
+    symlinkSync(`/${denied}/admin.json`, join(made.root, '.shotlist/admin.json'))
+    const run = openRun(
+      { untrusted: false, deny: [denied] },
+      join(made.root, 'shotlist.config.yaml'),
+    )
+
+    expect(() => sessionFor(run, 'admin', 'recipe "dash"')).toThrow(
+      new RegExp(`${denied}.*forbidden path`, 's'),
+    )
+  })
+
+  it('refuses an untrusted Run before observing its Session path', () => {
+    const { run } = projectRun({}, { untrusted: true })
+
+    expect(() => sessionFor(run, 'admin', 'recipe "dash"')).toThrow(/does not load sessions/)
   })
 })
 
 describe('a session that is not there yet', () => {
-  it('names the command that writes it, rather than reporting a missing file', () => {
-    const { loaded } = project()
-    expect(() => readSession(loaded, sessionFor(loaded, 'admin', 'x'))).toThrow(
-      /shotlist --login admin/,
+  it('names the command through the Run that writes it', () => {
+    const { run } = projectRun()
+
+    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/shotlist --login admin/)
+  })
+
+  it('uses configured keep hosts rather than a fabricated Session value', () => {
+    const { run } = projectRun()
+    const fabricated = {
+      name: 'admin',
+      file: 'elsewhere.json',
+      keep: ['accounts.example.test'],
+    }
+
+    expect(sessionHosts(run, fabricated)).not.toContain('accounts.example.test')
+  })
+
+  it('reauthorizes a public Session before reading its file', () => {
+    const { run, root } = projectRun(
+      { sessionPath: 'credential-vault/admin.json' },
+      { untrusted: false, deny: ['credential-vault'] },
     )
+    const fabricated = { name: 'admin', file: join(root, 'elsewhere.json'), keep: [] }
+
+    expect(() => readSession(run, fabricated)).toThrow(/credential-vault.*forbidden path/s)
+  })
+
+  it('names the command that writes it, rather than reporting a missing file', () => {
+    const { run } = project()
+    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/shotlist --login admin/)
   })
 
   it('says the same when the file is there but is not a session', () => {
-    const { loaded, root } = project()
+    const { run, root } = project()
     mkdirSync(join(root, '.shotlist'), { recursive: true })
     writeFileSync(join(root, '.shotlist/admin.json'), 'not json')
-    expect(() => readSession(loaded, sessionFor(loaded, 'admin', 'x'))).toThrow(/--login admin/)
+    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/--login admin/)
   })
 })
 
@@ -312,9 +386,8 @@ describe('an untrusted run', () => {
   })
 
   it('loads no session, because the browser carrying one is signed in as somebody', () => {
-    const { loaded, root } = project()
-    loaded.trust = trustFrom({ root, siteUrl: loaded.config.site.url }, true)
-    expect(() => sessionFor(loaded, 'admin', 'recipe "dash"')).toThrow(/does not load sessions/)
+    const { run } = project({}, { untrusted: true })
+    expect(() => sessionFor(run, 'admin', 'recipe "dash"')).toThrow(/does not load sessions/)
   })
 })
 
@@ -420,51 +493,57 @@ describe('what a session keeps', () => {
     expect(narrowSession(null, SITE_HOSTS).state).toEqual({ cookies: [], origins: [] })
   })
 
-  it('narrows a file written before it did, when that file is loaded', () => {
-    const { loaded, root } = project()
+  it('reads and narrows a Session through the Run', () => {
+    const { run, root } = projectRun()
     mkdirSync(join(root, '.shotlist'), { recursive: true })
     writeFileSync(
       join(root, '.shotlist/admin.json'),
       JSON.stringify(state([{ domain: '127.0.0.1' }, { domain: '.google.com' }])),
     )
-    const read = readSession(loaded, sessionFor(loaded, 'admin', 'x'))
+
+    const read = readSession(run, sessionFor(run, 'admin', 'x'))
+    expect(read.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
+  })
+
+  it('narrows a file written before it did, when that file is loaded', () => {
+    const { run, root } = project()
+    mkdirSync(join(root, '.shotlist'), { recursive: true })
+    writeFileSync(
+      join(root, '.shotlist/admin.json'),
+      JSON.stringify(state([{ domain: '127.0.0.1' }, { domain: '.google.com' }])),
+    )
+    const read = readSession(run, sessionFor(run, 'admin', 'x'))
     expect(read.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
   })
 })
 
 describe('--login', () => {
   /** The fixture's sign-in, filled in at whichever origin it is pointed at. */
-  const signInAt = (at: string, who: string) => `  - goto: ${at}/signin.html
+  const signInAt = (at: string, who: string, from = origin) => {
+    const destination = `${at}/signin.html`
+    const entry =
+      at === from ? destination : `${from}/bounce.html?to=${encodeURIComponent(destination)}`
+    return `  - goto: ${entry}
   - fill: { css: '#username' }
     value: ${who}
   - fill: { css: '#password' }
     value: hunter2
   - click: { css: '#signin' }
 `
+  }
 
-  /** A project whose sign-in macro is on disk before the library reads the directory. */
+  /** A Project whose sign-in macro is on disk before the Run opens. */
   function withSignIn(options: Parameters<typeof project>[0], steps: string) {
     const made = project(options)
-    // The operator's own config, which is the only way `--login` is ever run: nothing
-    // checks the URLs a sign-in walks through, exactly as nothing checks the redirects an
-    // identity provider issues. It also puts `sessionHosts` on its fallback.
-    delete made.loaded.trust
     writeFileSync(join(made.root, 'macros', 'via-provider.yaml'), `steps:\n${steps}`)
-    return {
-      ...made,
-      library: loadLibrary({
-        recipes: join(made.root, 'recipes'),
-        macros: join(made.root, 'macros'),
-        data: join(made.root, 'data'),
-        finders: {},
-      }),
-    }
+    const run = openRun({ untrusted: false }, join(made.root, 'shotlist.config.yaml'))
+    return { ...made, run, loaded: run.project, library: run.project.library }
   }
 
   /** Run `--login admin` with that macro, collecting what it said. */
   async function login(made: ReturnType<typeof withSignIn>) {
     const said: string[] = []
-    await signIn(made.loaded, made.library, sessionFor(made.loaded, 'admin', '--login'), {
+    await signIn(made.run, 'admin', {
       using: 'via-provider',
       say: (line) => said.push(line),
     })
@@ -474,6 +553,129 @@ describe('--login', () => {
   /** What ended up on disk. */
   const written = (root: string) =>
     JSON.parse(readFileSync(join(root, '.shotlist/admin.json'), 'utf8')) as StorageState
+
+  it('uses the Run environment snapshot for a scripted login', { timeout: 120_000 }, async () => {
+    process.env['FIXTURE_USER'] = 'Ada'
+    process.env['FIXTURE_PASSWORD'] = 'hunter2'
+    const made = projectRun(
+      { verify: '#account' },
+      { untrusted: false, env: ['FIXTURE_USER', 'FIXTURE_PASSWORD'] },
+    )
+    process.env['FIXTURE_USER'] = 'Mallory'
+    process.env['FIXTURE_PASSWORD'] = 'wrong'
+
+    const said: string[] = []
+    await signIn(made.run, 'admin', {
+      using: 'sign-in',
+      say: (line) => said.push(line),
+    })
+
+    expect(JSON.stringify(written(made.root))).toContain('Ada')
+    expect(said[0]).toMatch(/FIXTURE_USER, FIXTURE_PASSWORD/)
+    if (process.platform !== 'win32') {
+      expect(statSync(join(made.root, '.shotlist/admin.json')).mode & 0o777).toBe(0o600)
+    }
+  })
+
+  it('loads a Session through Run-based capture', { timeout: 120_000 }, async () => {
+    process.env['FIXTURE_USER'] = 'Ada'
+    process.env['FIXTURE_PASSWORD'] = 'hunter2'
+    const made = project({ verify: '#account' })
+    writeFileSync(
+      join(made.root, 'recipes/dash.yaml'),
+      `name: dash\nsession: admin\nclip: { css: '#account' }\n`,
+    )
+    const run = openRun(
+      { untrusted: false, env: ['FIXTURE_USER', 'FIXTURE_PASSWORD'] },
+      join(made.root, 'shotlist.config.yaml'),
+    )
+    await signIn(run, 'admin', { using: 'sign-in', say: () => {} })
+
+    const recipe = run.project.library.recipes.get('dash')!
+    const result = await shoot(run, recipe)
+
+    expect(existsSync(result.file)).toBe(true)
+  })
+
+  it('refuses an untrusted Session capture before browser or output effects', async () => {
+    const made = project({ siteUrl: 'https://example.com/' })
+    writeFileSync(
+      join(made.root, 'recipes/dash.yaml'),
+      `name: dash\nsession: admin\nclip: viewport\n`,
+    )
+    const run = openRun({ untrusted: true }, join(made.root, 'shotlist.config.yaml'))
+
+    await expect(shoot(run, run.project.library.recipes.get('dash')!)).rejects.toThrow(
+      /does not load sessions/,
+    )
+    expect(existsSync(join(made.root, 'out/dash.png'))).toBe(false)
+  })
+
+  it(
+    'keeps the expired-Session diagnostic Recipe-addressed through the Run',
+    { timeout: 120_000 },
+    async () => {
+      const made = project({ verify: '#account' })
+      mkdirSync(join(made.root, '.shotlist'), { recursive: true })
+      writeFileSync(
+        join(made.root, '.shotlist/admin.json'),
+        JSON.stringify({ cookies: [], origins: [] }),
+      )
+      writeFileSync(
+        join(made.root, 'recipes/dash.yaml'),
+        `name: dash\nsession: admin\nclip: viewport\n`,
+      )
+      const run = openRun({ untrusted: false }, join(made.root, 'shotlist.config.yaml'))
+
+      await expect(shoot(run, run.project.library.recipes.get('dash')!)).rejects.toThrow(
+        /recipe "dash": `session`.*most likely expired/s,
+      )
+    },
+  )
+
+  it('creates no Session directory when manual Run login cannot wait', async () => {
+    const made = projectRun()
+
+    await expect(signIn(made.run, 'admin', { say: () => {} })).rejects.toThrow(/--using <macro>/)
+    expect(existsSync(join(made.root, '.shotlist'))).toBe(false)
+  })
+
+  it(
+    'refuses a dangling Session symlink whose future target is denied',
+    { timeout: 120_000 },
+    async () => {
+      process.env['FIXTURE_USER'] = 'Ada'
+      process.env['FIXTURE_PASSWORD'] = 'hunter2'
+      const made = project({ verify: '#account' })
+      const target = join(made.root, 'credential-vault/admin.json')
+      const link = join(made.root, '.shotlist/admin.json')
+      mkdirSync(dirname(target), { recursive: true })
+      mkdirSync(dirname(link), { recursive: true })
+      symlinkSync(target, link)
+      const run = openRun(
+        {
+          untrusted: false,
+          deny: ['credential-vault'],
+          env: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
+        },
+        join(made.root, 'shotlist.config.yaml'),
+      )
+
+      await expect(signIn(run, 'admin', { using: 'sign-in', say: () => {} })).rejects.toThrow(
+        /credential-vault.*forbidden path/s,
+      )
+      expect(existsSync(target)).toBe(false)
+    },
+  )
+
+  it('refuses an untrusted Run before launching or creating a directory', async () => {
+    const made = projectRun({}, { untrusted: true })
+
+    await expect(signIn(made.run, 'admin', { say: () => {} })).rejects.toThrow(
+      /does not load sessions/,
+    )
+    expect(existsSync(join(made.root, '.shotlist'))).toBe(false)
+  })
 
   it(
     'writes none of what a round trip through another host left in the browser',
@@ -502,13 +704,37 @@ describe('--login', () => {
       // a file that looks fine and turns every shot of the next run into the sign-in form.
       const made = withSignIn(
         { verify: '#account', siteUrl: `${provider.origin}/signin.html` },
-        signInAt(origin, 'Ada'),
+        signInAt(origin, 'Ada', provider.origin),
       )
       await expect(login(made)).rejects.toThrow(/site\.sessions\.admin\.keep/)
       await expect(login(made)).rejects.toThrow(/Nothing was written/)
       expect(existsSync(join(made.root, '.shotlist/admin.json'))).toBe(false)
     },
   )
+
+  it('retains keep warnings through Run login', { timeout: 120_000 }, async () => {
+    const made = withSignIn(
+      { verify: '#account', keep: ['localhost'] },
+      signInAt(provider.origin, 'Provider') + signInAt(origin, 'Ada'),
+    )
+    const run = openRun(
+      { untrusted: false, hosts: ['localhost'] },
+      join(made.root, 'shotlist.config.yaml'),
+    )
+    const said: string[] = []
+
+    await signIn(run, 'admin', {
+      using: 'via-provider',
+      say: (line) => said.push(line),
+    })
+
+    expect(
+      written(made.root)
+        .cookies.map((one) => one.domain)
+        .sort(),
+    ).toEqual(['127.0.0.1', 'localhost'])
+    expect(said.join('\n')).toMatch(/site\.sessions\.admin\.keep.*signs in as/s)
+  })
 
   it(
     'keeps another host when the session says to, and says whose account that is',
@@ -537,12 +763,12 @@ describe('--login', () => {
       // variables reach it — so this line is the only place a lookalike is visible.
       process.env['FIXTURE_USER'] = 'Ada'
       process.env['FIXTURE_PASSWORD'] = 'hunter2'
-      const { loaded, library } = project({
+      const { run } = project({
         verify: '#account',
         allowEnv: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
       })
       const said: string[] = []
-      await signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+      await signIn(run, 'admin', {
         using: 'sign-in',
         say: (line) => said.push(line),
       })
@@ -566,12 +792,12 @@ describe('--login', () => {
     async () => {
       process.env['FIXTURE_USER'] = 'Ada'
       process.env['FIXTURE_PASSWORD'] = 'hunter2'
-      const { loaded, library, root } = project({
+      const { run, root } = project({
         verify: '#account',
         allowEnv: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
       })
       const said: string[] = []
-      await signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+      await signIn(run, 'admin', {
         using: 'sign-in',
         say: (line) => said.push(line),
       })
@@ -580,7 +806,7 @@ describe('--login', () => {
       expect(existsSync(file)).toBe(true)
       expect(said.join('\n')).toContain(file)
       // The cookie is what the next run is signed in by, so it has to be in there.
-      expect(JSON.stringify(readSession(loaded, sessionFor(loaded, 'admin', 'x')))).toContain(
+      expect(JSON.stringify(readSession(run, sessionFor(run, 'admin', 'x')))).toContain(
         'fixture-session',
       )
       // Windows has no mode bits to set, so there is nothing to assert there.
@@ -592,22 +818,15 @@ describe('--login', () => {
         join(root, 'recipes', 'dash.yaml'),
         `name: dash\nsession: admin\nclip: { css: '#account' }\n`,
       )
-      const reloaded = loadLibrary({
-        recipes: join(root, 'recipes'),
-        macros: join(root, 'macros'),
-        data: join(root, 'data'),
-        finders: {},
-      })
-      const result = await shoot(reloaded.recipes.get('dash')!, reloaded, loaded)
+      const captureRun = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+      const result = await shoot(captureRun, captureRun.project.library.recipes.get('dash')!)
       expect(existsSync(result.file)).toBe(true)
     },
   )
 
   it('refuses to sign in by hand where there is no terminal to wait in', async () => {
-    const { loaded, library } = project()
-    await expect(
-      signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), { say: () => {} }),
-    ).rejects.toThrow(/--using <macro>/)
+    const { run } = project()
+    await expect(signIn(run, 'admin', { say: () => {} })).rejects.toThrow(/--using <macro>/)
   })
 
   it(
@@ -617,12 +836,12 @@ describe('--login', () => {
       process.env['FIXTURE_USER'] = 'Ada'
       // No password, so the fixture refuses and `#account` never appears.
       process.env['FIXTURE_PASSWORD'] = 'x'
-      const { loaded, library, root } = project({
+      const { run, root } = project({
         verify: '#nothing-with-this-id',
         allowEnv: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
       })
       await expect(
-        signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+        signIn(run, 'admin', {
           using: 'sign-in',
           say: () => {},
         }),
@@ -635,7 +854,7 @@ describe('--login', () => {
     'reports an expired session instead of shooting the sign-in page',
     { timeout: 120_000 },
     async () => {
-      const { loaded, root } = project({ verify: '#account' })
+      const { root } = project({ verify: '#account' })
       // A session shaped right and signed in as nobody, which is what an expired one is.
       mkdirSync(join(root, '.shotlist'), { recursive: true })
       writeFileSync(
@@ -646,13 +865,8 @@ describe('--login', () => {
         join(root, 'recipes', 'dash.yaml'),
         `name: dash\nsession: admin\nclip: viewport\n`,
       )
-      const library = loadLibrary({
-        recipes: join(root, 'recipes'),
-        macros: join(root, 'macros'),
-        data: join(root, 'data'),
-        finders: {},
-      })
-      await expect(shoot(library.recipes.get('dash')!, library, loaded)).rejects.toThrow(
+      const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+      await expect(shoot(run, run.project.library.recipes.get('dash')!)).rejects.toThrow(
         /most likely expired/,
       )
     },

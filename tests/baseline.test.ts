@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -6,6 +6,7 @@ import {
   BASELINE_FILE,
   describeEnvironment,
   environmentDrift,
+  openRun,
   readBaseline,
   writeBaseline,
 } from '../src/index.js'
@@ -16,6 +17,14 @@ const root = () => {
   const dir = mkdtempSync(join(tmpdir(), 'shotlist-baseline-'))
   made.push(dir)
   return { root: dir }
+}
+
+/** Open a Run rooted beside its Baseline record. */
+function baselineRun() {
+  const loaded = root()
+  const config = join(loaded.root, 'shotlist.config.json')
+  writeFileSync(config, JSON.stringify({ site: { url: 'https://example.com' } }))
+  return { loaded, run: openRun({ untrusted: false }, config) }
 }
 
 afterEach(() => {
@@ -39,22 +48,55 @@ describe('describeEnvironment', () => {
 })
 
 describe('the recorded baseline', () => {
-  it('round-trips beside the config', () => {
+  it('round-trips beside the config through its Run', () => {
     const loaded = root()
+    const config = join(loaded.root, 'shotlist.config.json')
+    writeFileSync(config, JSON.stringify({ site: { url: 'https://example.com' } }))
+    const run = openRun({ untrusted: true }, config)
     const environment: Environment = { chromium: '141.0.0.0', platform: 'darwin' }
-    writeBaseline(loaded, environment)
-    expect(readBaseline(loaded)).toEqual(environment)
+
+    writeBaseline(run, environment)
+
+    expect(readBaseline(run)).toEqual(environment)
     expect(readFileSync(join(loaded.root, BASELINE_FILE), 'utf8')).toContain('141.0.0.0')
   })
 
-  it('is absent for a project that has never installed anything', () => {
-    expect(readBaseline(root())).toBeNull()
+  it('refuses to read a Baseline through a path outside an untrusted Run', () => {
+    const loaded = root()
+    const config = join(loaded.root, 'shotlist.config.json')
+    writeFileSync(config, JSON.stringify({ site: { url: 'https://example.com' } }))
+    const run = openRun({ untrusted: true }, config)
+    const outside = root().root
+    writeFileSync(join(outside, BASELINE_FILE), '{}')
+    symlinkSync(join(outside, BASELINE_FILE), join(loaded.root, BASELINE_FILE))
+
+    expect(() => readBaseline(run)).toThrow(/shotlist\.baseline\.json: .*outside the project/)
+  })
+
+  it('refuses to write a Baseline through a path outside an untrusted Run', () => {
+    const loaded = root()
+    const config = join(loaded.root, 'shotlist.config.json')
+    writeFileSync(config, JSON.stringify({ site: { url: 'https://example.com' } }))
+    const run = openRun({ untrusted: true }, config)
+    const outside = root().root
+    const target = join(outside, BASELINE_FILE)
+    writeFileSync(target, 'unchanged')
+    symlinkSync(target, join(loaded.root, BASELINE_FILE))
+
+    expect(() => writeBaseline(run, { platform: 'darwin' })).toThrow(
+      /shotlist\.baseline\.json: .*outside the project/,
+    )
+    expect(readFileSync(target, 'utf8')).toBe('unchanged')
+  })
+
+  it('is absent for a Project that has never installed anything', () => {
+    expect(readBaseline(baselineRun().run)).toBeNull()
   })
 
   it('names the file when it cannot be read', () => {
-    const loaded = root()
+    const { loaded, run } = baselineRun()
     writeFileSync(join(loaded.root, BASELINE_FILE), '{ not json')
-    expect(() => readBaseline(loaded)).toThrow(new RegExp(BASELINE_FILE))
+    expect(() => readBaseline(run)).toThrow(new RegExp(BASELINE_FILE))
   })
 })
 

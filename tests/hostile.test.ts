@@ -1,14 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  MAX_QUERY_DEPTH,
-  checkPath,
-  checkUrl,
-  interpolate,
-  parseQuery,
-  parseRecipe,
-  secretIn,
-  trustFrom,
-} from '../src/index.js'
+import { MAX_QUERY_DEPTH, interpolate, parseQuery, parseRecipe } from '../src/index.js'
+import { checkPath, checkUrl, secretIn, trustFrom } from '../src/trust.js'
 
 const NUL = String.fromCharCode(0)
 const SITE = 'https://example.com/'
