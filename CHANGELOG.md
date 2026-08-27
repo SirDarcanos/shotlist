@@ -33,6 +33,11 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   Retries keep the same Run and open a fresh browser context. Existing config-based capture
   remains available during migration.
 
+- **Run-based checking and Baseline access** for comparing Output images with Committed
+  images and recording their rendering environment. Checking authorizes canonical image and
+  diff paths, then re-shoots each Recipe through the same Run. Baseline reads and writes use
+  that Run's path policy. Existing config-based interfaces remain available during migration.
+
 - **Repository-local agent context**, with a canonical glossary and branch-specific guides
   for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
   now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these

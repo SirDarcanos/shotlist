@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { ShotlistError } from './config.js'
 import type { LoadedConfig } from './config.js'
 import type { Browser } from './playwright.js'
+import { authorizePath } from './trust.js'
+import type { Run } from './run.js'
 
 /**
  * What the committed images were taken with.
@@ -45,22 +47,37 @@ export function describeEnvironment(browser?: Browser): Environment {
   }
 }
 
-/** Where the record lives for a given project. */
-export function baselineFile(loaded: Pick<LoadedConfig, 'root'>): string {
-  return join(loaded.root, BASELINE_FILE)
+/** Whether Baseline access uses the immutable Run interface. */
+function isRun(input: Run | Pick<LoadedConfig, 'root'>): input is Run {
+  return 'project' in input
 }
 
-/** Record what this run was taken with, beside the config. */
-export function writeBaseline(loaded: Pick<LoadedConfig, 'root'>, environment: Environment): void {
-  writeFileSync(baselineFile(loaded), `${JSON.stringify(environment, null, 2)}\n`)
+/** Where the record lives for a given Project. */
+export function baselineFile(input: Run | Pick<LoadedConfig, 'root'>): string {
+  return join(isRun(input) ? input.project.root : input.root, BASELINE_FILE)
 }
 
-/** Read the record, or null when a project has never installed anything. */
-export function readBaseline(loaded: Pick<LoadedConfig, 'root'>): Environment | null {
-  const file = baselineFile(loaded)
-  if (!existsSync(file)) return null
+/** Canonical Baseline path authorized for an immediate filesystem effect. */
+function baselineTarget(input: Run | Pick<LoadedConfig, 'root'>): string {
+  const file = baselineFile(input)
+  return isRun(input) ? authorizePath(input.trust, file, BASELINE_FILE) : file
+}
+
+/** Record what this Run was taken with, beside the config. */
+export function writeBaseline(
+  input: Run | Pick<LoadedConfig, 'root'>,
+  environment: Environment,
+): void {
+  writeFileSync(baselineTarget(input), `${JSON.stringify(environment, null, 2)}\n`)
+}
+
+/** Read the record, or null when a Project has never installed anything. */
+export function readBaseline(input: Run | Pick<LoadedConfig, 'root'>): Environment | null {
+  const file = baselineFile(input)
+  const target = baselineTarget(input)
+  if (!existsSync(target)) return null
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as Environment
+    return JSON.parse(readFileSync(target, 'utf8')) as Environment
   } catch (error) {
     throw new ShotlistError((error as Error).message, file)
   }

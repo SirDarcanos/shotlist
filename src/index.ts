@@ -51,7 +51,7 @@ export { loadPlaywright } from './playwright.js'
 export { runSteps } from './steps.js'
 export type { DialogPolicy, RunContext } from './steps.js'
 export { check } from './check.js'
-export type { CheckResult } from './check.js'
+export type { CheckOptions, CheckResult } from './check.js'
 export {
   BASELINE_FILE,
   baselineFile,
