@@ -298,13 +298,33 @@ function manage(child: ChildProcess, command: string): Server {
   }
 }
 
-/** Run `body` with the site up, stopping afterwards whatever happens. */
+/** Add a stop failure without replacing the failure that interrupted the Run. */
+function withStopFailure(primary: unknown, cleanup: unknown): ShotlistError {
+  const first = primary instanceof Error ? primary.message : String(primary)
+  const second = cleanup instanceof Error ? cleanup.message : String(cleanup)
+  return new ShotlistError(`${first}\n  site cleanup also failed: ${second}`)
+}
+
+/** Run `body` with the site up, stopping only a site shotlist started. */
 export async function withServer<T>(run: Run, body: () => Promise<T>): Promise<T> {
   assertRun(run)
   const server = await startServer(run)
+  let result: T | undefined
+  let failure: unknown
+  let completed = false
   try {
-    return await body()
-  } finally {
-    await server?.stop()
+    result = await body()
+    completed = true
+  } catch (error) {
+    failure = error
   }
+
+  try {
+    await server?.stop()
+  } catch (cleanup) {
+    if (!completed) throw withStopFailure(failure, cleanup)
+    throw cleanup
+  }
+  if (!completed) throw failure
+  return result!
 }

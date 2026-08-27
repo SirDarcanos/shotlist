@@ -9,8 +9,8 @@ rather than by shotlist.
 DOM queries, clips, marks, masks, and annotation layout use CSS pixels. The browser context
 applies `deviceScaleFactor`; ignore regions become final image pixels only after capture.
 
-A frame query resolves inside the frame document. `src/steps.ts` translates its rectangle
-to top-page coordinates at the frame boundary, including iframe border and padding. A
+A frame query resolves inside the frame document. `src/step.ts` translates its rectangle
+to top-page coordinates at the frame seam, including iframe border and padding. A
 named outer-page `within` rectangle is invalid inside a frame because the documents do not
 share coordinates.
 

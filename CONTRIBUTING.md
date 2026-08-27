@@ -77,8 +77,8 @@ Meet each criterion before you submit a pull request.
       watching the test fail, and restoring the code. Use fixtures that expose boundary
       errors: `nth: -2` and `nth: 0` select the same element in a list of two.
 - [ ] Add a shape in `tests/fixture/` and a test for each new query primitive. Add each new
-      step verb to the `VERBS` array in `src/recipe.ts` so typos receive a "did you mean"
-      suggestion.
+      Step verb as one built-in declaration in `src/step.ts`; its authored shape, diagnostic
+      name, recursive structure, and runtime behavior belong together.
 - [ ] Add an entry to the correct `## [Unreleased]` section in
       [`CHANGELOG.md`](./CHANGELOG.md).
 - [ ] Document recipe format, step vocabulary, and query language changes in the separate
@@ -124,9 +124,10 @@ Meet each criterion before you submit a pull request.
 | ------------------- | ----------------------------------------------------------- |
 | `src/config.ts`     | config schema, defaults, loading, merge                     |
 | `src/library.ts`    | policy-aware discovery and Library assembly                 |
-| `src/recipe.ts`     | Recipe and Macro schemas, expansion, interpolation          |
+| `src/recipe.ts`     | Recipe and Macro schemas and document validation            |
 | `src/query.ts`      | the element query language: schema, finders, page evaluator |
-| `src/steps.ts`      | the step vocabulary, run against a Playwright page          |
+| `src/step.ts`       | built-in Step declarations, expansion, and execution        |
+| `src/steps.ts`      | the authenticated Step execution facade                     |
 | `src/annotate.ts`   | the drawing layer, injected into the page                   |
 | `src/capture.ts`    | clip, scale, canvas growth, encode, write                   |
 | `src/image.ts`      | encoded format detection and image dimensions               |
@@ -140,7 +141,8 @@ Meet each criterion before you submit a pull request.
 | `src/init.ts`       | the scaffold `--init` writes                                |
 | `src/schemas.ts`    | runtime schemas exported to the build generator             |
 | `src/index.ts`      | the public library surface                                  |
-| `src/cli.ts`        | the `shotlist` binary                                       |
+| `src/execute.ts`    | shared Run planning and site and browser lifetimes          |
+| `src/cli.ts`        | argument parsing, rendering, and the `shotlist` binary      |
 | `tests/fixture/`    | neutral pages used by jsdom and browser-driven tests        |
 
 ## Adding a step verb or a query primitive

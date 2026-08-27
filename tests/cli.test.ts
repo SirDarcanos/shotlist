@@ -429,6 +429,18 @@ describe('the machine a baseline was taken on', () => {
 })
 
 describe('--check', () => {
+  /** Make any attempt to start the configured site fail visibly. */
+  function refuseSiteStartup(root: string): void {
+    const config = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      config,
+      readFileSync(config, 'utf8').replace(
+        'site:\n',
+        'site:\n  serve:\n    command: shotlist-command-that-does-not-exist\n',
+      ),
+    )
+  }
+
   it('reports a recipe with nothing committed as new, and exits non-zero', async () => {
     const root = project()
     const { code, out } = await cli(root, ['--check', 'order-row'])
@@ -459,13 +471,28 @@ describe('--check', () => {
     expect(out).toMatch(/CHANGED {2}order-row — size changed/)
   })
 
-  it('skips a recipe that opts out, whatever is committed for it', async () => {
+  it('skips a recipe that opts out without starting its configured site', async () => {
     const root = project()
-    await cli(root, ['volatile', '--install'])
-    const { code, out } = await cli(root, ['--check', 'volatile'])
+    refuseSiteStartup(root)
+
+    const { code, out, err } = await cli(root, ['--check', 'volatile'])
+
     expect(code).toBe(0)
     expect(out).toContain('skipped  volatile')
     expect(out).toContain('opts out of checking')
+    expect(err).toBe('')
+  })
+
+  it('does not start the site when only an actionable File Recipe remains', async () => {
+    const root = project()
+    refuseSiteStartup(root)
+
+    const { code, out, err } = await cli(root, ['--check', 'modal', 'annotated'])
+
+    expect(code).toBe(1)
+    expect(out).toContain('skipped  modal')
+    expect(out).toContain('NEW      annotated')
+    expect(err).toBe('')
   })
 
   it('honors a threshold the recipe sets for itself', { timeout: 120_000 }, async () => {

@@ -200,6 +200,31 @@ function committedFile(run: Run, recipe: Recipe): { authored: string; target: st
   }
 }
 
+/** Return why a Recipe needs no comparison, or leave it actionable. */
+export function skippedCheckResult(
+  run: Run,
+  candidate: DeepReadonly<Recipe>,
+): CheckResult | undefined {
+  assertRun(run)
+  assertRecipe(run, candidate)
+  const recipe = candidate as Recipe
+  if (recipe.check === false) {
+    return {
+      name: recipe.name!,
+      status: 'skipped',
+      reason: 'the recipe opts out of checking',
+    }
+  }
+  if (!recipe.install || recipe.install === 'none' || !run.project.config.install[recipe.install]) {
+    return {
+      name: recipe.name!,
+      status: 'skipped',
+      reason: 'installs nowhere, so there is nothing to compare against',
+    }
+  }
+  return undefined
+}
+
 /**
  * Re-shoot recipes and compare each against the image the project committed.
  *
@@ -227,25 +252,14 @@ export async function check(
     await page.setContent('<body></body>')
 
     for (const recipe of recipes) {
-      if (recipe.check === false) {
-        results.push({
-          name: recipe.name!,
-          status: 'skipped',
-          reason: 'the recipe opts out of checking',
-        })
+      const skipped = skippedCheckResult(run, recipe)
+      if (skipped) {
+        results.push(skipped)
         continue
       }
       // The project's limits, with whatever this recipe says on top.
       const limits = { ...loaded.config.check, ...(recipe.check || {}) }
-      const committed = committedFile(run, recipe)
-      if (!committed) {
-        results.push({
-          name: recipe.name!,
-          status: 'skipped',
-          reason: 'installs nowhere, so there is nothing to compare against',
-        })
-        continue
-      }
+      const committed = committedFile(run, recipe)!
       // A shot that cannot be taken is not drift, and with `--keep-going` it is also not
       // a reason to stop: the other recipes still have an answer worth reporting.
       let shotResult

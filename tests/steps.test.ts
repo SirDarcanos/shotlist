@@ -331,6 +331,7 @@ describe('navigation verbs', () => {
       { setup: [{ openPage: '$destination', as: 'other' }] },
       { name: 'steps' },
     )
+    let opened = false
     const ctx: RunContext = {
       pages: new Map([['main', page]]),
       page,
@@ -338,12 +339,16 @@ describe('navigation verbs', () => {
       rects: {},
       viewport: VIEWPORT,
       timeout: 10_000,
-      newPage: () => context.newPage(),
+      newPage: () => {
+        opened = true
+        return context.newPage()
+      },
     }
 
     await expect(runSteps(domainRun, expandSteps(recipe.setup, new Map()), ctx)).rejects.toThrow(
       /`openPage`.*secrets-area.*forbidden path/s,
     )
+    expect(opened).toBe(false)
     expect(ctx.pages.has('other')).toBe(false)
     await page.close()
   })

@@ -1,14 +1,20 @@
 # Runtime lifecycle
 
-`src/cli.ts` owns resources shared by a command. `src/capture.ts:shoot` owns one recipe,
-while `src/steps.ts` owns ordered browser interaction. Put behavior at the lowest owner
-that can enforce it, because CLI-only fixes do not protect library callers.
+`src/execute.ts` owns site and browser lifetimes shared by the selected Recipes in a Run.
+`src/cli.ts` owns argument parsing and rendering, `src/capture.ts:shoot` owns one Recipe,
+and `src/step.ts` owns the built-in Step vocabulary from authored shape through ordered
+browser interaction. `src/steps.ts` authenticates the Run at the execution facade. Put
+behavior at the lowest owner that can enforce it, because CLI-only fixes do not protect
+library callers.
 
 ## Project run
 
-The CLI loads the config and Library, selects Recipes, and starts the configured site only
-when at least one selected Recipe has `source: app`. It launches one Chromium browser for
-a capture or check batch and closes it in `finally`; selected Recipes run sequentially.
+The CLI loads the config and Library, then Run execution coordinates the selected Recipes.
+Capture starts the configured site only when at least one selected Recipe has `source: app`.
+Checking first removes Recipes that opt out or install nowhere, then starts the site only
+when an actionable Application Recipe remains. A Run of only skipped Recipes starts neither
+the site nor Chromium. Run execution launches one Chromium browser for the remaining
+capture or check work, closes it before returning, and keeps Recipes sequential.
 
 `src/library.ts` owns policy-aware Library discovery, reading, parsing, and publication.
 Run opening asks it for one complete immutable Library; lint asks it for one review that

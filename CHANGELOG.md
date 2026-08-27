@@ -63,6 +63,21 @@ recipe authors what to edit. See
   document count. Directory traversal, entry authorization, authored-path diagnostics,
   parsing, and failure order remain inside the Library module.
 
+- **Run execution owns shared site and browser lifetimes.** The CLI retains argument parsing
+  and human or JSON rendering. Checking starts neither the configured site nor Chromium
+  when every selected Recipe opts out or installs nowhere, and a skipped Application Recipe
+  does not start the site when the remaining work contains only File Recipes.
+
+- **One Step declaration owns authored and runtime behavior.** The built-in vocabulary now
+  derives Recipe and Macro schemas, `VERBS`, typo suggestions, nested traversal, Macro
+  expansion, and Run dispatch from the same declarations. Existing Recipes, diagnostics,
+  and package interfaces remain unchanged.
+
+### Fixed
+
+- **`openPage` authorizes its interpolated URL before opening a page.** A refused URL now
+  causes no browser effect rather than leaving an unnamed page behind.
+
 ### Removed
 
 - **Session implementation interfaces at the package root.** `sessionFor`, `sessionHosts`,

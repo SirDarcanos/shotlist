@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { expandSteps, interpolate, nearestVerb, parseRecipe, withNumbering } from '../src/recipe.js'
+import {
+  VERBS,
+  expandSteps,
+  interpolate,
+  nearestVerb,
+  parseRecipe,
+  withNumbering,
+} from '../src/recipe.js'
 import type { Macro, StepInput } from '../src/recipe.js'
 
 /** The macro set the expansion tests share. */
@@ -24,6 +31,32 @@ describe('parseRecipe', () => {
     expect(recipe.setup).toEqual([])
   })
 
+  it('keeps the public Step vocabulary in diagnostic order', () => {
+    expect(VERBS).toEqual([
+      'goto',
+      'click',
+      'dblclick',
+      'hover',
+      'fill',
+      'select',
+      'check',
+      'uncheck',
+      'press',
+      'type',
+      'blur',
+      'scrollIntoView',
+      'wait',
+      'dialog',
+      'readValue',
+      'use',
+      'repeat',
+      'each',
+      'optional',
+      'openPage',
+      'usePage',
+    ])
+  })
+
   it('suggests the verb an author meant', () => {
     expect(nearestVerb('clik')).toBe('click')
     expect(nearestVerb('fil')).toBe('fill')
@@ -39,10 +72,13 @@ describe('parseRecipe', () => {
     ).toThrow(/setup\[1\]/)
   })
 
-  it('checks the verbs inside a nested block too', () => {
+  it('checks the verbs inside every nested block too', () => {
     expect(() =>
       parseRecipe({ setup: [{ repeat: 2, steps: [{ clic: { css: 'a' } }] }] }, { name: 'x' }),
     ).toThrow(/setup\[0\]\.steps\[0\].*unknown step "clic"/s)
+    expect(() =>
+      parseRecipe({ setup: [{ optional: [{ clic: { css: 'a' } }] }] }, { name: 'x' }),
+    ).toThrow(/setup\[0\]\.optional\[0\].*unknown step "clic"/s)
   })
 
   it('refuses a callout pointing at a mark the recipe never defines', () => {

@@ -1,8 +1,8 @@
 # Declarative language
 
-The Zod schemas in `src/config.ts`, `src/recipe.ts`, and `src/query.ts` define the authored
-language. TypeScript types are inferred and JSON Schemas are generated from them, so a
-shape has one source of truth.
+The Zod schemas in `src/config.ts`, `src/recipe.ts`, `src/query.ts`, and `src/step.ts`
+define the authored language. TypeScript types are inferred and JSON Schemas are generated
+from them, so a shape has one source of truth.
 
 ## Loading boundary
 
@@ -16,8 +16,9 @@ filename stem, and applies numbered-callout normalization after parsing.
 
 Most authored mappings are strict. Preserve addressed validation errors and typo
 suggestions when extending a union, because raw Zod branches turn one misspelled key into a
-screen of unrelated failures. Add every step verb to `VERBS`, which supplies the known
-vocabulary for those diagnostics.
+screen of unrelated failures. Add a Step verb as one built-in declaration in `src/step.ts`;
+`VERBS`, nested diagnostics, Macro expansion, and runtime dispatch derive from those
+declarations.
 
 ## Finders and queries
 
