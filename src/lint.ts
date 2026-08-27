@@ -7,11 +7,11 @@
  * reports everything, and needs neither Playwright nor a site that is up.
  */
 import { basename, join } from 'node:path'
-import { ShotlistError, fromRoot, loadConfig, readDocument, readDocumentAt } from './config.js'
+import { ShotlistError, fromRoot, loadConfig, readDocumentAt } from './config.js'
 import type { LoadedConfig } from './config.js'
 import { documentFiles, parseMacro, parseRecipe, withNumbering } from './recipe.js'
 import type { Recipe } from './recipe.js'
-import { projectPolicy } from './run.js'
+import { operatorAuthority, projectPolicy } from './run.js'
 import type { OperatorAuthority } from './run.js'
 import { authorizePath } from './trust.js'
 import type { Trust } from './trust.js'
@@ -64,41 +64,17 @@ export interface LintOptions {
 type LibraryKind = 'macros' | 'data' | 'recipes'
 
 /** Read a document through policy while retaining its authored path in diagnostics. */
-function lintDocument(
-  trust: Trust | undefined,
-  target: string,
-  file: string,
-  where: string,
-): unknown {
-  if (!trust) return readDocument(file)
+function lintDocument(trust: Trust, target: string, file: string, where: string): unknown {
   return readDocumentAt(authorizePath(trust, target, where), file)
 }
 
-/** Every problem in a Project's config, macros, data and Recipes. */
-export function lint(
-  authority: OperatorAuthority,
-  configFile?: string,
-  options?: LintOptions,
-): Problem[]
-/** Compatibility interface for callers migrating to explicit Operator authority. */
-export function lint(configFile?: string, options?: LintOptions): Problem[]
 /** Accumulate malformed and unauthorized documents without requiring a complete Run. */
 export function lint(
-  input?: OperatorAuthority | string,
-  configOrOptions?: string | LintOptions,
-  authorityOptions: LintOptions = {},
+  authorityValue: OperatorAuthority,
+  configFile?: string,
+  options: LintOptions = {},
 ): Problem[] {
-  const usesAuthority = input !== undefined && typeof input !== 'string'
-  const configFile = usesAuthority
-    ? typeof configOrOptions === 'string'
-      ? configOrOptions
-      : undefined
-    : input
-  const options = usesAuthority
-    ? typeof configOrOptions === 'object' && configOrOptions !== null
-      ? configOrOptions
-      : authorityOptions
-    : ((configOrOptions ?? {}) as LintOptions)
+  const authority = operatorAuthority(authorityValue)
   const problems: Problem[] = []
   let loaded: LoadedConfig
   try {
@@ -109,21 +85,14 @@ export function lint(
     return [{ file, message: said(error, file), level: 'error' }]
   }
 
-  let trust: Trust | undefined
-  if (usesAuthority) {
-    try {
-      trust = projectPolicy(input as OperatorAuthority, loaded).trust
-    } catch (error) {
-      return [{ file: loaded.file, message: said(error, loaded.file), level: 'error' }]
-    }
-  }
+  const trust = projectPolicy(authority, loaded).trust
 
   const { paths, finders } = loaded.config
   const documents = (kind: LibraryKind): Array<{ name: string; file: string; target: string }> => {
     const authored = fromRoot(loaded, paths[kind])
     let directory = authored
     try {
-      if (trust) directory = authorizePath(trust, authored, `paths.${kind}`)
+      directory = authorizePath(trust, authored, `paths.${kind}`)
       return documentFiles(directory).map(({ name, file: target }) => ({
         name,
         file: join(authored, basename(target)),
@@ -197,26 +166,19 @@ export function formatProblems(problems: readonly Problem[], checked: number): s
   return lines
 }
 
-/** Count documents reachable under explicit Operator authority. */
-export function countDocuments(authority: OperatorAuthority, configFile?: string): number
-/** Compatibility interface for callers migrating to explicit Operator authority. */
-export function countDocuments(configFile?: string): number
 /** How many documents a lint run looked at, for the line it finishes with. */
-export function countDocuments(input?: OperatorAuthority | string, authorityFile?: string): number {
-  const usesAuthority = input !== undefined && typeof input !== 'string'
-  const configFile = usesAuthority ? authorityFile : input
+export function countDocuments(authorityValue: OperatorAuthority, configFile?: string): number {
+  const authority = operatorAuthority(authorityValue)
   try {
     const loaded = loadConfig(configFile)
-    const trust = usesAuthority
-      ? projectPolicy(input as OperatorAuthority, loaded).trust
-      : undefined
+    const trust = projectPolicy(authority, loaded).trust
     const { paths } = loaded.config
     return (
       1 +
       (['macros', 'data', 'recipes'] as const).reduce((total, kind) => {
         const authored = fromRoot(loaded, paths[kind])
         try {
-          const directory = trust ? authorizePath(trust, authored, `paths.${kind}`) : authored
+          const directory = authorizePath(trust, authored, `paths.${kind}`)
           return total + documentFiles(directory).length
         } catch {
           return total

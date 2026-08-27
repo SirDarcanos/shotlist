@@ -202,7 +202,7 @@ export function trustFromEnvironment(
   }
 }
 
-/** Derive policy from the machine's current environment for compatibility callers. */
+/** Derive policy from the machine's current environment for focused policy callers. */
 export function trustFrom(where: TrustSource, flag: boolean): Trust {
   return trustFromEnvironment(where, flag, process.env)
 }

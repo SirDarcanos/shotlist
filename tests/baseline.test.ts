@@ -19,6 +19,14 @@ const root = () => {
   return { root: dir }
 }
 
+/** Open a Run rooted beside its Baseline record. */
+function baselineRun() {
+  const loaded = root()
+  const config = join(loaded.root, 'shotlist.config.json')
+  writeFileSync(config, JSON.stringify({ site: { url: 'https://example.com' } }))
+  return { loaded, run: openRun({ untrusted: false }, config) }
+}
+
 afterEach(() => {
   for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
@@ -81,14 +89,14 @@ describe('the recorded baseline', () => {
     expect(readFileSync(target, 'utf8')).toBe('unchanged')
   })
 
-  it('is absent for a project that has never installed anything', () => {
-    expect(readBaseline(root())).toBeNull()
+  it('is absent for a Project that has never installed anything', () => {
+    expect(readBaseline(baselineRun().run)).toBeNull()
   })
 
   it('names the file when it cannot be read', () => {
-    const loaded = root()
+    const { loaded, run } = baselineRun()
     writeFileSync(join(loaded.root, BASELINE_FILE), '{ not json')
-    expect(() => readBaseline(loaded)).toThrow(new RegExp(BASELINE_FILE))
+    expect(() => readBaseline(run)).toThrow(new RegExp(BASELINE_FILE))
   })
 })
 

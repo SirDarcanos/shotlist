@@ -2,13 +2,13 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
-import { authorizePath, checkPath, checkUrl, envFor } from './trust.js'
+import { authorizePath, checkUrl } from './trust.js'
 import { readSession, sessionFor } from './session.js'
 import { MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
 import type { Format } from './image.js'
 import type { Config, LoadedConfig, Style } from './config.js'
-import { ENV, expandSteps } from './recipe.js'
-import type { Library, Recipe } from './recipe.js'
+import { expandSteps } from './recipe.js'
+import type { Recipe } from './recipe.js'
 import { resolve as resolveInPage, runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
 import { drawAnnotations } from './annotate.js'
@@ -16,30 +16,19 @@ import type { DrawStyle, Mark } from './annotate.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
 import type { QueryInput, Rect } from './query.js'
+import { assertRecipe, assertRun } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
 
-/** Whether an input uses the immutable Run interface. */
-function isRun(input: Run | Recipe): input is Run {
-  return 'project' in input
-}
-
-/** Optional behavior shared by Run-based and compatibility capture. */
+/** Optional behavior for capturing a Recipe through its Run. */
 export interface ShootOptions {
   install?: boolean
   browser?: Browser
   onRetry?: (retry: Retry) => void
 }
 
-/** Authorize a Run path to its canonical target, preserving the compatibility behavior. */
-function capturePath(
-  run: Run | undefined,
-  loaded: LoadedConfig,
-  path: string,
-  where: string,
-): string {
-  if (run) return authorizePath(run.trust, path, where)
-  if (loaded.trust) checkPath(loaded.trust, path, where)
-  return path
+/** Authorize a Run path to its canonical target. */
+function capturePath(run: Run, path: string, where: string): string {
+  return authorizePath(run.trust, path, where)
 }
 
 export interface ShotResult {
@@ -105,7 +94,7 @@ function settingsFor(recipe: Recipe, config: Config) {
 
 /** Where a recipe's image is installed, refusing a destination the config never named. */
 function destinationFor(
-  run: Run | undefined,
+  run: Run,
   recipe: Recipe,
   loaded: LoadedConfig,
 ): { authored: string; target: string } | undefined {
@@ -124,12 +113,7 @@ function destinationFor(
   )
   return {
     authored: destination,
-    target: capturePath(
-      run,
-      loaded,
-      destination,
-      `recipe "${recipe.name}": install."${recipe.install}"`,
-    ),
+    target: capturePath(run, destination, `recipe "${recipe.name}": install."${recipe.install}"`),
   }
 }
 
@@ -201,7 +185,7 @@ function namedFamily(stack: string): string | undefined {
  * and the font files it points at are inlined into it, because a relative `url()` in an
  * inlined sheet would resolve against a page that is nowhere.
  */
-function fontSheet(run: Run | undefined, style: Style, loaded: LoadedConfig): FontSheet {
+function fontSheet(run: Run, style: Style, loaded: LoadedConfig): FontSheet {
   const named = style.label.fontUrl
   if (!named) return {}
 
@@ -209,7 +193,7 @@ function fontSheet(run: Run | undefined, style: Style, loaded: LoadedConfig): Fo
   try {
     const url = new URL(named)
     if (url.protocol === 'http:' || url.protocol === 'https:') {
-      if (run) checkUrl(run.trust, named, 'style.label.fontUrl')
+      checkUrl(run.trust, named, 'style.label.fontUrl')
       return { href: named }
     }
     if (url.protocol === 'data:') return { href: named }
@@ -225,7 +209,7 @@ function fontSheet(run: Run | undefined, style: Style, loaded: LoadedConfig): Fo
   }
 
   const authoredFile = fromRoot(loaded, path)
-  const file = capturePath(run, loaded, authoredFile, 'style.label.fontUrl')
+  const file = capturePath(run, authoredFile, 'style.label.fontUrl')
   if (!existsSync(file)) {
     throw new ShotlistError(
       `style.label.fontUrl: nothing at ${authoredFile} — a relative path is resolved from the ` +
@@ -258,12 +242,12 @@ function fontSheet(run: Run | undefined, style: Style, loaded: LoadedConfig): Fo
     /url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
     (whole, _quote: string, target: string) => {
       if (/^https?:/i.test(target)) {
-        if (run) checkUrl(run.trust, target, 'style.label.fontUrl')
+        checkUrl(run.trust, target, 'style.label.fontUrl')
         return whole
       }
       if (/^data:/i.test(target)) return whole
       const authoredAsset = fromRoot({ root: dirname(authoredFile) }, target.split(/[?#]/)[0]!)
-      const asset = capturePath(run, loaded, authoredAsset, 'style.label.fontUrl')
+      const asset = capturePath(run, authoredAsset, 'style.label.fontUrl')
       if (!existsSync(asset)) {
         throw new ShotlistError(
           `style.label.fontUrl: ${basename(authoredFile)} points at ${target}, and there is no file there`,
@@ -438,12 +422,12 @@ async function reEncode(
  * before being reported.
  */
 function sourceImage(
-  run: Run | undefined,
+  run: Run,
   recipe: Recipe,
   loaded: LoadedConfig,
 ): { image: Buffer; pixels: { width: number; height: number }; format: Format } {
   const authoredPath = fromRoot(loaded, recipe.file!)
-  const path = capturePath(run, loaded, authoredPath, `recipe "${recipe.name}": \`file:\``)
+  const path = capturePath(run, authoredPath, `recipe "${recipe.name}": \`file:\``)
   if (!existsSync(path)) {
     throw inRecipe(
       recipe,
@@ -474,51 +458,30 @@ function sourceImage(
  * already on disk. Both end in the same drawing pass, so a hand-captured screen and a
  * scripted one carry identical callouts.
  */
-export function shoot(
-  run: Run,
-  recipe: DeepReadonly<Recipe>,
-  options?: ShootOptions,
-): Promise<ShotResult>
-/** Compatibility interface for callers migrating to the Run seam. */
-export function shoot(
-  recipe: Recipe,
-  library: Library,
-  loaded: LoadedConfig,
-  options?: ShootOptions,
-): Promise<ShotResult>
-/** Shoot through a Run, retaining the old form until interface contraction. */
 export async function shoot(
-  input: Run | Recipe,
-  recipeOrLibrary: DeepReadonly<Recipe> | Library,
-  optionsOrLoaded: ShootOptions | LoadedConfig = {},
-  legacyOptions: ShootOptions = {},
+  run: Run,
+  candidate: DeepReadonly<Recipe>,
+  options: ShootOptions = {},
 ): Promise<ShotResult> {
-  const run = isRun(input) ? input : undefined
+  assertRun(run)
+  assertRecipe(run, candidate)
   // A Run freezes the Recipe rather than changing its shape; capture only reads it.
-  const recipe = (run ? recipeOrLibrary : input) as Recipe
-  const library = run ? run.project.library : (recipeOrLibrary as Library)
-  const loaded = (run ? run.project : optionsOrLoaded) as LoadedConfig
-  const trust = run?.trust ?? loaded.trust
-  const options = run ? (optionsOrLoaded as ShootOptions) : legacyOptions
+  const recipe = candidate as Recipe
+  const library = run.project.library
+  const loaded = run.project as unknown as LoadedConfig
   const { config } = loaded
   const style = mergeStyle(config.style, recipe.style as never)
   const settings = settingsFor(recipe, config)
   const session =
     recipe.session === undefined
       ? undefined
-      : run
-        ? sessionFor(run, recipe.session, `recipe "${recipe.name}": \`session\``)
-        : sessionFor(loaded, recipe.session, `recipe "${recipe.name}": \`session\``)
-  const storageState = session
-    ? run
-      ? readSession(run, session)
-      : readSession(loaded, session)
-    : undefined
+      : sessionFor(run, recipe.session, `recipe "${recipe.name}": \`session\``)
+  const storageState = session ? readSession(run, session) : undefined
   const authoredOutDir = fromRoot(loaded, config.paths.out)
-  const outDir = capturePath(run, loaded, authoredOutDir, 'paths.out')
+  const outDir = capturePath(run, authoredOutDir, 'paths.out')
   mkdirSync(outDir, { recursive: true })
   const file = join(authoredOutDir, `${recipe.name}${extensionOf(settings.format)}`)
-  const outputTarget = capturePath(run, loaded, file, `recipe "${recipe.name}": output`)
+  const outputTarget = capturePath(run, file, `recipe "${recipe.name}": output`)
   const source = recipe.source === 'file' ? sourceImage(run, recipe, loaded) : undefined
 
   // A caller shooting a whole set passes its own browser: launching one per recipe costs
@@ -585,12 +548,11 @@ export async function shoot(
         const ctx: RunContext = {
           pages: new Map<string, Page>([['main', page]]),
           page,
-          vars: { ...library.data, ...(run ? {} : { [ENV]: envFor(trust) }) },
+          vars: { ...library.data },
           rects: {},
           viewport: settings.viewport,
           timeout: config.site.timeout,
           newPage: () => context.newPage(),
-          ...(trust ? { trust } : {}),
         }
         // Held rather than thrown from the `finally`, because a shot that already failed
         // is the more useful thing to report: an error about tidying up a page that never
@@ -599,13 +561,11 @@ export async function shoot(
         try {
           // The site not being up is the first thing a new project gets wrong, and
           // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
-          if (trust) {
-            checkUrl(
-              trust,
-              settings.url,
-              `recipe "${recipe.name}": ${recipe.url ? '`url`' : '`site.url`'}`,
-            )
-          }
+          checkUrl(
+            run.trust,
+            settings.url,
+            `recipe "${recipe.name}": ${recipe.url ? '`url`' : '`site.url`'}`,
+          )
           try {
             await page.goto(settings.url, { waitUntil: 'load' })
           } catch (error) {
@@ -645,8 +605,7 @@ export async function shoot(
 
           try {
             const steps = expandSteps(recipe.setup, library.macros)
-            if (run) await runSteps(run, steps, ctx)
-            else await runSteps(steps, ctx)
+            await runSteps(run, steps, ctx)
           } catch (error) {
             throw inRecipe(recipe, 'setup', pageMessage(error))
           }
@@ -711,8 +670,7 @@ export async function shoot(
           if (recipe.teardown.length) {
             try {
               const steps = expandSteps(recipe.teardown, library.macros)
-              if (run) await runSteps(run, steps, ctx)
-              else await runSteps(steps, ctx)
+              await runSteps(run, steps, ctx)
             } catch (error) {
               tidying = inRecipe(recipe, 'teardown', pageMessage(error))
             }

@@ -4,9 +4,8 @@ import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { join, resolve } from 'node:path'
-import { ShotlistError, fromRoot, loadConfig } from './config.js'
-import { loadLibrary, withNumbering } from './recipe.js'
-import type { Library, Recipe } from './recipe.js'
+import { ShotlistError, fromRoot } from './config.js'
+import type { Recipe } from './recipe.js'
 import { shoot } from './capture.js'
 import type { Retry } from './capture.js'
 import { check } from './check.js'
@@ -14,8 +13,9 @@ import { loadPlaywright } from './playwright.js'
 import { withServer } from './serve.js'
 import { scaffold } from './init.js'
 import { countDocuments, formatProblems, lint } from './lint.js'
-import { trustFrom } from './trust.js'
-import { sessionFor, signIn } from './session.js'
+import { signIn } from './session.js'
+import { openRun } from './run.js'
+import type { DeepReadonly, OperatorAuthority, ProjectLibrary } from './run.js'
 import {
   BASELINE_FILE,
   describeEnvironment,
@@ -74,21 +74,12 @@ const CONSOLE: Io = {
     }),
 }
 
-/** Load the project's config and its recipes, macros and data. */
-function open(configFile?: string): { loaded: ReturnType<typeof loadConfig>; library: Library } {
-  const loaded = loadConfig(configFile)
-  const { paths, finders } = loaded.config
-  const library = loadLibrary({
-    recipes: fromRoot(loaded, paths.recipes),
-    macros: fromRoot(loaded, paths.macros),
-    data: fromRoot(loaded, paths.data),
-    finders,
-  })
-  return { loaded, library }
-}
-
-/** The recipes named on the command line, or all of them, refusing an unknown name. */
-function pick(library: Library, names: readonly string[], all: boolean): Recipe[] {
+/** The Recipes named on the command line, or all of them, refusing an unknown name. */
+function pick(
+  library: ProjectLibrary,
+  names: readonly string[],
+  all: boolean,
+): DeepReadonly<Recipe>[] {
   const chosen = all || names.length === 0 ? [...library.recipes.keys()] : names
   return chosen.map((name) => {
     const recipe = library.recipes.get(name)
@@ -99,7 +90,7 @@ function pick(library: Library, names: readonly string[], all: boolean): Recipe[
           (known.length ? ` — this project has ${known.join(', ')}` : ''),
       )
     }
-    return withNumbering(recipe)
+    return recipe
   })
 }
 
@@ -171,16 +162,17 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     return 0
   }
 
-  // Before the config is loaded, because a config that will not load is the first thing
-  // this has to be able to report rather than die of.
+  const authority: OperatorAuthority = {
+    untrusted: values.untrusted,
+    hosts: values.allow ?? [],
+    paths: values['allow-path'] ?? [],
+    deny: values.deny ?? [],
+    env: values['allow-env'] ?? [],
+  }
+
+  // Before a complete Run is opened, because malformed Library documents are what this
+  // command has to accumulate rather than stop at.
   if (values.lint) {
-    const authority = {
-      untrusted: values.untrusted,
-      hosts: values.allow ?? [],
-      paths: values['allow-path'] ?? [],
-      deny: values.deny ?? [],
-      env: values['allow-env'] ?? [],
-    }
     const problems = lint(authority, values.config, { warnings: values.warnings })
     for (const line of formatProblems(problems, countDocuments(authority, values.config))) {
       io.out(line)
@@ -189,30 +181,12 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
   }
 
   try {
-    const { loaded, library } = open(values.config)
-    // Set here and nowhere else: a control the config could switch off is not one.
-    // `--allow` comes from whoever typed the command, so unlike `site.allow` it is still
-    // worth something when the config is not theirs.
-    loaded.trust = trustFrom(
-      {
-        root: loaded.root,
-        siteUrl: loaded.config.site.url,
-        allow: loaded.config.site.allow,
-        deny: loaded.config.deny,
-        allowEnv: loaded.config.allowEnv,
-        granted: {
-          hosts: values.allow ?? [],
-          paths: values['allow-path'] ?? [],
-          deny: values.deny ?? [],
-          env: values['allow-env'] ?? [],
-        },
-      },
-      values.untrusted,
-    )
+    const shotRun = openRun(authority, values.config)
+    const { project } = shotRun
+    const { library } = project
 
     if (values.login !== undefined) {
-      const session = sessionFor(loaded, values.login, '--login')
-      await signIn(loaded, library, session, {
+      await signIn(shotRun, values.login, {
         ...(values.using !== undefined ? { using: values.using } : {}),
         ...(io.pause ? { pause: io.pause.bind(io) } : {}),
         say: io.out,
@@ -223,7 +197,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     // No recipe named and nothing to do with them: list what there is.
     if (!values.all && !values.check && positionals.length === 0) {
       if (library.recipes.size === 0) {
-        io.out(`no recipes in ${fromRoot(loaded, loaded.config.paths.recipes)}`)
+        io.out(`no recipes in ${fromRoot(project, project.config.paths.recipes)}`)
         return 0
       }
       for (const name of [...library.recipes.keys()].sort()) io.out(name)
@@ -259,18 +233,18 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         try {
           // Said before the results, so they are read in the light of it: a different
           // Chromium rasterises text differently, and that is not the site changing.
-          drift = environmentDrift(readBaseline(loaded), describeEnvironment(browser))
+          drift = environmentDrift(readBaseline(shotRun), describeEnvironment(browser))
           if (drift.length) {
             say('! this is not the machine the committed images were taken on:')
             for (const { field, was, now } of drift) say(`    ${field}: ${was} → ${now}`)
             say('  Differences below may be that, rather than the site.')
           }
-          results = await check(recipes, library, loaded, {
+          results = await check(shotRun, recipes, {
             browser,
             keepGoing,
             onRetry,
             ...(values.diff
-              ? { diffDir: join(fromRoot(loaded, loaded.config.paths.out), 'diff') }
+              ? { diffDir: join(fromRoot(project, project.config.paths.out), 'diff') }
               : {}),
           })
         } finally {
@@ -314,7 +288,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
       try {
         for (const recipe of recipes) {
           try {
-            const result = await shoot(recipe, library, loaded, {
+            const result = await shoot(shotRun, recipe, {
               install: values.install,
               browser,
               onRetry,
@@ -340,7 +314,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
       // What was just installed is the baseline a later `--check` compares against, so
       // this is the moment the machine that took it is worth recording.
       if (values.install) {
-        writeBaseline(loaded, describeEnvironment(browser))
+        writeBaseline(shotRun, describeEnvironment(browser))
         io.out(`  recorded this machine in ${BASELINE_FILE}`)
       }
       return 0
@@ -348,7 +322,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
 
     // A set of `source: file` recipes never opens the site, and should not wait on one.
     const needsSite = recipes.some((recipe) => recipe.source === 'app')
-    return needsSite ? await withServer(loaded, work) : await work()
+    return needsSite ? await withServer(shotRun, work) : await work()
   } catch (error) {
     io.err(error instanceof ShotlistError ? error.message : String(error))
     return 1

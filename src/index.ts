@@ -1,16 +1,5 @@
-export {
-  Config,
-  ShotlistError,
-  findConfig,
-  formatIssues,
-  fromRoot,
-  loadConfig,
-  mergeStyle,
-  nearest,
-  parseConfig,
-  readDocument,
-} from './config.js'
-export type { LoadedConfig, Serve, Style } from './config.js'
+export { Config, ShotlistError, formatIssues, mergeStyle, nearest, parseConfig } from './config.js'
+export type { Serve, Style } from './config.js'
 
 export {
   Macro,
@@ -18,8 +7,9 @@ export {
   VERBS,
   expandSteps,
   interpolate,
-  loadLibrary,
   nearestVerb,
+  parseLibrary,
+  parseMacro,
   parseRecipe,
   withNumbering,
 } from './recipe.js'
@@ -61,18 +51,6 @@ export {
   writeBaseline,
 } from './baseline.js'
 export type { Drift, Environment } from './baseline.js'
-export {
-  checkCommand,
-  checkPath,
-  checkSession,
-  checkUrl,
-  covers,
-  envFor,
-  hostsFor,
-  secretIn,
-  trustFrom,
-} from './trust.js'
-export type { Trust } from './trust.js'
 export { openRun } from './run.js'
 export type { DeepReadonly, OperatorAuthority, Project, ProjectLibrary, Run } from './run.js'
 export { narrowSession, readSession, sessionFor, sessionHosts, signIn } from './session.js'
@@ -82,4 +60,3 @@ export type { Server } from './serve.js'
 export { countDocuments, formatProblems, lint } from './lint.js'
 export type { LintOptions, Problem } from './lint.js'
 export { SCHEMA_FILES } from './schemas.js'
-export { run } from './cli.js'

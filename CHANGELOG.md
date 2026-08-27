@@ -15,39 +15,50 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
 - **Explicit Run opening** through `openRun(authority, configFile)`. The opener authorizes
   each configured Library directory before enumeration and each document before reading.
   It returns frozen authority, environment, config, and Library snapshots for the Run.
-  Existing loaders remain available while callers migrate to the Run interface.
 
 - **Run-based runtime interfaces** for browser steps and managed site startup. Steps
   authorize interpolated navigation URLs and read environment values from the Run snapshot.
   Site startup authorizes its command, working directory, and readiness URL, and interpolates
-  configured environment values from the same snapshot. Existing config-based interfaces
-  remain available until the Run migration contracts the public interface.
+  configured environment values from the same snapshot.
 
 - **Run-owned Session access** for login and authenticated capture. Session resolution,
   reads, and writes authorize canonical paths through the Run; scripted login uses the
-  opening environment snapshot. Existing config-based Session and capture interfaces remain
-  available during migration.
+  opening environment snapshot.
 
 - **Run-based capture** for Application and File Recipes. Capture authorizes navigation,
   source images, output and install destinations, and local font files through the Run.
-  Retries keep the same Run and open a fresh browser context. Existing config-based capture
-  remains available during migration.
+  Retries keep the same Run and open a fresh browser context.
 
 - **Run-policy linting** that accepts explicit Operator authority while continuing past
   malformed or unauthorized Library documents. Lint authorizes each configured directory
   before enumeration and each document before reading; the command remains trusted unless
-  the operator selects `--untrusted`. Existing lint interfaces remain available during
-  migration.
+  the operator selects `--untrusted`.
 
 - **Run-based checking and Baseline access** for comparing Output images with Committed
   images and recording their rendering environment. Checking authorizes canonical image and
   diff paths, then re-shoots each Recipe through the same Run. Baseline reads and writes use
-  that Run's path policy. Existing config-based interfaces remain available during migration.
+  that Run's path policy.
 
 - **Repository-local agent context**, with a canonical glossary and branch-specific guides
   for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
   now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these
   boundaries from imports or carrying every rule into every task.
+
+### Changed
+
+- **Effectful library calls require an authentic Run.** Open one with explicit Operator
+  authority, then pass its own Recipes to capture, checking, Session, server, step, and
+  Baseline interfaces. Missing or forged Runs and copied or foreign Recipes fail before an
+  effect. Lint takes Operator authority directly because malformed Projects cannot open a
+  complete Run. Config, Recipe, Macro, Library-document, and Query parsing remain
+  authority-free.
+
+### Removed
+
+- **Config-plus-Library compatibility interfaces and mutable config trust.** `LoadedConfig`
+  no longer carries optional trust, and the package root no longer exports unrestricted
+  config or Library loaders, raw trust checks, or the CLI runner. Use `openRun` for Project
+  effects and the parse functions for values already in memory.
 
 ## [0.5.0] — 2026-08-24
 

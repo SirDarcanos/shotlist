@@ -65,11 +65,25 @@ export interface ProjectPolicy {
 /** Full process environment snapshots retained without exposing ungranted values to recipes. */
 const ENVIRONMENTS = new WeakMap<Run, Readonly<Record<string, string | undefined>>>()
 
+/** Refuse a value not created by shotlist's Run opener. */
+export function assertRun(value: unknown): asserts value is Run {
+  if (typeof value !== 'object' || value === null || !ENVIRONMENTS.has(value as Run)) {
+    throw new ShotlistError('A Run opened by shotlist is required')
+  }
+}
+
+/** Refuse a Recipe that does not belong to the Run. */
+export function assertRecipe(run: Run, recipe: DeepReadonly<Recipe>): void {
+  assertRun(run)
+  if (![...run.project.library.recipes.values()].includes(recipe)) {
+    throw new ShotlistError(`Recipe "${recipe.name}" does not belong to this Run`)
+  }
+}
+
 /** Return the process environment captured for a Run-owned process. */
 export function environmentSnapshot(run: Run): Readonly<Record<string, string | undefined>> {
-  const environment = ENVIRONMENTS.get(run)
-  if (!environment) throw new ShotlistError('A Run opened by shotlist is required')
-  return environment
+  assertRun(run)
+  return ENVIRONMENTS.get(run)!
 }
 
 /** Copy and validate an Operator authority declaration from a TypeScript or JavaScript caller. */
@@ -104,6 +118,11 @@ function snapshotAuthority(value: unknown): Readonly<OperatorAuthority> {
     ...(env !== undefined ? { env } : {}),
   }
   return Object.freeze(authority)
+}
+
+/** Validate and copy an Operator authority declaration before any Project effect. */
+export function operatorAuthority(value: unknown): DeepReadonly<OperatorAuthority> {
+  return snapshotAuthority(value)
 }
 
 /** Freeze arrays and plain object graphs built while opening a Run. */
@@ -219,12 +238,12 @@ export function projectPolicy(
   authorityValue: OperatorAuthority,
   loaded: LoadedConfig,
 ): ProjectPolicy {
-  return policyFrom(snapshotAuthority(authorityValue), loaded, Object.freeze({ ...process.env }))
+  return policyFrom(operatorAuthority(authorityValue), loaded, Object.freeze({ ...process.env }))
 }
 
 /** Open a complete immutable Run after authorizing its config-directed Library reads. */
 export function openRun(authorityValue: OperatorAuthority, configFile?: string): Run {
-  const authority = snapshotAuthority(authorityValue)
+  const authority = operatorAuthority(authorityValue)
   const environment = Object.freeze({ ...process.env })
   const loaded = loadConfig(configFile)
   const config = loaded.config

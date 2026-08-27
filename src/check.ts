@@ -1,17 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ShotlistError, fromRoot } from './config.js'
-import type { LoadedConfig } from './config.js'
-import { authorizePath, checkPath } from './trust.js'
+import { fromRoot } from './config.js'
+import { authorizePath } from './trust.js'
 import { shoot } from './capture.js'
 import { MEDIA, extensionOf, formatOf } from './image.js'
 import type { Retry } from './capture.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, BrowserContext } from './playwright.js'
-import type { Library, Recipe } from './recipe.js'
+import type { Recipe } from './recipe.js'
+import { assertRecipe, assertRun } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
 
-/** Optional behavior shared by Run-based and compatibility checking. */
+/** Optional behavior for checking Recipes through a Run. */
 export interface CheckOptions {
   browser?: Browser
   keepGoing?: boolean
@@ -181,29 +181,14 @@ async function comparePixels(input: {
   return { differing, total: a.data.length / 4, sizes }
 }
 
-/** Whether an input uses the immutable Run interface. */
-function isRun(input: Run | readonly Recipe[]): input is Run {
-  return 'project' in input
-}
-
-/** Authorize a checking path to its canonical target, preserving compatibility behavior. */
-function checkFile(
-  run: Run | undefined,
-  loaded: LoadedConfig,
-  path: string,
-  where: string,
-): string {
-  if (run) return authorizePath(run.trust, path, where)
-  if (loaded.trust) checkPath(loaded.trust, path, where)
-  return path
+/** Authorize a checking path to its canonical target. */
+function checkFile(run: Run, path: string, where: string): string {
+  return authorizePath(run.trust, path, where)
 }
 
 /** Where a Recipe's committed image lives, if it installs anywhere. */
-function committedFile(
-  run: Run | undefined,
-  recipe: Recipe,
-  loaded: LoadedConfig,
-): { authored: string; target: string } | undefined {
+function committedFile(run: Run, recipe: Recipe): { authored: string; target: string } | undefined {
+  const loaded = run.project
   if (!recipe.install || recipe.install === 'none') return undefined
   const destination = loaded.config.install[recipe.install]
   if (!destination) return undefined
@@ -211,7 +196,7 @@ function committedFile(
   const authored = `${fromRoot(loaded, destination)}/${recipe.name}${extensionOf(format)}`
   return {
     authored,
-    target: checkFile(run, loaded, authored, `recipe "${recipe.name}": committed image`),
+    target: checkFile(run, authored, `recipe "${recipe.name}": committed image`),
   }
 }
 
@@ -221,38 +206,15 @@ function committedFile(
  * The comparison runs in the browser that took the shot, so no image library is needed
  * for something the tool already has a decoder for.
  */
-export function check(
-  run: Run,
-  recipes: readonly DeepReadonly<Recipe>[],
-  options?: CheckOptions,
-): Promise<CheckResult[]>
-/** Compatibility interface for callers migrating to the Run seam. */
-export function check(
-  recipes: readonly Recipe[],
-  library: Library,
-  loaded: LoadedConfig,
-  options?: CheckOptions,
-): Promise<CheckResult[]>
-/** Compare Recipes through a Run, retaining the old form until interface contraction. */
 export async function check(
-  input: Run | readonly Recipe[],
-  recipesOrLibrary: readonly DeepReadonly<Recipe>[] | Library,
-  loadedOrOptions: LoadedConfig | CheckOptions = {},
-  legacyOptions: CheckOptions = {},
+  run: Run,
+  candidates: readonly DeepReadonly<Recipe>[],
+  options: CheckOptions = {},
 ): Promise<CheckResult[]> {
-  const run = isRun(input) ? input : undefined
-  const recipes = (run ? recipesOrLibrary : input) as readonly Recipe[]
-  const library = run ? run.project.library : (recipesOrLibrary as Library)
-  const loaded = (run ? run.project : loadedOrOptions) as LoadedConfig
-  const options = run ? (loadedOrOptions as CheckOptions) : legacyOptions
-  if (run) {
-    const owned = new Set(run.project.library.recipes.values())
-    for (const recipe of recipesOrLibrary as readonly DeepReadonly<Recipe>[]) {
-      if (!owned.has(recipe)) {
-        throw new ShotlistError(`Recipe "${recipe.name}" does not belong to this Run`)
-      }
-    }
-  }
+  assertRun(run)
+  for (const recipe of candidates) assertRecipe(run, recipe)
+  const recipes = candidates as readonly Recipe[]
+  const loaded = run.project
   // A caller that already has one passes it, the same way `shoot` takes one — the CLI
   // reads the browser's version off it before any recipe is re-shot.
   const browser: Browser = options.browser ?? (await loadPlaywright().chromium.launch())
@@ -275,7 +237,7 @@ export async function check(
       }
       // The project's limits, with whatever this recipe says on top.
       const limits = { ...loaded.config.check, ...(recipe.check || {}) }
-      const committed = committedFile(run, recipe, loaded)
+      const committed = committedFile(run, recipe)
       if (!committed) {
         results.push({
           name: recipe.name!,
@@ -288,12 +250,7 @@ export async function check(
       // a reason to stop: the other recipes still have an answer worth reporting.
       let shotResult
       try {
-        shotResult = run
-          ? await shoot(run, recipe, { browser, onRetry: options.onRetry })
-          : await shoot(recipe, library as Library, loaded, {
-              browser,
-              onRetry: options.onRetry,
-            })
+        shotResult = await shoot(run, recipe, { browser, onRetry: options.onRetry })
       } catch (error) {
         if (!options.keepGoing) throw error
         results.push({
@@ -312,12 +269,7 @@ export async function check(
         })
         continue
       }
-      const shotTarget = checkFile(
-        run,
-        loaded,
-        shotResult.file,
-        `recipe "${recipe.name}": re-shot image`,
-      )
+      const shotTarget = checkFile(run, shotResult.file, `recipe "${recipe.name}": re-shot image`)
       const uri = (file: string) => {
         const bytes = readFileSync(file)
         return `data:${MEDIA[formatOf(bytes) ?? 'png']};base64,${bytes.toString('base64')}`
@@ -339,10 +291,10 @@ export async function check(
           ignore,
           ...DIFF,
         })
-        const directory = checkFile(run, loaded, options.diffDir, 'check diff directory')
+        const directory = checkFile(run, options.diffDir, 'check diff directory')
         mkdirSync(directory, { recursive: true })
         const file = join(options.diffDir, `${recipe.name}.png`)
-        const target = checkFile(run, loaded, file, `recipe "${recipe.name}": diff`)
+        const target = checkFile(run, file, `recipe "${recipe.name}": diff`)
         writeFileSync(target, Buffer.from(url.split(',')[1]!, 'base64'))
         return file
       }

@@ -1,7 +1,7 @@
 import { ShotlistError, pageMessage } from './config.js'
 import { checkUrl } from './trust.js'
-import type { Trust } from './trust.js'
 import { ENV, interpolate } from './recipe.js'
+import { assertRun } from './run.js'
 import type { Run } from './run.js'
 import { resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
@@ -24,8 +24,6 @@ export interface RunContext {
   viewport: { width: number; height: number }
   timeout: number
   newPage(): Promise<Page>
-  /** What this recipe may reach, when the operator said the config is not theirs. */
-  trust?: Trust
   /** Set by `dialog:`. Unset, nothing is listening and the browser's own default holds. */
   dialog?: DialogPolicy
 }
@@ -217,38 +215,22 @@ async function elementFor(
  * than being stamped onto each step: a macro used inside a loop may loop again, and the
  * steps two levels down still need the outer loop's variable.
  */
-export function runSteps(
+export async function runSteps(
   run: Run,
   steps: readonly ResolvedStep[],
   ctx: RunContext,
-  scope?: Readonly<Record<string, unknown>>,
-): Promise<void>
-/** Compatibility interface for callers migrating to the Run seam. */
-export function runSteps(
-  steps: readonly ResolvedStep[],
-  ctx: RunContext,
-  scope?: Readonly<Record<string, unknown>>,
-): Promise<void>
-/** Run one recipe's steps with a Run, retaining the old form until interface contraction. */
-export async function runSteps(
-  runOrSteps: Run | readonly ResolvedStep[],
-  stepsOrContext: readonly ResolvedStep[] | RunContext,
-  contextOrScope: RunContext | Readonly<Record<string, unknown>> = {},
-  maybeScope: Readonly<Record<string, unknown>> = {},
+  scope: Readonly<Record<string, unknown>> = {},
 ): Promise<void> {
-  const run = Array.isArray(runOrSteps) ? undefined : (runOrSteps as Run)
-  const steps = (run ? stepsOrContext : runOrSteps) as readonly ResolvedStep[]
-  const ctx = (run ? contextOrScope : stepsOrContext) as RunContext
-  const scope = (run ? maybeScope : contextOrScope) as Readonly<Record<string, unknown>>
-  for (const resolved of steps) await runStep(resolved, ctx, scope, run)
+  assertRun(run)
+  for (const resolved of steps) await runStep(run, resolved, ctx, scope)
 }
 
 /** Run one step, with `$name` resolved against the variables in scope where it was written. */
 async function runStep(
+  run: Run,
   resolved: ResolvedStep,
   ctx: RunContext,
   outer: Readonly<Record<string, unknown>>,
-  run?: Run,
 ): Promise<void> {
   // A macro's own arguments beat a loop variable of the same name: `with:` is the more
   // specific statement of the two.
@@ -256,7 +238,7 @@ async function runStep(
   // They are resolved here rather than where the frame was built, because an argument may
   // name a loop variable — `use: set-hp` `with: {who: $foe}` inside an `each` — and the
   // frames are built when the file loads, before `$foe` stands for anything.
-  const environment = run ? { [ENV]: run.env } : {}
+  const environment = { [ENV]: run.env }
   const enclosing = { ...ctx.vars, ...outer, ...environment }
   const args = interpolate(resolved.vars, enclosing, 'keep') as Record<string, unknown>
   const scope = { ...enclosing, ...args, ...environment }
@@ -279,8 +261,7 @@ async function runStep(
 
   if ('goto' in step) {
     const to = text('goto')
-    const trust = run?.trust ?? ctx.trust
-    if (trust) checkUrl(trust, to, '`goto`')
+    checkUrl(run.trust, to, '`goto`')
     await page.goto(to, { waitUntil: 'load' })
     return
   }
@@ -368,8 +349,7 @@ async function runStep(
   if ('repeat' in step) {
     const times = Number(step['repeat'])
     for (let i = 0; i < times; i++) {
-      if (run) await runSteps(run, resolved.nested ?? [], ctx, outer)
-      else await runSteps(resolved.nested ?? [], ctx, outer)
+      await runSteps(run, resolved.nested ?? [], ctx, outer)
     }
     return
   }
@@ -380,15 +360,13 @@ async function runStep(
     }
     const name = text('as')
     for (const item of items) {
-      if (run) await runSteps(run, resolved.nested ?? [], ctx, { ...outer, [name]: item })
-      else await runSteps(resolved.nested ?? [], ctx, { ...outer, [name]: item })
+      await runSteps(run, resolved.nested ?? [], ctx, { ...outer, [name]: item })
     }
     return
   }
   if ('optional' in step) {
     try {
-      if (run) await runSteps(run, resolved.nested ?? [], ctx, outer)
-      else await runSteps(resolved.nested ?? [], ctx, outer)
+      await runSteps(run, resolved.nested ?? [], ctx, outer)
     } catch {
       // `optional` exists for the dialog that is sometimes already closed.
     }
@@ -399,8 +377,7 @@ async function runStep(
     const viewport = step['viewport'] as { width: number; height: number } | undefined
     if (viewport) await opened.setViewportSize(viewport)
     const to = text('openPage')
-    const trust = run?.trust ?? ctx.trust
-    if (trust) checkUrl(trust, to, '`openPage`')
+    checkUrl(run.trust, to, '`openPage`')
     await opened.goto(to, { waitUntil: 'load' })
     ctx.pages.set(text('as'), opened)
     ctx.page = opened

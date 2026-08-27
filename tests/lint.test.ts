@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { lint, nearest, parseRecipe, run } from '../src/index.js'
+import { lint, nearest, parseRecipe } from '../src/index.js'
+import { run } from '../src/cli.js'
+
+const AUTHORITY = { untrusted: false } as const
 
 const made: string[] = []
 afterAll(() => {
@@ -58,7 +61,7 @@ describe('a key that is nearly right', () => {
     const root = project({
       'shotlist.config.yaml': 'site:\n  url: http://x.test\n  viewpoint: 3\n',
     })
-    expect(lint(config(root))[0]?.message).toMatch(/did you mean "viewport"\?/)
+    expect(lint(AUTHORITY, config(root))[0]?.message).toMatch(/did you mean "viewport"\?/)
   })
 })
 
@@ -67,7 +70,7 @@ describe('a document filed as the wrong kind', () => {
     const root = project({
       'macros/image-block.yaml': `name: image-block\ninstall: guide\nclip: { css: '.b' }\nmarks:\n  t: { css: h2 }\ncallouts:\n  - { mark: t, text: Heading }\n`,
     })
-    const problems = lint(config(root))
+    const problems = lint(AUTHORITY, config(root))
     expect(problems).toHaveLength(1)
     expect(problems[0]!.message).toMatch(/reads as a recipe rather than a macro/)
     expect(problems[0]!.message).toMatch(/install, clip, marks, callouts/)
@@ -78,12 +81,14 @@ describe('a document filed as the wrong kind', () => {
 
   it('says the same the other way round, for a macro in the recipes directory', () => {
     const root = project({ 'recipes/opener.yaml': `steps:\n  - click: { css: button }\n` })
-    expect(lint(config(root))[0]!.message).toMatch(/reads as a macro rather than a recipe/)
+    expect(lint(AUTHORITY, config(root))[0]!.message).toMatch(
+      /reads as a macro rather than a recipe/,
+    )
   })
 
   it('leaves a real macro alone', () => {
     const root = project({ 'macros/opener.yaml': `steps:\n  - click: { css: button }\n` })
-    expect(lint(config(root))).toEqual([])
+    expect(lint(AUTHORITY, config(root))).toEqual([])
   })
 })
 
@@ -100,6 +105,14 @@ describe('a suggestion', () => {
 })
 
 describe('--lint', () => {
+  it('requires Operator authority before reading a config', () => {
+    const call = lint as unknown as (authority?: unknown, file?: string) => unknown
+
+    expect(() => call(undefined, '/this-config-must-not-be-read')).toThrow(
+      /Operator authority is required/,
+    )
+  })
+
   it('does not enumerate a configured directory denied by Operator authority', () => {
     const outside = mkdtempSync(join(tmpdir(), 'shotlist-lint-outside-'))
     made.push(outside)
@@ -186,7 +199,7 @@ describe('--lint', () => {
       'recipes/two.yaml': `name: two\nclip: { css: '.b', mathcing: 'y' }\n`,
       'macros/m.yaml': `steps:\n  - clik: { css: 'button' }\n`,
     })
-    const problems = lint(config(root))
+    const problems = lint(AUTHORITY, config(root))
     expect(problems).toHaveLength(3)
     expect(problems.every((one) => one.level === 'error')).toBe(true)
     expect(problems.map((one) => one.message).join('\n')).toMatch(/did you mean "click"\?/)
@@ -194,21 +207,21 @@ describe('--lint', () => {
 
   it('reports a config that will not load, rather than throwing out of the run', () => {
     const root = project({ 'shotlist.config.yaml': 'site: {}\n' })
-    const problems = lint(config(root))
+    const problems = lint(AUTHORITY, config(root))
     expect(problems).toHaveLength(1)
     expect(problems[0]!.level).toBe('error')
   })
 
   it('catches YAML that does not parse at all', () => {
     const root = project({ 'data/rows.yaml': 'a: [1, 2\n' })
-    expect(lint(config(root))[0]?.file).toMatch(/rows\.yaml$/)
+    expect(lint(AUTHORITY, config(root))[0]?.file).toMatch(/rows\.yaml$/)
   })
 
   it('finds nothing wrong with a project that is fine', () => {
     const root = project({
       'recipes/ok.yaml': `name: ok\nclip: viewport\nmarks:\n  a: { css: '.a' }\ncallouts:\n  - { mark: a, text: Here }\n`,
     })
-    expect(lint(config(root))).toEqual([])
+    expect(lint(AUTHORITY, config(root))).toEqual([])
   })
 })
 
@@ -219,11 +232,11 @@ describe('warnings', () => {
     })
 
   it('are off unless asked for, so a lint run reports only what is refused', () => {
-    expect(lint(config(suspect()))).toEqual([])
+    expect(lint(AUTHORITY, config(suspect()))).toEqual([])
   })
 
   it('name a mark no callout points at, and a destination the config does not have', () => {
-    const found = lint(config(suspect()), { warnings: true })
+    const found = lint(AUTHORITY, config(suspect()), { warnings: true })
     expect(found.every((one) => one.level === 'warning')).toBe(true)
     expect(found.map((one) => one.message)).toEqual([
       'mark "b" is never used by a callout',

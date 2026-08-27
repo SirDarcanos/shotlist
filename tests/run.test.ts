@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { openRun } from '../src/index.js'
+import { openRun, runSteps } from '../src/index.js'
+import type { Run, RunContext } from '../src/index.js'
 
 if (false) {
   // @ts-expect-error Operator authority is a required part of the Run interface.
@@ -38,6 +39,26 @@ describe('openRun', () => {
     const call = openRun as unknown as (authority?: unknown, file?: string) => unknown
     expect(() => call()).toThrow(/Operator authority is required/)
     expect(() => call({}, 'shotlist.config.yaml')).toThrow(/untrusted.*boolean/)
+  })
+
+  it('rejects forged Runs before touching their browser context', async () => {
+    const root = project(config())
+    const authentic = openRun({ untrusted: false }, join(root, 'shotlist.config.json'))
+    let touched = false
+    const context = {
+      get page() {
+        touched = true
+        throw new Error('browser context was touched')
+      },
+    } as unknown as RunContext
+    const forged = [{ project: authentic.project }, { ...authentic }] as unknown as Run[]
+
+    for (const candidate of forged) {
+      await expect(runSteps(candidate, [], context)).rejects.toThrow(
+        /A Run opened by shotlist is required/,
+      )
+    }
+    expect(touched).toBe(false)
   })
 
   it('opens a complete Project in trusted mode', () => {

@@ -4,28 +4,15 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { ShotlistError, fromRoot, pageMessage, type LoadedConfig } from './config.js'
-import {
-  authorizePath,
-  checkPath,
-  checkSession,
-  checkUrl,
-  covers,
-  envFor,
-  hostsFor,
-} from './trust.js'
-import { ENV, expandSteps } from './recipe.js'
-import type { Library } from './recipe.js'
+import { ShotlistError, fromRoot, pageMessage } from './config.js'
+import { authorizePath, checkSession, checkUrl, covers } from './trust.js'
+import { expandSteps } from './recipe.js'
 import { runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
+import { assertRun } from './run.js'
 import type { Run } from './run.js'
-
-/** Whether an input uses the immutable Run interface. */
-function isRun(input: Run | LoadedConfig): input is Run {
-  return 'project' in input
-}
 
 /** A session as the run needs it: where it lives, and what proves it still works. */
 export interface Session {
@@ -37,13 +24,9 @@ export interface Session {
 }
 
 /** Find a session by name through a Run's authority. */
-export function sessionFor(run: Run, name: string, where: string): Session
-/** Compatibility interface for callers migrating to the Run seam. */
-export function sessionFor(loaded: LoadedConfig, name: string, where: string): Session
-/** Resolve and authorize one configured session. */
-export function sessionFor(input: Run | LoadedConfig, name: string, where: string): Session {
-  const run = isRun(input) ? input : undefined
-  const loaded = isRun(input) ? input.project : input
+export function sessionFor(run: Run, name: string, where: string): Session {
+  assertRun(run)
+  const loaded = run.project
   const declared = loaded.config.site.sessions[name]
   if (!declared) {
     const known = Object.keys(loaded.config.site.sessions)
@@ -54,12 +37,9 @@ export function sessionFor(input: Run | LoadedConfig, name: string, where: strin
           : '`site.sessions` is empty. Declare one, then run `shotlist --login ' + `${name}\`.`),
     )
   }
-  const trust = run?.trust ?? ('trust' in loaded ? loaded.trust : undefined)
-  if (trust) checkSession(trust, name, where)
+  checkSession(run.trust, name, where)
   const authored = fromRoot(loaded, declared.path)
-  let file = authored
-  if (run) file = authorizePath(run.trust, authored, `site.sessions.${name}`)
-  else if (trust) checkPath(trust, authored, `site.sessions.${name}`)
+  const file = authorizePath(run.trust, authored, `site.sessions.${name}`)
   return {
     name,
     file,
@@ -89,23 +69,14 @@ export interface Dropped {
  * which is the config widening its reach, and safe here because an `--untrusted` run is
  * refused a session by `checkSession` before it ever gets this far.
  */
-export function sessionHosts(run: Run, session: Session): readonly string[]
-/** Compatibility interface for callers migrating to the Run seam. */
-export function sessionHosts(loaded: LoadedConfig, session: Session): readonly string[]
-/** Derive the hosts whose state one session may retain. */
-export function sessionHosts(input: Run | LoadedConfig, session: Session): readonly string[] {
-  return hostsForSession(input, session)
+export function sessionHosts(run: Run, session: Session): readonly string[] {
+  assertRun(run)
+  return hostsForSession(run, sessionFor(run, session.name, `session "${session.name}"`))
 }
 
-/** Derive session hosts for either side of the compatibility seam. */
-function hostsForSession(input: Run | LoadedConfig, session: Session): readonly string[] {
-  const run = isRun(input) ? input : undefined
-  const loaded = isRun(input) ? input.project : input
-  const site =
-    run?.trust.hosts ??
-    ('trust' in loaded ? loaded.trust?.hosts : undefined) ??
-    hostsFor(loaded.config.site.url, loaded.config.site.allow)
-  return [...site, ...session.keep]
+/** Derive the hosts whose state one configured Session may retain. */
+function hostsForSession(run: Run, session: Session): readonly string[] {
+  return [...run.trust.hosts, ...session.keep]
 }
 
 /** The hostname of an origin, or an empty string when it is not one — which never matches. */
@@ -207,12 +178,12 @@ function kept(session: Session): string {
  */
 async function proveSession(
   browser: Browser,
-  input: Run | LoadedConfig,
+  run: Run,
   session: Session,
   state: StorageState,
   dropped: Dropped,
 ): Promise<void> {
-  const site = isRun(input) ? input.project.config.site : input.config.site
+  const site = run.project.config.site
   const context = await browser.newContext({ viewport: site.viewport, storageState: state })
   try {
     const page = await context.newPage()
@@ -232,13 +203,9 @@ async function proveSession(
 }
 
 /** Read a configured session through a Run's authority. */
-export function readSession(run: Run, session: Session): StorageState
-/** Compatibility interface for callers migrating to the Run seam. */
-export function readSession(loaded: LoadedConfig, session: Session): StorageState
-/** Read and narrow one authorized session file. */
-export function readSession(input: Run | LoadedConfig, candidate: Session): StorageState {
-  const run = isRun(input) ? input : undefined
-  const session = run ? sessionFor(run, candidate.name, `session "${candidate.name}"`) : candidate
+export function readSession(run: Run, candidate: Session): StorageState {
+  assertRun(run)
+  const session = sessionFor(run, candidate.name, `session "${candidate.name}"`)
   if (!existsSync(session.file)) {
     throw new ShotlistError(
       `session "${session.name}": ${session.file} is not there — run ` +
@@ -256,11 +223,11 @@ export function readSession(input: Run | LoadedConfig, candidate: Session): Stor
   }
   // A file written before this narrowed anything still holds whatever the sign-in swept
   // up, and loading it hands those cookies back to a browser that will send them.
-  return narrowSession(parsed, hostsForSession(input, session)).state
+  return narrowSession(parsed, hostsForSession(run, session)).state
 }
 
-/** Make sure the directory a session is about to be written into exists. */
-export function prepareSession(session: Session): void {
+/** Make sure the directory a Session is about to be written into exists. */
+function prepareSession(session: Session): void {
   mkdirSync(dirname(session.file), { recursive: true })
 }
 
@@ -272,31 +239,13 @@ export interface SignInOptions {
 }
 
 /** Sign in to a named Session through a Run. */
-export function signIn(run: Run, name: string, options: SignInOptions): Promise<void>
-/** Compatibility interface for callers migrating to the Run seam. */
-export function signIn(
-  loaded: LoadedConfig,
-  library: Library,
-  session: Session,
-  options: SignInOptions,
-): Promise<void>
-/** Sign in by hand or macro, then narrow and write the authorized Session. */
-export async function signIn(
-  input: Run | LoadedConfig,
-  nameOrLibrary: string | Library,
-  sessionOrOptions: Session | SignInOptions,
-  legacyOptions?: SignInOptions,
-): Promise<void> {
-  const run = isRun(input) ? input : undefined
-  const loaded = isRun(input) ? input.project : input
-  const session = run
-    ? sessionFor(run, nameOrLibrary as string, '--login')
-    : (sessionOrOptions as Session)
-  const options = run ? (sessionOrOptions as SignInOptions) : legacyOptions!
-  const library = run ? run.project.library : (nameOrLibrary as Library)
+export async function signIn(run: Run, name: string, options: SignInOptions): Promise<void> {
+  assertRun(run)
+  const loaded = run.project
+  const session = sessionFor(run, name, '--login')
+  const library = run.project.library
   const { site } = loaded.config
-  const trust = run?.trust ?? ('trust' in loaded ? loaded.trust : undefined)
-  if (trust) checkUrl(trust, site.url, 'site.url')
+  checkUrl(run.trust, site.url, 'site.url')
 
   const scripted = options.using !== undefined
   if (!scripted && !options.pause) {
@@ -311,7 +260,7 @@ export async function signIn(
     // picks the host a password is typed into, and `allowEnv` picks which variables it
     // may be typed from — so a config nobody has read gets to choose both, and this line
     // is where that choice becomes visible. The signed-in flow already prints its URL.
-    const granted = trust?.env ?? []
+    const granted = run.trust.env
     options.say(
       `Signing in at ${site.url} with \`${options.using}\`` +
         (granted.length ? `, which may type ${granted.join(', ')} into it.` : '.'),
@@ -334,20 +283,15 @@ export async function signIn(
       const ctx: RunContext = {
         pages: new Map<string, Page>([['main', page]]),
         page,
-        vars: {
-          ...library.data,
-          ...(run ? {} : { [ENV]: envFor(trust) }),
-        },
+        vars: { ...library.data },
         rects: {},
         viewport: site.viewport,
         timeout: site.timeout,
         newPage: () => context.newPage(),
-        ...(run ? {} : trust ? { trust } : {}),
       }
       try {
         const steps = expandSteps([{ use: options.using }], library.macros)
-        if (run) await runSteps(run, steps, ctx)
-        else await runSteps(steps, ctx)
+        await runSteps(run, steps, ctx)
       } catch (error) {
         throw new ShotlistError(
           `--login ${session.name}: \`${options.using}\` — ${pageMessage(error)}`,
@@ -369,7 +313,7 @@ export async function signIn(
         )
       }
     }
-    const hosts = hostsForSession(input, session)
+    const hosts = hostsForSession(run, session)
     const { state, dropped } = narrowSession(await context.storageState(), hosts)
 
     // The check above was of the browser, which still holds everything the sign-in
@@ -377,15 +321,13 @@ export async function signIn(
     // the narrowed state is loaded into a context of its own and asked the same question.
     // Before the file is written, so a session that does not work leaves nothing behind.
     if ((dropped.cookies || dropped.origins) && session.verify) {
-      await proveSession(browser, input, session, state, dropped)
+      await proveSession(browser, run, session, state, dropped)
     }
 
     // Anyone holding this file is signed in as that account. `mode` is only honored for a
     // file being created, so an existing one — written at the default umask 0644 by an
     // older version, and readable by every other account on the machine — is set as well.
-    const file = run
-      ? authorizePath(run.trust, session.file, `site.sessions.${session.name}`)
-      : session.file
+    const file = authorizePath(run.trust, session.file, `site.sessions.${session.name}`)
     prepareSession({ ...session, file })
     writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 })
     chmodSync(file, 0o600)

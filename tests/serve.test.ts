@@ -3,17 +3,14 @@ import { createServer } from 'node:http'
 import { createConnection, createServer as createTcpServer } from 'node:net'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { openRun, parseConfig, run, startServer, tokenize } from '../src/index.js'
-import type { LoadedConfig, OperatorAuthority, Run, Server } from '../src/index.js'
+import { openRun, startServer, tokenize } from '../src/index.js'
+import { run } from '../src/cli.js'
+import type { OperatorAuthority, Run, Server } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
-/** A config holding just enough for `startServer`, rooted where the tests run. */
-function config(site: Record<string, unknown>): LoadedConfig {
-  return {
-    config: parseConfig({ site: { url: 'http://127.0.0.1:0/', ...site } }),
-    root: process.cwd(),
-    file: 'shotlist.config.yaml',
-  }
+/** Open a Run holding the site settings under test. */
+function config(site: Record<string, unknown>): Run {
+  return domainRun({ url: 'http://127.0.0.1:0/', ...site })
 }
 
 /** Open a temporary Project with the site settings under test. */
@@ -78,8 +75,8 @@ afterEach(async () => {
 })
 
 /** Start a server and remember it, so a failing assertion cannot leave one running. */
-async function start(input: LoadedConfig | Run): Promise<Server | null> {
-  const server = 'project' in input ? await startServer(input) : await startServer(input)
+async function start(input: Run): Promise<Server | null> {
+  const server = await startServer(input)
   if (server) started.push(server)
   return server
 }
@@ -224,7 +221,7 @@ describe('startServer', () => {
     const port = await freePort()
     const loaded = config({
       url: `http://127.0.0.1:${port}/`,
-      serve: `node tests/nested-server.mjs ${port}`,
+      serve: `node ${join(process.cwd(), 'tests/nested-server.mjs')} ${port}`,
     })
     const server = await start(loaded)
     expect(await listening(port)).toBe(true)

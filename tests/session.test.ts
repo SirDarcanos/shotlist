@@ -15,20 +15,18 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   Recipe,
-  envFor,
   interpolate,
-  loadConfig,
-  loadLibrary,
   narrowSession,
   openRun,
   parseConfig,
   readSession,
   sessionFor,
+  sessionHosts,
   shoot,
   signIn,
-  trustFrom,
 } from '../src/index.js'
-import type { LoadedConfig, OperatorAuthority, Run, StorageState } from '../src/index.js'
+import type { OperatorAuthority, Run, StorageState } from '../src/index.js'
+import { envFor, trustFrom } from '../src/trust.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -45,7 +43,14 @@ const SITE = 'https://example.com/'
 function serve(host: string): Promise<{ origin: string; close: () => Promise<void> }> {
   return new Promise((ready) => {
     const server: Server = createServer((request, response) => {
-      const { pathname } = new URL(request.url ?? '/', 'http://localhost')
+      const requested = new URL(request.url ?? '/', 'http://localhost')
+      const { pathname } = requested
+      if (pathname === '/bounce.html') {
+        response.end(
+          `<script>location.href=${JSON.stringify(requested.searchParams.get('to'))}</script>`,
+        )
+        return
+      }
       try {
         response.end(readFileSync(join(HERE, 'fixture', pathname.replace(/^\/+/, ''))))
       } catch {
@@ -92,11 +97,8 @@ function project(
     siteUrl?: string
     sessionPath?: string
   } = {},
-): {
-  loaded: LoadedConfig
-  library: ReturnType<typeof loadLibrary>
-  root: string
-} {
+  authority: OperatorAuthority = { untrusted: false, env: options.allowEnv ?? [] },
+) {
   const root = tempProject()
   // The copied recipes lean on `finders` this config drops; these write their own.
   rmSync(join(root, 'recipes'), { recursive: true, force: true })
@@ -133,19 +135,8 @@ ${options.verify === undefined ? '' : `      verify: '${options.verify}'\n`}${
   - click: { css: '#signin' }
 `,
   )
-  const loaded = loadConfig(join(root, 'shotlist.config.yaml'))
-  loaded.trust = trustFrom(
-    { root, siteUrl: loaded.config.site.url, granted: { env: options.allowEnv ?? [] } },
-    false,
-  )
-  const { paths, finders } = loaded.config
-  const library = loadLibrary({
-    recipes: join(root, paths.recipes),
-    macros: join(root, paths.macros),
-    data: join(root, paths.data),
-    finders,
-  })
-  return { loaded, library, root }
+  const run = openRun(authority, join(root, 'shotlist.config.yaml'))
+  return { run, loaded: run.project, library: run.project.library, root }
 }
 
 /** Open the temporary Project as an immutable Run. */
@@ -153,11 +144,7 @@ function projectRun(
   options: Parameters<typeof project>[0] = {},
   authority: OperatorAuthority = { untrusted: false },
 ): ReturnType<typeof project> & { run: Run } {
-  const made = project(options)
-  return {
-    ...made,
-    run: openRun(authority, join(made.root, 'shotlist.config.yaml')),
-  }
+  return project(options, authority)
 }
 
 describe('site.sessions', () => {
@@ -192,14 +179,16 @@ describe('a recipe naming a session', () => {
   })
 
   it('says which sessions there are when it names one that is not declared', () => {
-    const { loaded } = project()
-    expect(() => sessionFor(loaded, 'editor', 'recipe "dash"')).toThrow(/no session named "editor"/)
-    expect(() => sessionFor(loaded, 'editor', 'recipe "dash"')).toThrow(/"admin"/)
+    const { run } = project()
+    expect(() => sessionFor(run, 'editor', 'recipe "dash"')).toThrow(/no session named "editor"/)
+    expect(() => sessionFor(run, 'editor', 'recipe "dash"')).toThrow(/"admin"/)
   })
 
   it('resolves the file from the config, not the working directory', () => {
-    const { loaded, root } = project()
-    expect(sessionFor(loaded, 'admin', 'x').file).toBe(join(root, '.shotlist/admin.json'))
+    const { run, root } = project()
+    expect(sessionFor(run, 'admin', 'x').file).toBe(
+      join(realpathSync(root), '.shotlist/admin.json'),
+    )
   })
 
   it('resolves a Session through the Run', () => {
@@ -242,6 +231,17 @@ describe('a session that is not there yet', () => {
     expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/shotlist --login admin/)
   })
 
+  it('uses configured keep hosts rather than a fabricated Session value', () => {
+    const { run } = projectRun()
+    const fabricated = {
+      name: 'admin',
+      file: 'elsewhere.json',
+      keep: ['accounts.example.test'],
+    }
+
+    expect(sessionHosts(run, fabricated)).not.toContain('accounts.example.test')
+  })
+
   it('reauthorizes a public Session before reading its file', () => {
     const { run, root } = projectRun(
       { sessionPath: 'credential-vault/admin.json' },
@@ -253,17 +253,15 @@ describe('a session that is not there yet', () => {
   })
 
   it('names the command that writes it, rather than reporting a missing file', () => {
-    const { loaded } = project()
-    expect(() => readSession(loaded, sessionFor(loaded, 'admin', 'x'))).toThrow(
-      /shotlist --login admin/,
-    )
+    const { run } = project()
+    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/shotlist --login admin/)
   })
 
   it('says the same when the file is there but is not a session', () => {
-    const { loaded, root } = project()
+    const { run, root } = project()
     mkdirSync(join(root, '.shotlist'), { recursive: true })
     writeFileSync(join(root, '.shotlist/admin.json'), 'not json')
-    expect(() => readSession(loaded, sessionFor(loaded, 'admin', 'x'))).toThrow(/--login admin/)
+    expect(() => readSession(run, sessionFor(run, 'admin', 'x'))).toThrow(/--login admin/)
   })
 })
 
@@ -388,9 +386,8 @@ describe('an untrusted run', () => {
   })
 
   it('loads no session, because the browser carrying one is signed in as somebody', () => {
-    const { loaded, root } = project()
-    loaded.trust = trustFrom({ root, siteUrl: loaded.config.site.url }, true)
-    expect(() => sessionFor(loaded, 'admin', 'recipe "dash"')).toThrow(/does not load sessions/)
+    const { run } = project({}, { untrusted: true })
+    expect(() => sessionFor(run, 'admin', 'recipe "dash"')).toThrow(/does not load sessions/)
   })
 })
 
@@ -509,50 +506,44 @@ describe('what a session keeps', () => {
   })
 
   it('narrows a file written before it did, when that file is loaded', () => {
-    const { loaded, root } = project()
+    const { run, root } = project()
     mkdirSync(join(root, '.shotlist'), { recursive: true })
     writeFileSync(
       join(root, '.shotlist/admin.json'),
       JSON.stringify(state([{ domain: '127.0.0.1' }, { domain: '.google.com' }])),
     )
-    const read = readSession(loaded, sessionFor(loaded, 'admin', 'x'))
+    const read = readSession(run, sessionFor(run, 'admin', 'x'))
     expect(read.cookies.map((one) => one.domain)).toEqual(['127.0.0.1'])
   })
 })
 
 describe('--login', () => {
   /** The fixture's sign-in, filled in at whichever origin it is pointed at. */
-  const signInAt = (at: string, who: string) => `  - goto: ${at}/signin.html
+  const signInAt = (at: string, who: string, from = origin) => {
+    const destination = `${at}/signin.html`
+    const entry =
+      at === from ? destination : `${from}/bounce.html?to=${encodeURIComponent(destination)}`
+    return `  - goto: ${entry}
   - fill: { css: '#username' }
     value: ${who}
   - fill: { css: '#password' }
     value: hunter2
   - click: { css: '#signin' }
 `
+  }
 
-  /** A project whose sign-in macro is on disk before the library reads the directory. */
+  /** A Project whose sign-in macro is on disk before the Run opens. */
   function withSignIn(options: Parameters<typeof project>[0], steps: string) {
     const made = project(options)
-    // The operator's own config, which is the only way `--login` is ever run: nothing
-    // checks the URLs a sign-in walks through, exactly as nothing checks the redirects an
-    // identity provider issues. It also puts `sessionHosts` on its fallback.
-    delete made.loaded.trust
     writeFileSync(join(made.root, 'macros', 'via-provider.yaml'), `steps:\n${steps}`)
-    return {
-      ...made,
-      library: loadLibrary({
-        recipes: join(made.root, 'recipes'),
-        macros: join(made.root, 'macros'),
-        data: join(made.root, 'data'),
-        finders: {},
-      }),
-    }
+    const run = openRun({ untrusted: false }, join(made.root, 'shotlist.config.yaml'))
+    return { ...made, run, loaded: run.project, library: run.project.library }
   }
 
   /** Run `--login admin` with that macro, collecting what it said. */
   async function login(made: ReturnType<typeof withSignIn>) {
     const said: string[] = []
-    await signIn(made.loaded, made.library, sessionFor(made.loaded, 'admin', '--login'), {
+    await signIn(made.run, 'admin', {
       using: 'via-provider',
       say: (line) => said.push(line),
     })
@@ -713,7 +704,7 @@ describe('--login', () => {
       // a file that looks fine and turns every shot of the next run into the sign-in form.
       const made = withSignIn(
         { verify: '#account', siteUrl: `${provider.origin}/signin.html` },
-        signInAt(origin, 'Ada'),
+        signInAt(origin, 'Ada', provider.origin),
       )
       await expect(login(made)).rejects.toThrow(/site\.sessions\.admin\.keep/)
       await expect(login(made)).rejects.toThrow(/Nothing was written/)
@@ -772,12 +763,12 @@ describe('--login', () => {
       // variables reach it — so this line is the only place a lookalike is visible.
       process.env['FIXTURE_USER'] = 'Ada'
       process.env['FIXTURE_PASSWORD'] = 'hunter2'
-      const { loaded, library } = project({
+      const { run } = project({
         verify: '#account',
         allowEnv: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
       })
       const said: string[] = []
-      await signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+      await signIn(run, 'admin', {
         using: 'sign-in',
         say: (line) => said.push(line),
       })
@@ -801,12 +792,12 @@ describe('--login', () => {
     async () => {
       process.env['FIXTURE_USER'] = 'Ada'
       process.env['FIXTURE_PASSWORD'] = 'hunter2'
-      const { loaded, library, root } = project({
+      const { run, root } = project({
         verify: '#account',
         allowEnv: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
       })
       const said: string[] = []
-      await signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+      await signIn(run, 'admin', {
         using: 'sign-in',
         say: (line) => said.push(line),
       })
@@ -815,7 +806,7 @@ describe('--login', () => {
       expect(existsSync(file)).toBe(true)
       expect(said.join('\n')).toContain(file)
       // The cookie is what the next run is signed in by, so it has to be in there.
-      expect(JSON.stringify(readSession(loaded, sessionFor(loaded, 'admin', 'x')))).toContain(
+      expect(JSON.stringify(readSession(run, sessionFor(run, 'admin', 'x')))).toContain(
         'fixture-session',
       )
       // Windows has no mode bits to set, so there is nothing to assert there.
@@ -827,22 +818,15 @@ describe('--login', () => {
         join(root, 'recipes', 'dash.yaml'),
         `name: dash\nsession: admin\nclip: { css: '#account' }\n`,
       )
-      const reloaded = loadLibrary({
-        recipes: join(root, 'recipes'),
-        macros: join(root, 'macros'),
-        data: join(root, 'data'),
-        finders: {},
-      })
-      const result = await shoot(reloaded.recipes.get('dash')!, reloaded, loaded)
+      const captureRun = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+      const result = await shoot(captureRun, captureRun.project.library.recipes.get('dash')!)
       expect(existsSync(result.file)).toBe(true)
     },
   )
 
   it('refuses to sign in by hand where there is no terminal to wait in', async () => {
-    const { loaded, library } = project()
-    await expect(
-      signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), { say: () => {} }),
-    ).rejects.toThrow(/--using <macro>/)
+    const { run } = project()
+    await expect(signIn(run, 'admin', { say: () => {} })).rejects.toThrow(/--using <macro>/)
   })
 
   it(
@@ -852,12 +836,12 @@ describe('--login', () => {
       process.env['FIXTURE_USER'] = 'Ada'
       // No password, so the fixture refuses and `#account` never appears.
       process.env['FIXTURE_PASSWORD'] = 'x'
-      const { loaded, library, root } = project({
+      const { run, root } = project({
         verify: '#nothing-with-this-id',
         allowEnv: ['FIXTURE_USER', 'FIXTURE_PASSWORD'],
       })
       await expect(
-        signIn(loaded, library, sessionFor(loaded, 'admin', '--login'), {
+        signIn(run, 'admin', {
           using: 'sign-in',
           say: () => {},
         }),
@@ -870,7 +854,7 @@ describe('--login', () => {
     'reports an expired session instead of shooting the sign-in page',
     { timeout: 120_000 },
     async () => {
-      const { loaded, root } = project({ verify: '#account' })
+      const { root } = project({ verify: '#account' })
       // A session shaped right and signed in as nobody, which is what an expired one is.
       mkdirSync(join(root, '.shotlist'), { recursive: true })
       writeFileSync(
@@ -881,13 +865,8 @@ describe('--login', () => {
         join(root, 'recipes', 'dash.yaml'),
         `name: dash\nsession: admin\nclip: viewport\n`,
       )
-      const library = loadLibrary({
-        recipes: join(root, 'recipes'),
-        macros: join(root, 'macros'),
-        data: join(root, 'data'),
-        finders: {},
-      })
-      await expect(shoot(library.recipes.get('dash')!, library, loaded)).rejects.toThrow(
+      const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+      await expect(shoot(run, run.project.library.recipes.get('dash')!)).rejects.toThrow(
         /most likely expired/,
       )
     },

@@ -2,9 +2,9 @@ import { createRequire } from 'node:module'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ShotlistError } from './config.js'
-import type { LoadedConfig } from './config.js'
 import type { Browser } from './playwright.js'
 import { authorizePath } from './trust.js'
+import { assertRun } from './run.js'
 import type { Run } from './run.js'
 
 /**
@@ -47,34 +47,28 @@ export function describeEnvironment(browser?: Browser): Environment {
   }
 }
 
-/** Whether Baseline access uses the immutable Run interface. */
-function isRun(input: Run | Pick<LoadedConfig, 'root'>): input is Run {
-  return 'project' in input
-}
-
-/** Where the record lives for a given Project. */
-export function baselineFile(input: Run | Pick<LoadedConfig, 'root'>): string {
-  return join(isRun(input) ? input.project.root : input.root, BASELINE_FILE)
+/** Where the Baseline record lives for a Run's Project. */
+export function baselineFile(run: Run): string {
+  assertRun(run)
+  return join(run.project.root, BASELINE_FILE)
 }
 
 /** Canonical Baseline path authorized for an immediate filesystem effect. */
-function baselineTarget(input: Run | Pick<LoadedConfig, 'root'>): string {
-  const file = baselineFile(input)
-  return isRun(input) ? authorizePath(input.trust, file, BASELINE_FILE) : file
+function baselineTarget(run: Run): string {
+  return authorizePath(run.trust, baselineFile(run), BASELINE_FILE)
 }
 
 /** Record what this Run was taken with, beside the config. */
-export function writeBaseline(
-  input: Run | Pick<LoadedConfig, 'root'>,
-  environment: Environment,
-): void {
-  writeFileSync(baselineTarget(input), `${JSON.stringify(environment, null, 2)}\n`)
+export function writeBaseline(run: Run, environment: Environment): void {
+  assertRun(run)
+  writeFileSync(baselineTarget(run), `${JSON.stringify(environment, null, 2)}\n`)
 }
 
 /** Read the record, or null when a Project has never installed anything. */
-export function readBaseline(input: Run | Pick<LoadedConfig, 'root'>): Environment | null {
-  const file = baselineFile(input)
-  const target = baselineTarget(input)
+export function readBaseline(run: Run): Environment | null {
+  assertRun(run)
+  const file = baselineFile(run)
+  const target = baselineTarget(run)
   if (!existsSync(target)) return null
   try {
     return JSON.parse(readFileSync(target, 'utf8')) as Environment

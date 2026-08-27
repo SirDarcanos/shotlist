@@ -194,6 +194,22 @@ npx shotlist --all --install
 npx shotlist --check            # re-shoot and compare against what is committed
 ```
 
+A library caller opens one Run with Operator authority, then uses Recipes from that Run's
+Library. Capture, checking, Session, server, and Baseline calls reject a fabricated Run or
+a copied Recipe before an effect:
+
+```ts
+import { openRun, shoot } from 'shotlist'
+
+const run = openRun({ untrusted: false }, 'shotlist.config.yaml')
+const recipe = run.project.library.recipes.get('order-row')!
+await shoot(run, recipe)
+```
+
+Lint takes Operator authority directly because its job is to report a Project whose
+Library is too malformed to open as a Run:
+`lint({ untrusted: false }, 'shotlist.config.yaml')`.
+
 If the site is not already running, give the config a `site.serve` — shotlist starts it,
 waits until it answers, and stops it afterwards. It reuses a server that is already up, so
 this is safe to leave in the config permanently.
