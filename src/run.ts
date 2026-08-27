@@ -1,21 +1,12 @@
 import { ShotlistError, loadConfig } from './config.js'
 import type { Config, LoadedConfig } from './config.js'
-import { discoverLibrary, parseLibrary } from './library.js'
-import type { Library, LibraryDocument } from './library.js'
-import type { Macro, Recipe } from './recipe.js'
+import { openLibrary } from './library.js'
+import type { DeepReadonly, ProjectLibrary } from './library.js'
+import type { Recipe } from './recipe.js'
 import { trustFromEnvironment } from './trust.js'
 import type { Trust } from './trust.js'
 
-/** A value whose nested arrays, mappings, and fields cannot change through the Run. */
-export type DeepReadonly<T> = T extends (...args: never[]) => unknown
-  ? T
-  : T extends ReadonlyMap<infer K, infer V>
-    ? ReadonlyMap<DeepReadonly<K>, DeepReadonly<V>>
-    : T extends readonly (infer V)[]
-      ? readonly DeepReadonly<V>[]
-      : T extends object
-        ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
-        : T
+export type { DeepReadonly, ProjectLibrary } from './library.js'
 
 /** Authority the operator declares before shotlist opens a Project. */
 export interface OperatorAuthority {
@@ -29,13 +20,6 @@ export interface OperatorAuthority {
   readonly deny?: readonly string[]
   /** Environment names the operator grants to recipes. */
   readonly env?: readonly string[]
-}
-
-/** The immutable Library view exposed by a Run. */
-export interface ProjectLibrary {
-  readonly recipes: ReadonlyMap<string, DeepReadonly<Recipe>>
-  readonly macros: ReadonlyMap<string, DeepReadonly<Macro>>
-  readonly data: DeepReadonly<Record<string, unknown>>
 }
 
 /** A parsed configuration and its complete Library. */
@@ -134,68 +118,6 @@ function deepFreeze<T>(value: T, seen = new WeakSet<object>()): DeepReadonly<T> 
   return Object.freeze(value) as DeepReadonly<T>
 }
 
-/** A Map view with no mutation methods or exposed backing Map. */
-class ImmutableMap<K, V> implements ReadonlyMap<K, V> {
-  readonly #values: Map<K, V>
-
-  /** Copy entries into an inaccessible backing Map. */
-  constructor(entries: Iterable<readonly [K, V]>) {
-    this.#values = new Map(entries)
-    Object.freeze(this)
-  }
-
-  /** Report the number of entries. */
-  get size(): number {
-    return this.#values.size
-  }
-
-  /** Return the value for a key. */
-  get(key: K): V | undefined {
-    return this.#values.get(key)
-  }
-
-  /** Report whether a key exists. */
-  has(key: K): boolean {
-    return this.#values.has(key)
-  }
-
-  /** Iterate over key-value pairs. */
-  entries(): MapIterator<[K, V]> {
-    return this.#values.entries()
-  }
-
-  /** Iterate over keys. */
-  keys(): MapIterator<K> {
-    return this.#values.keys()
-  }
-
-  /** Iterate over values. */
-  values(): MapIterator<V> {
-    return this.#values.values()
-  }
-
-  /** Call a function for each entry. */
-  forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
-    for (const [key, value] of this.#values) callbackfn.call(thisArg, value, key, this)
-  }
-
-  /** Iterate over key-value pairs. */
-  [Symbol.iterator](): MapIterator<[K, V]> {
-    return this.entries()
-  }
-}
-
-/** Freeze a parsed Library behind runtime read-only views. */
-function freezeLibrary(library: Library): ProjectLibrary {
-  const recipes = new ImmutableMap(
-    [...library.recipes].map(([name, recipe]) => [name, deepFreeze(recipe)] as const),
-  )
-  const macros = new ImmutableMap(
-    [...library.macros].map(([name, macro]) => [name, deepFreeze(macro)] as const),
-  )
-  return Object.freeze({ recipes, macros, data: deepFreeze(library.data) })
-}
-
 /** Derive immutable policy state from snapshots owned by shotlist. */
 function policyFrom(
   authority: DeepReadonly<OperatorAuthority>,
@@ -241,36 +163,7 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
   const config = loaded.config
   const { trust } = policyFrom(authority, loaded, environment)
 
-  const discovery = discoverLibrary(loaded, trust)
-  // Run opening is atomic: authorize every configured directory before enumeration,
-  // then every discovered entry before reading one document.
-  for (const group of discovery.groups) {
-    if ('error' in group && group.stage === 'authorization') throw group.error
-  }
-  for (const group of discovery.groups) {
-    if ('error' in group) throw group.error
-    for (const document of group.documents) {
-      if ('error' in document) throw document.error
-    }
-  }
-
-  const documents: Record<'macros' | 'data' | 'recipes', LibraryDocument[]> = {
-    macros: [],
-    data: [],
-    recipes: [],
-  }
-  for (const group of discovery.groups) {
-    for (const document of group.documents) {
-      if ('error' in document) throw document.error
-      documents[group.kind].push({
-        name: document.name,
-        file: document.file,
-        raw: document.read(),
-      })
-    }
-  }
-
-  const library = freezeLibrary(parseLibrary(documents, config.finders))
+  const library = openLibrary(loaded, trust)
   const project = Object.freeze({
     config: deepFreeze(config),
     root: loaded.root,

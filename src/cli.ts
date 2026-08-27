@@ -12,7 +12,7 @@ import { check } from './check.js'
 import { loadPlaywright } from './playwright.js'
 import { withServer } from './serve.js'
 import { scaffold } from './init.js'
-import { countDocuments, formatProblems, lint } from './lint.js'
+import { formatProblems, reviewProject } from './lint.js'
 import { signIn } from './session.js'
 import { openRun } from './run.js'
 import type { DeepReadonly, OperatorAuthority, ProjectLibrary } from './run.js'
@@ -173,11 +173,9 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
   // Before a complete Run is opened, because malformed Library documents are what this
   // command has to accumulate rather than stop at.
   if (values.lint) {
-    const problems = lint(authority, values.config, { warnings: values.warnings })
-    for (const line of formatProblems(problems, countDocuments(authority, values.config))) {
-      io.out(line)
-    }
-    return problems.some((one) => one.level === 'error') ? 1 : 0
+    const report = reviewProject(authority, values.config, { warnings: values.warnings })
+    for (const line of formatProblems(report.problems, report.checked)) io.out(line)
+    return report.problems.some((one) => one.level === 'error') ? 1 : 0
   }
 
   try {

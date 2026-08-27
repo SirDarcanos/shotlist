@@ -18,9 +18,9 @@ and the nearest existing ancestor of a future path before confining the result t
 config root or operator-granted roots.
 
 `src/library.ts` owns policy-aware Library discovery. It authorizes every configured
-directory before enumeration and every discovered document before its read handle can
-reach the filesystem; the handle retains the authored path for diagnostics while hiding
-the authorized target from callers.
+directory before enumeration and every discovered document before reading any document.
+Authorized targets stay inside the module; diagnostics retain the authored paths, including
+paths that name symlinks.
 
 `checkUrl` accepts only HTTP(S) in untrusted mode, checks decoded path segments, and confines
 hosts to the configured site relationship plus operator grants. It rejects obvious
