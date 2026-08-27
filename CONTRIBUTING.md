@@ -1,10 +1,10 @@
 # Contributing to shotlist
 
-We welcome bug reports, broken recipes, and requests for missing vocabulary.
+Report bugs, broken recipes, and missing vocabulary through GitHub Issues.
 
-Use this guide to set up the repository, make changes, open a pull request, and cut a
-release. Agents start at [`AGENTS.md`](./AGENTS.md), then read this workflow and any context
-the task requires.
+Use this guide to set up the repository, make changes, open a pull request, or cut a release.
+Agents start at [`AGENTS.md`](./AGENTS.md), then read this workflow and the context their task
+requires.
 
 ## Setup
 

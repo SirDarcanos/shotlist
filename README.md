@@ -119,7 +119,7 @@ npx shotlist --help               # the full list, from the tool
 
 ## Library API
 
-Open one Run with the Operator authority your caller grants, then select Recipes from that
+Your caller grants Operator authority. Pass it to `openRun`, then select a Recipe from the
 Run's Library:
 
 ```ts
@@ -130,14 +130,14 @@ const recipe = run.project.library.recipes.get('order-row')!
 await shoot(run, recipe, { install: true })
 ```
 
-Capture, checking, Session, server, step, and Baseline functions require that Run. They
-reject a hand-built Run or a copied Recipe before touching the browser, filesystem, network,
-or a process. Operator authority comes from the caller rather than the Project config.
+Pass the Run to capture, checking, Session, server, step, and Baseline functions. shotlist
+rejects a hand-built Run or a copied Recipe before it touches the browser, filesystem,
+network, or a process. The caller grants Operator authority; the Project config does not.
 
-Lint cannot open a complete Run when the Project is malformed, so it takes authority
-itself: `lint({ untrusted: false }, 'shotlist.config.yaml')`. Parsing values already in
-memory remains authority-free through `parseConfig`, `parseRecipe`, `parseMacro`,
-`parseLibrary`, and `parseQuery`.
+Pass authority to lint because a malformed Project cannot open a complete Run:
+`lint({ untrusted: false }, 'shotlist.config.yaml')`. Use `parseConfig`, `parseRecipe`,
+`parseMacro`, `parseLibrary`, and `parseQuery` to parse in-memory values without Operator
+authority.
 
 ## A recipe is data
 
