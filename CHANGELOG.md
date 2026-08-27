@@ -63,6 +63,11 @@ recipe authors what to edit. See
   document count. Directory traversal, entry authorization, authored-path diagnostics,
   parsing, and failure order remain inside the Library module.
 
+- **Run execution owns shared site and browser lifetimes.** The CLI retains argument parsing
+  and human or JSON rendering. Checking starts neither the configured site nor Chromium
+  when every selected Recipe opts out or installs nowhere, and a skipped Application Recipe
+  does not start the site when the remaining work contains only File Recipes.
+
 ### Removed
 
 - **Session implementation interfaces at the package root.** `sessionFor`, `sessionHosts`,

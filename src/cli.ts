@@ -3,26 +3,17 @@ import { createRequire } from 'node:module'
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { ShotlistError, fromRoot } from './config.js'
 import type { Recipe } from './recipe.js'
-import { shoot } from './capture.js'
 import type { Retry } from './capture.js'
-import { check } from './check.js'
-import { loadPlaywright } from './playwright.js'
-import { withServer } from './serve.js'
+import { executeCaptureRun, executeCheckRun } from './execute.js'
 import { scaffold } from './init.js'
 import { formatProblems, reviewProject } from './lint.js'
 import { signIn } from './session.js'
 import { openRun } from './run.js'
 import type { DeepReadonly, OperatorAuthority, ProjectLibrary } from './run.js'
-import {
-  BASELINE_FILE,
-  describeEnvironment,
-  environmentDrift,
-  readBaseline,
-  writeBaseline,
-} from './baseline.js'
+import { BASELINE_FILE } from './baseline.js'
 
 const USAGE = `shotlist — annotated UI screenshots from YAML recipes
 
@@ -219,108 +210,75 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
           retry.why.replace(`recipe "${retry.name}": `, ''),
       )
 
-    /** Everything that wants the site up, so the server's lifetime is exactly this. */
-    const work = async (): Promise<number> => {
-      if (values.check) {
-        // With `--json` the report is stdout, so everything written for a person moves
-        // aside — `shotlist --check --json > report.json` has to leave a usable file.
-        const say = values.json ? io.err : io.out
-        const browser = await loadPlaywright().chromium.launch()
-        let results
-        let drift
-        try {
-          // Said before the results, so they are read in the light of it: a different
-          // Chromium rasterises text differently, and that is not the site changing.
-          drift = environmentDrift(readBaseline(shotRun), describeEnvironment(browser))
-          if (drift.length) {
-            say('! this is not the machine the committed images were taken on:')
-            for (const { field, was, now } of drift) say(`    ${field}: ${was} → ${now}`)
-            say('  Differences below may be that, rather than the site.')
-          }
-          results = await check(shotRun, recipes, {
-            browser,
-            keepGoing,
-            onRetry,
-            ...(values.diff
-              ? { diffDir: join(fromRoot(project, project.config.paths.out), 'diff') }
-              : {}),
-          })
-        } finally {
-          await browser.close()
-        }
-        let changed = 0
-        for (const result of results) {
-          if (result.status === 'same') {
-            say(`  same     ${result.name}${notCompared(result)}`)
-          } else if (result.status === 'changed') {
-            changed++
-            const why =
-              result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
-            say(`  CHANGED  ${result.name} — ${why}${notCompared(result)}`)
-            say(`           committed: ${result.against}`)
-            say(`           re-shot:   ${result.shot}`)
-            if (result.diff) say(`           diff:      ${result.diff}`)
-          } else if (result.status === 'new') {
-            changed++
-            say(`  NEW      ${result.name} — nothing committed at ${result.against}`)
-          } else if (result.status === 'failed') {
-            changed++
-            say(`  FAILED   ${result.name} — ${result.reason}`)
-          } else {
-            say(`  skipped  ${result.name} — ${result.reason}`)
-          }
-        }
-        say(
-          changed
-            ? `${changed} of ${results.length} need attention`
-            : 'every screenshot is current',
-        )
-        if (values.json) {
-          io.out(JSON.stringify({ changed, total: results.length, drift, results }, null, 2))
-        }
-        return changed ? 1 : 0
+    if (values.check) {
+      // With `--json` the report is stdout, so everything written for a person moves
+      // aside — `shotlist --check --json > report.json` has to leave a usable file.
+      const say = values.json ? io.err : io.out
+      const { results, drift } = await executeCheckRun(shotRun, recipes, {
+        keepGoing,
+        onRetry,
+        diff: values.diff,
+      })
+      // Said before the results, so they are read in the light of it: a different
+      // Chromium rasterizes text differently, and that is not the site changing.
+      if (drift.length) {
+        say('! this is not the machine the committed images were taken on:')
+        for (const { field, was, now } of drift) say(`    ${field}: ${was} → ${now}`)
+        say('  Differences below may be that, rather than the site.')
       }
-
-      const browser = await loadPlaywright().chromium.launch()
-      const failed: string[] = []
-      try {
-        for (const recipe of recipes) {
-          try {
-            const result = await shoot(shotRun, recipe, {
-              install: values.install,
-              browser,
-              onRetry,
-            })
-            io.out(`  ✓ ${result.name} → ${result.file}`)
-            if (result.installed) io.out(`    installed ${result.installed}`)
-            for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
-          } catch (error) {
-            // Without `--keep-going` the first failure is the answer. With it, one broken
-            // recipe must not hide what the other thirty-nine would have said.
-            if (!keepGoing) throw error
-            failed.push(recipe.name!)
-            io.err(`  ✗ ${error instanceof ShotlistError ? error.message : String(error)}`)
-          }
+      let changed = 0
+      for (const result of results) {
+        if (result.status === 'same') {
+          say(`  same     ${result.name}${notCompared(result)}`)
+        } else if (result.status === 'changed') {
+          changed++
+          const why = result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
+          say(`  CHANGED  ${result.name} — ${why}${notCompared(result)}`)
+          say(`           committed: ${result.against}`)
+          say(`           re-shot:   ${result.shot}`)
+          if (result.diff) say(`           diff:      ${result.diff}`)
+        } else if (result.status === 'new') {
+          changed++
+          say(`  NEW      ${result.name} — nothing committed at ${result.against}`)
+        } else if (result.status === 'failed') {
+          changed++
+          say(`  FAILED   ${result.name} — ${result.reason}`)
+        } else {
+          say(`  skipped  ${result.name} — ${result.reason}`)
         }
-      } finally {
-        await browser.close()
       }
-      if (failed.length) {
-        io.err(`${failed.length} of ${recipes.length} failed: ${failed.join(', ')}`)
-        return 1
+      say(
+        changed ? `${changed} of ${results.length} need attention` : 'every screenshot is current',
+      )
+      if (values.json) {
+        io.out(JSON.stringify({ changed, total: results.length, drift, results }, null, 2))
       }
-      // What was just installed is the baseline a later `--check` compares against, so
-      // this is the moment the machine that took it is worth recording.
-      if (values.install) {
-        writeBaseline(shotRun, describeEnvironment(browser))
-        io.out(`  recorded this machine in ${BASELINE_FILE}`)
-      }
-      return 0
+      return changed ? 1 : 0
     }
 
-    // A set of `source: file` recipes never opens the site, and should not wait on one.
-    const needsSite = recipes.some((recipe) => recipe.source === 'app')
-    return needsSite ? await withServer(shotRun, work) : await work()
+    const captured = await executeCaptureRun(shotRun, recipes, {
+      install: values.install,
+      keepGoing,
+      onRetry,
+      onShot: (result) => {
+        io.out(`  ✓ ${result.name} → ${result.file}`)
+        if (result.installed) io.out(`    installed ${result.installed}`)
+        for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
+      },
+      onFailure: ({ error }) =>
+        io.err(`  ✗ ${error instanceof ShotlistError ? error.message : String(error)}`),
+    })
+    if (captured.failures.length) {
+      io.err(
+        `${captured.failures.length} of ${recipes.length} failed: ` +
+          captured.failures.map((failure) => failure.name).join(', '),
+      )
+      return 1
+    }
+    if (captured.baselineRecorded) {
+      io.out(`  recorded this machine in ${BASELINE_FILE}`)
+    }
+    return 0
   } catch (error) {
     io.err(error instanceof ShotlistError ? error.message : String(error))
     return 1

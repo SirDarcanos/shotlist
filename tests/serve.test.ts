@@ -327,6 +327,31 @@ describe('a run against a site shotlist starts', () => {
     // Started by the run, so stopped by it: nothing is left holding the port.
     expect(await quiet(port)).toBe(true)
   })
+
+  it('stops the site it started after a Recipe fails', { timeout: 120_000 }, async () => {
+    const root = tempProject()
+    const port = await freePort()
+    const script = join(process.cwd(), 'tests/static-server.mjs')
+    const fixture = join(process.cwd(), 'tests/fixture')
+    const file = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      file,
+      readFileSync(file, 'utf8').replace(
+        /^ {2}url: .*$/m,
+        `  url: http://127.0.0.1:${port}/\n  serve: node "${script}" ${port} "${fixture}"`,
+      ),
+    )
+    writeFileSync(
+      join(root, 'recipes/broken.yaml'),
+      'name: broken\nmarks:\n  missing: { css: .does-not-exist }\n',
+    )
+
+    const io = { out: () => {}, err: () => {} }
+    const code = await run(['broken', '--config', file], io)
+
+    expect(code).toBe(1)
+    expect(await quiet(port)).toBe(true)
+  })
 })
 
 describe('serve in the config', () => {

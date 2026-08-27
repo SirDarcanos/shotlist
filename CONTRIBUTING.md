@@ -140,7 +140,8 @@ Meet each criterion before you submit a pull request.
 | `src/init.ts`       | the scaffold `--init` writes                                |
 | `src/schemas.ts`    | runtime schemas exported to the build generator             |
 | `src/index.ts`      | the public library surface                                  |
-| `src/cli.ts`        | the `shotlist` binary                                       |
+| `src/execute.ts`    | shared Run planning and site and browser lifetimes          |
+| `src/cli.ts`        | argument parsing, rendering, and the `shotlist` binary      |
 | `tests/fixture/`    | neutral pages used by jsdom and browser-driven tests        |
 
 ## Adding a step verb or a query primitive
