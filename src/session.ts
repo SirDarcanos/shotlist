@@ -14,8 +14,8 @@ import type { Browser, Page } from './playwright.js'
 import { assertRun } from './run.js'
 import type { Run } from './run.js'
 
-/** A session as the run needs it: where it lives, and what proves it still works. */
-export interface Session {
+/** A Session as this module needs it: where it lives, and what proves it still works. */
+interface Session {
   name: string
   file: string
   verify?: string
@@ -23,11 +23,12 @@ export interface Session {
   keep: readonly string[]
 }
 
-/** Find a session by name through a Run's authority. */
-export function sessionFor(run: Run, name: string, where: string): Session {
+/** Resolve a configured Session by name through a Run's authority. */
+function resolveSession(run: Run, name: string, where: string): Session {
   assertRun(run)
   const loaded = run.project
-  const declared = loaded.config.site.sessions[name]
+  const sessions = loaded.config.site.sessions
+  const declared = Object.hasOwn(sessions, name) ? sessions[name] : undefined
   if (!declared) {
     const known = Object.keys(loaded.config.site.sessions)
     throw new ShotlistError(
@@ -49,13 +50,13 @@ export function sessionFor(run: Run, name: string, where: string): Session {
 }
 
 /** Cookies and local storage, in the shape Playwright hands back and takes again. */
-export interface StorageState {
+interface StorageState {
   cookies: Array<{ domain?: string } & Record<string, unknown>>
   origins: Array<{ origin?: string } & Record<string, unknown>>
 }
 
-/** What narrowing left behind, for the line that says a session lives somewhere else. */
-export interface Dropped {
+/** What narrowing left behind, for the line that says a Session lives somewhere else. */
+interface Dropped {
   cookies: number
   origins: number
   /** The hostnames they belonged to, so a missing sign-in names the host to allow. */
@@ -69,11 +70,6 @@ export interface Dropped {
  * which is the config widening its reach, and safe here because an `--untrusted` run is
  * refused a session by `checkSession` before it ever gets this far.
  */
-export function sessionHosts(run: Run, session: Session): readonly string[] {
-  assertRun(run)
-  return hostsForSession(run, sessionFor(run, session.name, `session "${session.name}"`))
-}
-
 /** Derive the hosts whose state one configured Session may retain. */
 function hostsForSession(run: Run, session: Session): readonly string[] {
   return [...run.trust.hosts, ...session.keep]
@@ -99,10 +95,10 @@ function hostnameOf(origin: unknown): string {
  * credential, no shot ever sends them anywhere, and a file holding them is a much larger
  * secret than the one it was written for.
  *
- * Kept is what a browser would send to one of `hosts`, which `sessionHosts` builds from
- * the site the run may open and the session's own `keep`.
+ * Kept is what a browser would send to one of `hosts`, derived from the hosts the Run may
+ * open and the Session's own `keep`.
  */
-export function narrowSession(
+function narrowSession(
   state: unknown,
   hosts: readonly string[],
 ): { state: StorageState; dropped: Dropped } {
@@ -202,10 +198,8 @@ async function proveSession(
   }
 }
 
-/** Read a configured session through a Run's authority. */
-export function readSession(run: Run, candidate: Session): StorageState {
-  assertRun(run)
-  const session = sessionFor(run, candidate.name, `session "${candidate.name}"`)
+/** Read and narrow one resolved Session. */
+function readResolvedSession(run: Run, session: Session): StorageState {
   if (!existsSync(session.file)) {
     throw new ShotlistError(
       `session "${session.name}": ${session.file} is not there — run ` +
@@ -226,6 +220,41 @@ export function readSession(run: Run, candidate: Session): StorageState {
   return narrowSession(parsed, hostsForSession(run, session)).state
 }
 
+/** Read a named Session through a Run's authority. */
+export function readSession(run: Run, name: string): StorageState {
+  assertRun(run)
+  return readResolvedSession(run, resolveSession(run, name, `session "${name}"`))
+}
+
+/** Session state and verification behavior needed by one capture. */
+export interface CaptureSession {
+  storageState: StorageState
+  verify(page: Page, url: string, timeout: number): Promise<void>
+}
+
+/** Read a named Session for capture while keeping its verification details local. */
+export function readCaptureSession(run: Run, name: string, where: string): CaptureSession {
+  assertRun(run)
+  const session = resolveSession(run, name, where)
+  return {
+    // Resolve from the name again at the read, so no copied path or host details can become
+    // authority between capture's diagnostic context and the filesystem access.
+    storageState: readSession(run, name),
+    verify: async (page, url, timeout) => {
+      if (!session.verify) return
+      try {
+        await page.waitForSelector(session.verify, { timeout })
+      } catch {
+        throw new ShotlistError(
+          `${where} — loaded the session "${session.name}", but "${session.verify}" never appeared ` +
+            `at ${url} — it has most likely expired. Run \`shotlist --login ` +
+            `${session.name}\` to sign in again.`,
+        )
+      }
+    },
+  }
+}
+
 /** Make sure the directory a Session is about to be written into exists. */
 function prepareSession(session: Session): void {
   mkdirSync(dirname(session.file), { recursive: true })
@@ -242,7 +271,7 @@ export interface SignInOptions {
 export async function signIn(run: Run, name: string, options: SignInOptions): Promise<void> {
   assertRun(run)
   const loaded = run.project
-  const session = sessionFor(run, name, '--login')
+  const session = resolveSession(run, name, '--login')
   const library = run.project.library
   const { site } = loaded.config
   checkUrl(run.trust, site.url, 'site.url')

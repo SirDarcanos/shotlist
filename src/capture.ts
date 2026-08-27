@@ -3,7 +3,7 @@ import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
 import { authorizePath, checkUrl } from './trust.js'
-import { readSession, sessionFor } from './session.js'
+import { readCaptureSession } from './session.js'
 import { MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
 import type { Format } from './image.js'
 import type { Config, LoadedConfig, Style } from './config.js'
@@ -475,8 +475,8 @@ export async function shoot(
   const session =
     recipe.session === undefined
       ? undefined
-      : sessionFor(run, recipe.session, `recipe "${recipe.name}": \`session\``)
-  const storageState = session ? readSession(run, session) : undefined
+      : readCaptureSession(run, recipe.session, `recipe "${recipe.name}": \`session\``)
+  const storageState = session?.storageState
   const authoredOutDir = fromRoot(loaded, config.paths.out)
   const outDir = capturePath(run, authoredOutDir, 'paths.out')
   mkdirSync(outDir, { recursive: true })
@@ -586,21 +586,9 @@ export async function shoot(
               )
             }
           }
-          // An expired session redirects rather than failing, and `--install` would commit
+          // An expired Session redirects rather than failing, and `--install` would commit
           // a run's worth of sign-in forms.
-          if (session?.verify) {
-            try {
-              await page.waitForSelector(session.verify, { timeout: config.site.timeout })
-            } catch {
-              throw inRecipe(
-                recipe,
-                '`session`',
-                `loaded the session "${session.name}", but "${session.verify}" never appeared ` +
-                  `at ${settings.url} — it has most likely expired. Run \`shotlist --login ` +
-                  `${session.name}\` to sign in again.`,
-              )
-            }
-          }
+          await session?.verify(page, settings.url, config.site.timeout)
           if (config.site.settle) await page.waitForTimeout(config.site.settle)
 
           try {

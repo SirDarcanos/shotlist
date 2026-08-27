@@ -54,7 +54,15 @@ recipe authors what to edit. See
   Projects cannot open a complete Run. Parse Config, Recipe, Macro, Library-document, and
   Query values in memory without Operator authority.
 
+- **Session reads take a configured name.** Call `readSession(run, name)` rather than
+  resolving and passing a Session object. The Session module owns path resolution, host
+  narrowing, and capture verification details.
+
 ### Removed
+
+- **Session implementation interfaces at the package root.** `sessionFor`, `sessionHosts`,
+  and `narrowSession`, along with their internal data types, no longer expose paths or host
+  derivation to callers. Use `readSession` to read and `signIn` to write a named Session.
 
 - **Config-plus-Library compatibility interfaces and mutable config trust.** shotlist
   removed optional trust from `LoadedConfig`. The package root no longer exports
