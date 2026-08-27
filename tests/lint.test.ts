@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { lint, nearest, parseRecipe } from '../src/index.js'
+import { countDocuments, lint, nearest, parseRecipe } from '../src/index.js'
 import { run } from '../src/cli.js'
 
 const AUTHORITY = { untrusted: false } as const
@@ -191,6 +191,8 @@ describe('--lint', () => {
     ])
     expect(problems[1]!.message).toMatch(/paths\.recipes: .*outside the project/)
     expect(problems[1]!.message).not.toMatch(/not valid/)
+    // Both filenames were discovered even though policy refused to read one of them.
+    expect(countDocuments({ untrusted: true }, config(root))).toBe(3)
   })
 
   it('reports every file, rather than stopping at the first that fails', () => {

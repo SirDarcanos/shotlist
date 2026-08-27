@@ -6,15 +6,13 @@
  * reading one complaint, fixing it, and running it again. This reads everything and
  * reports everything, and needs neither Playwright nor a site that is up.
  */
-import { basename, join } from 'node:path'
-import { ShotlistError, fromRoot, loadConfig, readDocumentAt } from './config.js'
+import { ShotlistError, loadConfig } from './config.js'
 import type { LoadedConfig } from './config.js'
-import { documentFiles, parseMacro, parseRecipe, withNumbering } from './recipe.js'
+import { discoverLibrary } from './library.js'
+import { parseMacro, parseRecipe, withNumbering } from './recipe.js'
 import type { Recipe } from './recipe.js'
 import { operatorAuthority, projectPolicy } from './run.js'
 import type { OperatorAuthority } from './run.js'
-import { authorizePath } from './trust.js'
-import type { Trust } from './trust.js'
 
 /** One thing wrong, addressed by the file it is in. */
 export interface Problem {
@@ -61,13 +59,6 @@ export interface LintOptions {
   warnings?: boolean
 }
 
-type LibraryKind = 'macros' | 'data' | 'recipes'
-
-/** Read a document through policy while retaining its authored path in diagnostics. */
-function lintDocument(trust: Trust, target: string, file: string, where: string): unknown {
-  return readDocumentAt(authorizePath(trust, target, where), file)
-}
-
 /** Accumulate malformed and unauthorized documents without requiring a complete Run. */
 export function lint(
   authorityValue: OperatorAuthority,
@@ -87,57 +78,35 @@ export function lint(
 
   const trust = projectPolicy(authority, loaded).trust
 
-  const { paths, finders } = loaded.config
-  const documents = (kind: LibraryKind): Array<{ name: string; file: string; target: string }> => {
-    const authored = fromRoot(loaded, paths[kind])
-    let directory = authored
-    try {
-      directory = authorizePath(trust, authored, `paths.${kind}`)
-      return documentFiles(directory).map(({ name, file: target }) => ({
-        name,
-        file: join(authored, basename(target)),
-        target,
-      }))
-    } catch (error) {
-      problems.push({ file: authored, message: said(error, authored), level: 'error' })
-      return []
+  const { finders } = loaded.config
+  const discovery = discoverLibrary(loaded, trust)
+  for (const group of discovery.groups) {
+    if ('error' in group) {
+      problems.push({ file: group.file, message: said(group.error, group.file), level: 'error' })
+      continue
     }
-  }
-
-  for (const { file, target } of documents('macros')) {
-    try {
-      parseMacro(lintDocument(trust, target, file, 'paths.macros'), { finders, file })
-    } catch (error) {
-      problems.push({ file, message: said(error, file), level: 'error' })
-    }
-  }
-
-  // Data files hold whatever a Recipe wants to read, so there is no shape to check —
-  // only that the document parses at all.
-  for (const { file, target } of documents('data')) {
-    try {
-      lintDocument(trust, target, file, 'paths.data')
-    } catch (error) {
-      problems.push({ file, message: said(error, file), level: 'error' })
-    }
-  }
-
-  for (const { name, file, target } of documents('recipes')) {
-    try {
-      const recipe = withNumbering(
-        parseRecipe(lintDocument(trust, target, file, 'paths.recipes'), {
-          finders,
-          file,
-          name,
-        }),
-      )
-      if (options.warnings) {
-        for (const message of suspect(recipe, loaded)) {
-          problems.push({ file, message, level: 'warning' })
-        }
+    for (const document of group.documents) {
+      const { file } = document
+      if ('error' in document) {
+        problems.push({ file, message: said(document.error, file), level: 'error' })
+        continue
       }
-    } catch (error) {
-      problems.push({ file, message: said(error, file), level: 'error' })
+      try {
+        const raw = document.read()
+        if (group.kind === 'macros') {
+          parseMacro(raw, { finders, file })
+        } else if (group.kind === 'recipes') {
+          const recipe = withNumbering(parseRecipe(raw, { finders, file, name: document.name }))
+          if (options.warnings) {
+            for (const message of suspect(recipe, loaded)) {
+              problems.push({ file, message, level: 'warning' })
+            }
+          }
+        }
+        // Data documents may have any shape, so a successful syntax parse completes lint.
+      } catch (error) {
+        problems.push({ file, message: said(error, file), level: 'error' })
+      }
     }
   }
   return problems
@@ -172,19 +141,8 @@ export function countDocuments(authorityValue: OperatorAuthority, configFile?: s
   try {
     const loaded = loadConfig(configFile)
     const trust = projectPolicy(authority, loaded).trust
-    const { paths } = loaded.config
-    return (
-      1 +
-      (['macros', 'data', 'recipes'] as const).reduce((total, kind) => {
-        const authored = fromRoot(loaded, paths[kind])
-        try {
-          const directory = authorizePath(trust, authored, `paths.${kind}`)
-          return total + documentFiles(directory).length
-        } catch {
-          return total
-        }
-      }, 0)
-    )
+    const discovery = discoverLibrary(loaded, trust)
+    return 1 + discovery.groups.reduce((total, group) => total + group.documents.length, 0)
   } catch {
     return 1
   }

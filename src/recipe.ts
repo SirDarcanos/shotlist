@@ -1,14 +1,5 @@
-import { readdirSync, existsSync } from 'node:fs'
-import { basename, extname, join } from 'node:path'
 import { z } from 'zod'
-import {
-  MAX_PIXELS,
-  ShotlistError,
-  distance,
-  formatIssues,
-  keysIn,
-  readDocument,
-} from './config.js'
+import { MAX_PIXELS, ShotlistError, distance, formatIssues, keysIn } from './config.js'
 import { FORMATS } from './image.js'
 import { QUERY_KEYS, makeQuery } from './query.js'
 import type { QueryInput } from './query.js'
@@ -464,89 +455,6 @@ export function withNumbering(recipe: Recipe): Recipe {
     Callout.parse({ ...shared, mark, n: index + 1, place: 'corner' }),
   )
   return { ...recipe, callouts: [...recipe.callouts, ...discs], numbered: undefined }
-}
-
-export interface Library {
-  recipes: Map<string, Recipe>
-  macros: Map<string, Macro>
-  data: Record<string, unknown>
-}
-
-const DOCUMENTS = new Set(['.yaml', '.yml', '.json'])
-
-/** Every document in a directory, named but not yet read — the linter reads them itself. */
-export function documentFiles(dir: string): Array<{ name: string; file: string }> {
-  if (!existsSync(dir)) return []
-  return readdirSync(dir)
-    .filter((entry) => DOCUMENTS.has(extname(entry)) && !entry.startsWith('.'))
-    .sort()
-    .map((entry) => ({ name: basename(entry, extname(entry)), file: join(dir, entry) }))
-}
-
-export interface LibraryDocument {
-  name: string
-  /** The authored path used in diagnostics, which may name a symlink. */
-  file: string
-  raw: unknown
-}
-
-export interface LibraryDocuments {
-  recipes: readonly LibraryDocument[]
-  macros: readonly LibraryDocument[]
-  data: readonly LibraryDocument[]
-}
-
-/** Every document in a directory, keyed by filename without its extension. */
-function documentsIn(dir: string): LibraryDocument[] {
-  return documentFiles(dir).map(({ name, file }) => ({ name, file, raw: readDocument(file) }))
-}
-
-/** Parse a complete set of already-read Library documents. */
-export function parseLibrary(
-  documents: LibraryDocuments,
-  finders: Readonly<Record<string, unknown>> = {},
-): Library {
-  const macros = new Map<string, Macro>()
-  for (const { name, file, raw } of documents.macros) {
-    const macro = parseMacro(raw, { finders, file })
-    macros.set(macro.name ?? name, macro)
-  }
-
-  const data: Record<string, unknown> = {}
-  for (const { name, raw } of documents.data) {
-    // Assignment treats `__proto__` as a prototype setter rather than a document name.
-    Object.defineProperty(data, name, {
-      value: raw,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    })
-  }
-
-  const recipes = new Map<string, Recipe>()
-  for (const { name, file, raw } of documents.recipes) {
-    const recipe = withNumbering(parseRecipe(raw, { finders, file, name }))
-    recipes.set(recipe.name!, recipe)
-  }
-
-  return { recipes, macros, data }
-}
-
-/** Load a project's recipes, macros and data from the directories its config names. */
-export function loadLibrary(paths: {
-  recipes: string
-  macros: string
-  data: string
-  finders?: Readonly<Record<string, unknown>>
-}): Library {
-  return parseLibrary(
-    {
-      macros: documentsIn(paths.macros),
-      data: documentsIn(paths.data),
-      recipes: documentsIn(paths.recipes),
-    },
-    paths.finders,
-  )
 }
 
 export interface ResolvedStep {

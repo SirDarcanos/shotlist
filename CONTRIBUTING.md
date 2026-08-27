@@ -100,9 +100,10 @@ Meet each criterion before you submit a pull request.
    derived types or schemas.
 4. **Write errors for someone editing YAML.** Name the file, the path inside it, and the
    fix. Use `unknown step "clik" — did you mean "click"?` rather than a Zod dump.
-5. **Guard each path and URL.** Route each path through `checkPath` and each URL through
-   `checkUrl` in `src/trust.ts`. A run may receive a config that no maintainer reviewed,
-   and new callers can bypass the trust boundary without failing a test.
+5. **Guard each path and URL.** Route each path through `authorizePath` and perform the
+   filesystem effect on the canonical target it returns; route each URL through `checkUrl`
+   in `src/trust.ts`. A run may receive a config that no maintainer reviewed, and new
+   callers can bypass the trust boundary without failing a test.
 6. **Keep controls under operator authority.** The operator owns `--untrusted`, `--allow`,
    `--allow-path`, and `SHOTLIST_*`. A config can narrow authority through `deny:` in any
    mode. It can widen authority in trusted mode.
@@ -122,7 +123,8 @@ Meet each criterion before you submit a pull request.
 | Path                | What it is                                                  |
 | ------------------- | ----------------------------------------------------------- |
 | `src/config.ts`     | config schema, defaults, loading, merge                     |
-| `src/recipe.ts`     | recipe schema, loading, macro expansion, interpolation      |
+| `src/library.ts`    | policy-aware discovery and Library assembly                 |
+| `src/recipe.ts`     | Recipe and Macro schemas, expansion, interpolation          |
 | `src/query.ts`      | the element query language: schema, finders, page evaluator |
 | `src/steps.ts`      | the step vocabulary, run against a Playwright page          |
 | `src/annotate.ts`   | the drawing layer, injected into the page                   |

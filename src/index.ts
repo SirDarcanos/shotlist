@@ -8,12 +8,13 @@ export {
   expandSteps,
   interpolate,
   nearestVerb,
-  parseLibrary,
   parseMacro,
   parseRecipe,
   withNumbering,
 } from './recipe.js'
-export type { Callout, Library, ResolvedStep, StepInput } from './recipe.js'
+export type { Callout, ResolvedStep, StepInput } from './recipe.js'
+export { parseLibrary } from './library.js'
+export type { Library } from './library.js'
 
 export {
   ElementQuery,

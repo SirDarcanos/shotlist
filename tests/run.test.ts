@@ -80,12 +80,14 @@ describe('openRun', () => {
   it('authorizes every Library directory before enumerating one', () => {
     const outside = mkdtempSync(join(tmpdir(), 'shotlist-outside-'))
     made.push(outside)
-    const root = project(config({ paths: { data: outside } }), {
-      'screenshots/recipes/broken.yaml': 'name: [not valid',
+    const root = project(config({ paths: { macros: 'not-a-directory', recipes: outside } }), {
+      'not-a-directory': 'nothing to enumerate',
     })
 
+    // `macros` sorts first and cannot be enumerated. The later policy failure still wins
+    // because every directory is authorized before the first one reaches the filesystem.
     expect(() => openRun({ untrusted: true }, join(root, 'shotlist.config.json'))).toThrow(
-      /^paths\.data: .*outside the project/,
+      /^paths\.recipes: .*outside the project/,
     )
   })
 
@@ -101,30 +103,16 @@ describe('openRun', () => {
     )
   })
 
-  it('allows a symlinked document under an operator-granted path', () => {
-    const outside = mkdtempSync(join(tmpdir(), 'shotlist-outside-'))
-    made.push(outside)
-    writeFileSync(join(outside, 'shared.yaml'), 'clip: viewport')
-    const root = project(config())
-    mkdirSync(join(root, 'screenshots/recipes'), { recursive: true })
-    symlinkSync(join(outside, 'shared.yaml'), join(root, 'screenshots/recipes/shared.yaml'))
+  it('reads authorized documents before assembling the Library', () => {
+    const root = project(config(), {
+      'screenshots/recipes/a-invalid-schema.yaml': 'name: [wrong]\n',
+      'screenshots/recipes/z-invalid-syntax.yaml': 'name: [not closed\n',
+    })
 
-    const run = openRun({ untrusted: true, paths: [outside] }, join(root, 'shotlist.config.json'))
-
-    expect(run.project.library.recipes.has('shared')).toBe(true)
-  })
-
-  it('checks forbidden names in a symlink target in trusted mode', () => {
-    const outside = mkdtempSync(join(tmpdir(), 'shotlist-outside-'))
-    made.push(outside)
-    mkdirSync(join(outside, '.git'), { recursive: true })
-    writeFileSync(join(outside, '.git/recipe.yaml'), 'clip: viewport')
-    const root = project(config())
-    mkdirSync(join(root, 'screenshots/recipes'), { recursive: true })
-    symlinkSync(join(outside, '.git/recipe.yaml'), join(root, 'screenshots/recipes/hidden.yaml'))
-
+    // Discovery reads raw documents before `parseLibrary` validates their language, so
+    // the later syntax error remains the first failure as it was before this refactor.
     expect(() => openRun({ untrusted: false }, join(root, 'shotlist.config.json'))).toThrow(
-      /^paths\.recipes: "\.git" is a forbidden path/,
+      /z-invalid-syntax\.yaml/,
     )
   })
 

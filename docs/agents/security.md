@@ -6,15 +6,21 @@ config cannot grant itself authority.
 
 ## Guard every sink
 
-Route every filesystem source and destination through `checkPath`, every authored
-navigation URL through `checkUrl`, site execution through `checkCommand`, and stored
-browser state through `checkSession`. These calls are the security boundary; adding a new
-sink without its check bypasses policy even when adjacent callers are guarded.
+Route every filesystem source and destination through `authorizePath`, then perform the
+effect on the canonical target it returns. Route every authored navigation URL through
+`checkUrl`, site execution through `checkCommand`, and stored browser state through
+`checkSession`. These calls are the security boundary; adding a new sink without its check
+bypasses policy even when adjacent callers are guarded.
 
-`checkPath` rejects secret-looking segments, control characters, forbidden extensions, and
-deny patterns in every mode. In untrusted mode it resolves existing symlink components and
-the nearest existing ancestor of a future path before confining the result to the config
-root or operator-granted roots.
+`authorizePath` rejects secret-looking segments, control characters, forbidden extensions,
+and deny patterns in every mode. In untrusted mode it resolves existing symlink components
+and the nearest existing ancestor of a future path before confining the result to the
+config root or operator-granted roots.
+
+`src/library.ts` owns policy-aware Library discovery. It authorizes every configured
+directory before enumeration and every discovered document before its read handle can
+reach the filesystem; the handle retains the authored path for diagnostics while hiding
+the authorized target from callers.
 
 `checkUrl` accepts only HTTP(S) in untrusted mode, checks decoded path segments, and confines
 hosts to the configured site relationship plus operator grants. It rejects obvious

@@ -6,9 +6,14 @@ that can enforce it, because CLI-only fixes do not protect library callers.
 
 ## Project run
 
-The CLI loads the config and library, selects recipes, and starts the configured site only
-when at least one selected recipe has `source: app`. It launches one Chromium browser for
-a capture or check batch and closes it in `finally`; selected recipes run sequentially.
+The CLI loads the config and Library, selects Recipes, and starts the configured site only
+when at least one selected Recipe has `source: app`. It launches one Chromium browser for
+a capture or check batch and closes it in `finally`; selected Recipes run sequentially.
+
+`src/library.ts` discovers configured Library directories and documents through one policy
+report. Run opening rejects every directory or document authorization failure before it
+reads a document; lint consumes the same report one outcome at a time so one refused or
+malformed document does not hide the rest.
 
 Playwright remains an optional peer. `loadPlaywright` resolves `playwright`, then
 `playwright-core`, then installations under the npm `npx` cache. Preserve the actionable
