@@ -1,5 +1,5 @@
-import { realpathSync } from 'node:fs'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { ShotlistError } from './config.js'
 
 /**
@@ -314,16 +314,26 @@ export function checkUrl(trust: Trust, url: string, where: string): void {
  * A destination is usually a directory that has not been made yet, so this climbs to the
  * nearest part that does exist and resolves that: what is not there cannot be a link.
  */
-function realpathOf(path: string): string {
+function realpathOf(path: string, followed = new Set<string>()): string {
   let here = path
   const rest: string[] = []
   for (;;) {
     try {
       return resolve(realpathSync(here), ...rest.reverse())
     } catch {
+      try {
+        if (lstatSync(here).isSymbolicLink()) {
+          if (followed.has(here)) return path
+          followed.add(here)
+          const target = resolve(dirname(here), readlinkSync(here), ...[...rest].reverse())
+          return realpathOf(target, followed)
+        }
+      } catch {
+        // This component does not exist; its nearest existing ancestor decides policy.
+      }
       const up = dirname(here)
       if (up === here) return path
-      rest.push(here.slice(up.length + 1))
+      rest.push(basename(here))
       here = up
     }
   }

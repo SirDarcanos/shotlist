@@ -1,14 +1,14 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
+import { Config, MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
 import { checkPath, checkUrl, envFor } from './trust.js'
 import { readSession, sessionFor } from './session.js'
 import { MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
 import type { Format } from './image.js'
-import type { Config, LoadedConfig, Style } from './config.js'
-import { ENV, expandSteps } from './recipe.js'
-import type { Library, Recipe } from './recipe.js'
+import type { LoadedConfig, Style } from './config.js'
+import { ENV, Macro, Recipe, expandSteps } from './recipe.js'
+import type { Library } from './recipe.js'
 import { resolve as resolveInPage, runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
 import { drawAnnotations } from './annotate.js'
@@ -16,6 +16,54 @@ import type { DrawStyle, Mark } from './annotate.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
 import type { QueryInput, Rect } from './query.js'
+import type { DeepReadonly, Run } from './run.js'
+
+/** Whether an input uses the immutable Run interface. */
+function isRun(input: Run | Recipe): input is Run {
+  return 'project' in input
+}
+
+/** Optional behavior shared by Run-based and compatibility capture. */
+export interface ShootOptions {
+  install?: boolean
+  browser?: Browser
+  onRetry?: (retry: Retry) => void
+}
+
+/** Build detached mutable inputs for capture behavior not migrated until issue #3. */
+function compatibilityInputs(run: Run): { loaded: LoadedConfig; library: Library } {
+  const library: Library = {
+    recipes: new Map(
+      [...run.project.library.recipes].map(([name, recipe]) => [name, Recipe.parse(recipe)]),
+    ),
+    macros: new Map(
+      [...run.project.library.macros].map(([name, macro]) => [name, Macro.parse(macro)]),
+    ),
+    data: Object.fromEntries(
+      Object.entries(run.project.library.data).map(([name, value]) => [
+        name,
+        structuredClone(value),
+      ]),
+    ),
+  }
+  const trust = {
+    untrusted: run.trust.untrusted,
+    root: run.trust.root,
+    hosts: [...run.trust.hosts],
+    paths: [...run.trust.paths],
+    deny: [...run.trust.deny],
+    env: [...run.trust.env],
+  }
+  return {
+    loaded: {
+      config: Config.parse(run.project.config),
+      root: run.project.root,
+      file: run.project.file,
+      trust,
+    },
+    library,
+  }
+}
 
 export interface ShotResult {
   name: string
@@ -433,12 +481,31 @@ function sourceImage(
  * already on disk. Both end in the same drawing pass, so a hand-captured screen and a
  * scripted one carry identical callouts.
  */
-export async function shoot(
+export function shoot(
+  run: Run,
+  recipe: DeepReadonly<Recipe>,
+  options?: ShootOptions,
+): Promise<ShotResult>
+/** Compatibility interface for callers migrating to the Run seam. */
+export function shoot(
   recipe: Recipe,
   library: Library,
   loaded: LoadedConfig,
-  options: { install?: boolean; browser?: Browser; onRetry?: (retry: Retry) => void } = {},
+  options?: ShootOptions,
+): Promise<ShotResult>
+/** Shoot through a Run, retaining the old form until interface contraction. */
+export async function shoot(
+  input: Run | Recipe,
+  recipeOrLibrary: DeepReadonly<Recipe> | Library,
+  optionsOrLoaded: ShootOptions | LoadedConfig = {},
+  legacyOptions: ShootOptions = {},
 ): Promise<ShotResult> {
+  const run = isRun(input) ? input : undefined
+  const recipe = isRun(input) ? Recipe.parse(recipeOrLibrary) : input
+  const compatibility = run ? compatibilityInputs(run) : undefined
+  const library = run ? compatibility!.library : (recipeOrLibrary as Library)
+  const loaded = run ? compatibility!.loaded : (optionsOrLoaded as LoadedConfig)
+  const options = run ? (optionsOrLoaded as ShootOptions) : legacyOptions
   const { config } = loaded
   const style = mergeStyle(config.style, recipe.style as never)
   const settings = settingsFor(recipe, config)
@@ -453,7 +520,14 @@ export async function shoot(
   const session =
     recipe.session === undefined
       ? undefined
-      : sessionFor(loaded, recipe.session, `recipe "${recipe.name}": \`session\``)
+      : run
+        ? sessionFor(run, recipe.session, `recipe "${recipe.name}": \`session\``)
+        : sessionFor(loaded, recipe.session, `recipe "${recipe.name}": \`session\``)
+  const storageState = session
+    ? run
+      ? readSession(run, session)
+      : readSession(loaded, session)
+    : undefined
   const outDir = fromRoot(loaded, config.paths.out)
   if (loaded.trust) checkPath(loaded.trust, outDir, 'paths.out')
   mkdirSync(outDir, { recursive: true })
@@ -517,14 +591,14 @@ export async function shoot(
         deviceScaleFactor: settings.scale,
         colorScheme: settings.theme,
         reducedMotion: config.site.reducedMotion ? 'reduce' : 'no-preference',
-        ...(session ? { storageState: readSession(loaded, session) } : {}),
+        ...(storageState ? { storageState } : {}),
       })
       try {
         const page = await context.newPage()
         const ctx: RunContext = {
           pages: new Map<string, Page>([['main', page]]),
           page,
-          vars: { ...library.data, [ENV]: envFor(loaded.trust) },
+          vars: { ...library.data, ...(run ? {} : { [ENV]: envFor(loaded.trust) }) },
           rects: {},
           viewport: settings.viewport,
           timeout: config.site.timeout,
@@ -576,7 +650,9 @@ export async function shoot(
           if (config.site.settle) await page.waitForTimeout(config.site.settle)
 
           try {
-            await runSteps(expandSteps(recipe.setup, library.macros), ctx)
+            const steps = expandSteps(recipe.setup, library.macros)
+            if (run) await runSteps(run, steps, ctx)
+            else await runSteps(steps, ctx)
           } catch (error) {
             throw inRecipe(recipe, 'setup', pageMessage(error))
           }
@@ -640,7 +716,9 @@ export async function shoot(
           // and leaves everything `setup` asked the application itself to do.
           if (recipe.teardown.length) {
             try {
-              await runSteps(expandSteps(recipe.teardown, library.macros), ctx)
+              const steps = expandSteps(recipe.teardown, library.macros)
+              if (run) await runSteps(run, steps, ctx)
+              else await runSteps(steps, ctx)
             } catch (error) {
               tidying = inRecipe(recipe, 'teardown', pageMessage(error))
             }

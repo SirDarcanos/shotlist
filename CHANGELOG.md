@@ -23,6 +23,11 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   configured environment values from the same snapshot. Existing config-based interfaces
   remain available until the Run migration contracts the public interface.
 
+- **Run-owned Session access** for login and authenticated capture. Session resolution,
+  reads, and writes authorize canonical paths through the Run; scripted login uses the
+  opening environment snapshot. Existing config-based Session and capture interfaces remain
+  available during migration.
+
 - **Repository-local agent context**, with a canonical glossary and branch-specific guides
   for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
   now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these

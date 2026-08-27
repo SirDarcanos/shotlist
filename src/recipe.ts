@@ -564,7 +564,13 @@ export interface ResolvedStep {
  */
 export function expandSteps(
   steps: readonly StepInput[],
-  macros: ReadonlyMap<string, Macro>,
+  macros: ReadonlyMap<
+    string,
+    {
+      readonly defaults: Readonly<Record<string, unknown>>
+      readonly steps: readonly StepInput[]
+    }
+  >,
   vars: Record<string, unknown> = {},
   seen: readonly string[] = [],
 ): ResolvedStep[] {
@@ -583,7 +589,7 @@ export function expandSteps(
         throw new ShotlistError(`macro "${name}" uses itself (${[...seen, name].join(' → ')})`)
       }
       const frame = { ...vars, ...macro.defaults, ...((step['with'] as object) ?? {}) }
-      return expandSteps(macro.steps as StepInput[], macros, frame, [...seen, name])
+      return expandSteps(macro.steps, macros, frame, [...seen, name])
     }
 
     const nestedKey = Array.isArray(step['steps'])
