@@ -28,6 +28,11 @@ edit. See [CONTRIBUTING.md](./CONTRIBUTING.md#breaking-changes).
   opening environment snapshot. Existing config-based Session and capture interfaces remain
   available during migration.
 
+- **Run-based capture** for Application and File Recipes. Capture authorizes navigation,
+  source images, output and install destinations, and local font files through the Run.
+  Retries keep the same Run and open a fresh browser context. Existing config-based capture
+  remains available during migration.
+
 - **Repository-local agent context**, with a canonical glossary and branch-specific guides
   for the language, runtime, imaging, security, tests, tracker, and writing voice. Agents
   now enter through `AGENTS.md` and load the relevant branch rather than rebuilding these

@@ -1,7 +1,15 @@
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
@@ -9,6 +17,7 @@ import {
   loadConfig,
   loadLibrary,
   loadPlaywright,
+  openRun,
   parseConfig,
   parseRecipe,
   shoot,
@@ -196,6 +205,40 @@ describe('shoot', () => {
       /installs to "nowhere".*it defines guide/s,
     )
   })
+
+  it('authorizes a Recipe URL immediately before navigation through its Run', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes/outside.yaml'),
+      'name: outside\nurl: https://outside.example.test/private\nclip: viewport\n',
+    )
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const recipe = run.project.library.recipes.get('outside')!
+    let contexts = 0
+    let navigations = 0
+    const browser = {
+      newContext: () => {
+        contexts++
+        return Promise.resolve({
+          newPage: () =>
+            Promise.resolve({
+              goto: () => {
+                navigations++
+                return Promise.resolve()
+              },
+            }),
+          close: () => Promise.resolve(),
+        })
+      },
+      close: () => Promise.resolve(),
+    }
+
+    await expect(shoot(run, recipe, { browser: browser as never })).rejects.toThrow(
+      /recipe "outside": `url`: outside\.example\.test is not this site/,
+    )
+    expect(contexts).toBe(1)
+    expect(navigations).toBe(0)
+  })
 })
 
 // A query is resolved by a function serialized into the browser, so a failure arrives as
@@ -305,6 +348,48 @@ describe('retries', () => {
     ])
   })
 
+  it('keeps the Run and its authorized output target across retries', async () => {
+    const root = tempProject()
+    writeFileSync(join(root, 'recipes/retried.yaml'), 'name: retried\nretries: 1\nclip: viewport\n')
+    rmSync(join(root, 'out'), { recursive: true, force: true })
+    mkdirSync(join(root, 'first'))
+    mkdirSync(join(root, 'second'))
+    symlinkSync('first', join(root, 'out'))
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const recipe = run.project.library.recipes.get('retried')!
+    const real = await loadPlaywright().chromium.launch()
+    let contexts = 0
+    let closes = 0
+    const browser = {
+      newContext: (options?: Record<string, unknown>) => {
+        contexts++
+        return contexts === 1
+          ? Promise.reject(new Error('a flake'))
+          : real.newContext(options as never)
+      },
+      close: () => {
+        closes++
+        return Promise.resolve()
+      },
+    }
+    try {
+      const result = await shoot(run, recipe, {
+        browser,
+        onRetry: () => {
+          rmSync(join(root, 'out'))
+          symlinkSync('second', join(root, 'out'))
+        },
+      })
+      expect(contexts).toBe(2)
+      expect(closes).toBe(0)
+      expect(result.file).toBe(join(root, 'out/retried.png'))
+      expect(existsSync(join(root, 'first/retried.png'))).toBe(true)
+      expect(existsSync(join(root, 'second/retried.png'))).toBe(false)
+    } finally {
+      await real.close()
+    }
+  }, 120_000)
+
   it('returns the shot when a later attempt succeeds', { timeout: 120_000 }, async () => {
     const { loaded, library } = project()
     const real = await loadPlaywright().chromium.launch()
@@ -348,6 +433,36 @@ describe('retries', () => {
 
 describe('source: file', () => {
   it(
+    'shoots and installs through its Run with a local font and an owned browser',
+    { timeout: 120_000 },
+    async () => {
+      const root = tempProject()
+      mkdirSync(join(root, 'fonts'))
+      copyFileSync(join(HERE, 'fixture/JetBrainsMono-Bold.woff2'), join(root, 'fonts/mono.woff2'))
+      writeFileSync(
+        join(root, 'fonts/mono.css'),
+        "@font-face { font-family: 'Shotlist Mono'; src: url('mono.woff2') format('woff2'); }",
+      )
+      const configFile = join(root, 'shotlist.config.yaml')
+      writeFileSync(
+        configFile,
+        readFileSync(configFile, 'utf8').replace(
+          '  label:\n    fill:',
+          '  label:\n    font: Shotlist Mono\n    fontUrl: fonts/mono.css\n    fill:',
+        ),
+      )
+      const run = openRun({ untrusted: false }, configFile)
+      const recipe = run.project.library.recipes.get('annotated')!
+
+      const result = await shoot(run, recipe, { install: true })
+
+      expect(existsSync(result.file)).toBe(true)
+      expect(existsSync(result.installed!)).toBe(true)
+      expect(result.warnings).toBeUndefined()
+    },
+  )
+
+  it(
     'annotates an image already on disk, with no page to query',
     { timeout: 120_000 },
     async () => {
@@ -366,6 +481,88 @@ describe('source: file', () => {
       expect(pngSize(result.file).width).toBe(result.size.width * 2)
     },
   )
+
+  it('refuses an untrusted File Recipe path escape through its Run', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes/outside-file.yaml'),
+      'name: outside-file\nsource: file\nfile: /etc/hosts\nclip: viewport\n',
+    )
+    const run = openRun({ untrusted: true }, join(root, 'shotlist.config.yaml'))
+    const recipe = run.project.library.recipes.get('outside-file')!
+
+    await expect(shoot(run, recipe, { browser: unusable as never })).rejects.toThrow(
+      /recipe "outside-file": `file:`: \/etc\/hosts is outside the project/,
+    )
+  })
+
+  it('keeps secret-looking File Recipe paths forbidden for a trusted Run', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes/secret-file.yaml'),
+      'name: secret-file\nsource: file\nfile: .env\nclip: viewport\n',
+    )
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const recipe = run.project.library.recipes.get('secret-file')!
+
+    await expect(shoot(run, recipe, { browser: unusable as never })).rejects.toThrow(
+      /recipe "secret-file": `file:`: "\.env" is a forbidden path/,
+    )
+  })
+
+  it('keeps control characters forbidden in File Recipe paths for a trusted Run', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes/control-file.json'),
+      JSON.stringify({ name: 'control-file', source: 'file', file: 'incoming/\u0001.png' }),
+    )
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const recipe = run.project.library.recipes.get('control-file')!
+
+    await expect(shoot(run, recipe, { browser: unusable as never })).rejects.toThrow(
+      /recipe "control-file": `file:`: .* holds a control character/,
+    )
+  })
+
+  it('authorizes an untrusted Run output before creating it', async () => {
+    const root = tempProject()
+    const escapedName = `${basename(root)}-escaped-output`
+    const escaped = join(root, '..', escapedName)
+    const configFile = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      configFile,
+      readFileSync(configFile, 'utf8').replace('  out: out', `  out: ../${escapedName}`),
+    )
+    const run = openRun({ untrusted: true }, configFile)
+    const recipe = run.project.library.recipes.get('annotated')!
+
+    await expect(shoot(run, recipe, { browser: unusable as never })).rejects.toThrow(
+      /paths\.out: .* is outside the project/,
+    )
+    expect(existsSync(escaped)).toBe(false)
+  })
+
+  it('authorizes an untrusted Run install destination before creating it', async () => {
+    const root = tempProject()
+    const escapedName = `${basename(root)}-escaped-install`
+    const escaped = join(root, '..', escapedName)
+    writeFileSync(
+      join(root, 'recipes/plain.yaml'),
+      'name: plain\nsource: file\nfile: incoming/invoice.png\ninstall: guide\n',
+    )
+    const configFile = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      configFile,
+      readFileSync(configFile, 'utf8').replace('  guide: installed', `  guide: ../${escapedName}`),
+    )
+    const run = openRun({ untrusted: true }, configFile)
+    const recipe = run.project.library.recipes.get('plain')!
+
+    await expect(shoot(run, recipe, { install: true, browser: unusable as never })).rejects.toThrow(
+      /recipe "plain": install\."guide": .* is outside the project/,
+    )
+    expect(existsSync(escaped)).toBe(false)
+  })
 
   it('refuses a mark that queries the page, since there is no page', async () => {
     const { loaded, library } = project()
@@ -603,6 +800,127 @@ describe('a font the project ships itself', () => {
     // and opened a script tag — in the page holding the screenshot.
     const { loaded, library } = withFont(SHEET, '"><script>globalThis.PWNED=1</script>')
     await expect(shootIt(loaded, library)).rejects.toThrow(/nothing at /)
+  }, 120_000)
+
+  it('resolves a symlinked stylesheet asset from the authored location', async () => {
+    const root = tempProject()
+    mkdirSync(join(root, 'fonts'))
+    mkdirSync(join(root, 'shared'))
+    copyFileSync(FONT, join(root, 'fonts/mono.woff2'))
+    writeFileSync(
+      join(root, 'shared/mono.css'),
+      "@font-face { font-family: 'Shotlist Mono'; src: url('mono.woff2') format('woff2'); }",
+    )
+    symlinkSync('../shared/mono.css', join(root, 'fonts/linked.css'))
+    const configFile = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      configFile,
+      readFileSync(configFile, 'utf8').replace(
+        '  label:\n    fill:',
+        '  label:\n    font: Shotlist Mono\n    fontUrl: fonts/linked.css\n    fill:',
+      ),
+    )
+    const run = openRun({ untrusted: false }, configFile)
+    const recipe = run.project.library.recipes.get('annotated')!
+
+    expect((await shoot(run, recipe)).warnings).toBeUndefined()
+  }, 120_000)
+
+  it('authorizes a remote stylesheet through the Run before loading it', async () => {
+    const root = tempProject()
+    const configFile = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      configFile,
+      readFileSync(configFile, 'utf8').replace(
+        '  label:\n    fill:',
+        '  label:\n    font: Shotlist Mono\n    fontUrl: https://outside.example.test/mono.css\n    fill:',
+      ),
+    )
+    const run = openRun({ untrusted: false }, configFile)
+    const recipe = run.project.library.recipes.get('annotated')!
+    const browser = {
+      newContext: () => Promise.reject(new Error('the stylesheet URL policy was bypassed')),
+      close: () => Promise.resolve(),
+    }
+
+    await expect(shoot(run, recipe, { browser: browser as never })).rejects.toThrow(
+      /style\.label\.fontUrl: outside\.example\.test is not this site/,
+    )
+  })
+
+  it('authorizes a remote asset in a local stylesheet through the Run', async () => {
+    const root = tempProject()
+    mkdirSync(join(root, 'fonts'))
+    writeFileSync(
+      join(root, 'fonts/mono.css'),
+      "@font-face { font-family: 'Shotlist Mono'; src: url('https://outside.example.test/mono.woff2'); }",
+    )
+    const configFile = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      configFile,
+      readFileSync(configFile, 'utf8').replace(
+        '  label:\n    fill:',
+        '  label:\n    font: Shotlist Mono\n    fontUrl: fonts/mono.css\n    fill:',
+      ),
+    )
+    const run = openRun({ untrusted: false }, configFile)
+    const recipe = run.project.library.recipes.get('annotated')!
+    const browser = {
+      newContext: () => Promise.reject(new Error('the font URL policy was bypassed')),
+      close: () => Promise.resolve(),
+    }
+
+    await expect(shoot(run, recipe, { browser: browser as never })).rejects.toThrow(
+      /style\.label\.fontUrl: outside\.example\.test is not this site/,
+    )
+  })
+
+  it('authorizes a local stylesheet path through the Run before reading it', async () => {
+    const root = tempProject()
+    const configFile = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      configFile,
+      readFileSync(configFile, 'utf8').replace(
+        '  label:\n    fill:',
+        '  label:\n    font: Shotlist Mono\n    fontUrl: fonts/.env.css\n    fill:',
+      ),
+    )
+    const run = openRun({ untrusted: false }, configFile)
+    const recipe = run.project.library.recipes.get('annotated')!
+    const browser = {
+      newContext: () => Promise.reject(new Error('the stylesheet policy was bypassed')),
+      close: () => Promise.resolve(),
+    }
+
+    await expect(shoot(run, recipe, { browser: browser as never })).rejects.toThrow(
+      /style\.label\.fontUrl: "\.env\.css" is a forbidden path/,
+    )
+  })
+
+  it('authorizes a local stylesheet asset through the Run before reading it', async () => {
+    const root = tempProject()
+    mkdirSync(join(root, 'fonts'))
+    writeFileSync(
+      join(root, 'fonts/mono.css'),
+      "@font-face { font-family: 'Shotlist Mono'; src: url('denied.woff2') format('woff2'); }",
+    )
+    writeFileSync(join(root, 'fonts/denied.woff2'), 'not read')
+    const configFile = join(root, 'shotlist.config.yaml')
+    writeFileSync(
+      configFile,
+      readFileSync(configFile, 'utf8')
+        .replace(
+          '  label:\n    fill:',
+          '  label:\n    font: Shotlist Mono\n    fontUrl: fonts/mono.css\n    fill:',
+        )
+        .concat('\ndeny: [denied.woff2]\n'),
+    )
+    const run = openRun({ untrusted: false }, configFile)
+    const recipe = run.project.library.recipes.get('annotated')!
+
+    await expect(shoot(run, recipe)).rejects.toThrow(
+      /style\.label\.fontUrl: "denied\.woff2" is a forbidden path/,
+    )
   }, 120_000)
 
   it('says which font a stylesheet points at when that is missing', async () => {
