@@ -2,8 +2,10 @@
 
 `src/execute.ts` owns site and browser lifetimes shared by the selected Recipes in a Run.
 `src/cli.ts` owns argument parsing and rendering, `src/capture.ts:shoot` owns one Recipe,
-and `src/steps.ts` owns ordered browser interaction. Put behavior at the lowest owner that
-can enforce it, because CLI-only fixes do not protect library callers.
+and `src/step.ts` owns the built-in Step vocabulary from authored shape through ordered
+browser interaction. `src/steps.ts` authenticates the Run at the execution facade. Put
+behavior at the lowest owner that can enforce it, because CLI-only fixes do not protect
+library callers.
 
 ## Project run
 

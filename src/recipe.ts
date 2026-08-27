@@ -1,103 +1,21 @@
 import { z } from 'zod'
-import { MAX_PIXELS, ShotlistError, distance, formatIssues, keysIn } from './config.js'
+import { MAX_PIXELS, ShotlistError, formatIssues, keysIn } from './config.js'
 import { FORMATS } from './image.js'
 import { QUERY_KEYS, makeQuery } from './query.js'
+import {
+  ENV,
+  VERBS,
+  checkStepVerbs,
+  expandSteps,
+  interpolate,
+  makeStep,
+  nearestVerb,
+} from './step.js'
 import type { QueryInput } from './query.js'
+import type { ResolvedStep, StepInput } from './step.js'
 
-/** A value a recipe can hold literally or reference with `$name`. */
-const Ref = z.union([z.string(), z.number(), z.boolean()])
-
-const StepBase = { comment: z.string().optional() }
-
-/** The step vocabulary, bound to a project's query aliases. */
-function makeStep(aliases: Readonly<Record<string, unknown>>): z.ZodType<StepInput> {
-  const Query = makeQuery(aliases)
-  const Step: z.ZodType<StepInput> = z.lazy(() =>
-    z.union([
-      z.object({ goto: z.string(), ...StepBase }).strict(),
-      z.object({ click: Query, ...StepBase }).strict(),
-      z.object({ dblclick: Query, ...StepBase }).strict(),
-      z.object({ hover: Query, ...StepBase }).strict(),
-      z.object({ fill: Query, value: Ref, ...StepBase }).strict(),
-      z
-        .object({
-          select: Query,
-          option: Ref.optional(),
-          optionLabel: z.string().optional(),
-          ...StepBase,
-        })
-        .strict(),
-      z.object({ check: Query, ...StepBase }).strict(),
-      z.object({ uncheck: Query, ...StepBase }).strict(),
-      z.object({ press: z.string(), on: Query.optional(), ...StepBase }).strict(),
-      z.object({ type: z.string(), on: Query.optional(), ...StepBase }).strict(),
-      z.object({ blur: Query, ...StepBase }).strict(),
-      z.object({ scrollIntoView: Query, ...StepBase }).strict(),
-      z.object({ wait: z.union([z.number(), Query]), ...StepBase }).strict(),
-      // Two branches rather than one with an optional `value`, so `dialog: dismiss` cannot
-      // carry a value nothing types: a key with no effect looks exactly like a broken one.
-      z.object({ dialog: z.literal('accept'), value: Ref.optional(), ...StepBase }).strict(),
-      z.object({ dialog: z.literal('dismiss'), ...StepBase }).strict(),
-      z.object({ readValue: Query, as: z.string(), ...StepBase }).strict(),
-      z
-        .object({
-          use: z.string(),
-          with: z.record(z.string(), z.unknown()).optional(),
-          ...StepBase,
-        })
-        .strict(),
-      z
-        .object({ repeat: z.int().positive().max(1000), steps: z.array(Step), ...StepBase })
-        .strict(),
-      z
-        .object({
-          each: z.union([z.string(), z.array(z.unknown())]),
-          as: z.string().default('item'),
-          steps: z.array(Step),
-          ...StepBase,
-        })
-        .strict(),
-      z.object({ optional: z.array(Step), ...StepBase }).strict(),
-      z
-        .object({
-          openPage: z.string(),
-          as: z.string(),
-          viewport: z.object({ width: z.number(), height: z.number() }).optional(),
-          ...StepBase,
-        })
-        .strict(),
-      z.object({ usePage: z.string(), ...StepBase }).strict(),
-    ]),
-  )
-  return Step
-}
-
-export type StepInput = Record<string, unknown>
-
-/** Every verb a step may lead with — the vocabulary, and the source of did-you-mean. */
-export const VERBS = [
-  'goto',
-  'click',
-  'dblclick',
-  'hover',
-  'fill',
-  'select',
-  'check',
-  'uncheck',
-  'press',
-  'type',
-  'blur',
-  'scrollIntoView',
-  'wait',
-  'dialog',
-  'readValue',
-  'use',
-  'repeat',
-  'each',
-  'optional',
-  'openPage',
-  'usePage',
-] as const
+export { ENV, VERBS, expandSteps, interpolate, nearestVerb }
+export type { ResolvedStep, StepInput }
 
 const Callout = z
   .object({
@@ -261,52 +179,6 @@ export type Recipe = z.infer<typeof Recipe>
 export type Callout = z.infer<typeof Callout>
 export type Macro = z.infer<typeof Macro>
 
-/** The closest known verb to `word`, when one is close enough to be worth suggesting. */
-export function nearestVerb(word: string): string | null {
-  let best: string | null = null
-  let score = Infinity
-  for (const verb of VERBS) {
-    const d = distance(word.toLowerCase(), verb.toLowerCase())
-    if (d < score) {
-      score = d
-      best = verb
-    }
-  }
-  return score <= Math.max(2, Math.floor(word.length / 3)) ? best : null
-}
-
-/**
- * Check a step leads with a known verb before zod does.
- *
- * A union of twenty strict objects produces twenty parallel failures for one typo,
- * none of which says "clik". This catches it first and says so.
- */
-function checkVerb(step: unknown, where: string): void {
-  if (typeof step !== 'object' || step === null || Array.isArray(step)) {
-    throw new ShotlistError(`${where}: a step must be a mapping like \`click: {…}\``)
-  }
-  const keys = Object.keys(step)
-  if (keys.some((key) => (VERBS as readonly string[]).includes(key))) return
-  const [first] = keys
-  const suggestion = first ? nearestVerb(first) : null
-  throw new ShotlistError(
-    `${where}: unknown step "${first ?? '(empty)'}"` +
-      (suggestion ? ` — did you mean "${suggestion}"?` : ` — known steps: ${VERBS.join(', ')}`),
-  )
-}
-
-/** Walk a step tree, checking every verb, including the nested ones. */
-function checkVerbs(steps: unknown, where: string): void {
-  if (!Array.isArray(steps)) throw new ShotlistError(`${where}: expected a list of steps`)
-  steps.forEach((step, index) => {
-    const at = `${where}[${index}]`
-    checkVerb(step, at)
-    const nested = step as Record<string, unknown>
-    if (Array.isArray(nested['steps'])) checkVerbs(nested['steps'], `${at}.steps`)
-    if (Array.isArray(nested['optional'])) checkVerbs(nested['optional'], `${at}.optional`)
-  })
-}
-
 /**
  * Every name a recipe may legally use as a key, for suggesting the one that was meant.
  *
@@ -378,7 +250,7 @@ export function parseMacro(
 ): Macro {
   checkKind(raw, 'macro', options.file)
   if (typeof raw === 'object' && raw !== null && 'steps' in raw) {
-    checkVerbs((raw as { steps: unknown }).steps, 'steps')
+    checkStepVerbs((raw as { steps: unknown }).steps, 'steps')
   }
   return validate(makeMacro(options.finders ?? {}), raw, 'macro', options.file)
 }
@@ -391,7 +263,7 @@ export function parseRecipe(
   checkKind(raw, 'recipe', options.file)
   for (const key of ['setup', 'teardown'] as const) {
     if (typeof raw === 'object' && raw !== null && key in raw) {
-      checkVerbs((raw as Record<string, unknown>)[key], key)
+      checkStepVerbs((raw as Record<string, unknown>)[key], key)
     }
   }
   const recipe = validate(makeRecipe(options.finders ?? {}), raw, 'recipe', options.file)
@@ -455,136 +327,6 @@ export function withNumbering(recipe: Recipe): Recipe {
     Callout.parse({ ...shared, mark, n: index + 1, place: 'corner' }),
   )
   return { ...recipe, callouts: [...recipe.callouts, ...discs], numbered: undefined }
-}
-
-export interface ResolvedStep {
-  step: StepInput
-  /** The variables in scope where this step was written — macro arguments and loop items. */
-  vars: Record<string, unknown>
-  nested?: ResolvedStep[]
-}
-
-/**
- * Flatten `use:` into the macro's own steps, recording each frame's variables.
- *
- * Structure resolves now so an unknown macro fails at load; `$name` stays unresolved
- * because `readValue` can only fill it once the browser is running.
- */
-export function expandSteps(
-  steps: readonly StepInput[],
-  macros: ReadonlyMap<
-    string,
-    {
-      readonly defaults: Readonly<Record<string, unknown>>
-      readonly steps: readonly StepInput[]
-    }
-  >,
-  vars: Record<string, unknown> = {},
-  seen: readonly string[] = [],
-): ResolvedStep[] {
-  return steps.flatMap((step): ResolvedStep[] => {
-    if (typeof step['use'] === 'string') {
-      const name = step['use']
-      const macro = macros.get(name)
-      if (!macro) {
-        const known = [...macros.keys()].sort()
-        throw new ShotlistError(
-          `unknown macro "${name}"` +
-            (known.length ? ` — this project defines ${known.join(', ')}` : ''),
-        )
-      }
-      if (seen.includes(name)) {
-        throw new ShotlistError(`macro "${name}" uses itself (${[...seen, name].join(' → ')})`)
-      }
-      const frame = { ...vars, ...macro.defaults, ...((step['with'] as object) ?? {}) }
-      return expandSteps(macro.steps, macros, frame, [...seen, name])
-    }
-
-    const nestedKey = Array.isArray(step['steps'])
-      ? 'steps'
-      : Array.isArray(step['optional'])
-        ? 'optional'
-        : null
-    if (nestedKey) {
-      return [
-        {
-          step,
-          vars,
-          nested: expandSteps(step[nestedKey] as StepInput[], macros, vars, seen),
-        },
-      ]
-    }
-    return [{ step, vars }]
-  })
-}
-
-/** The scope a recipe reads the operator's variables through: `${env.NAME}`. */
-export const ENV = 'env'
-
-/** Why an `env.` reference did not resolve: not set and not allowed look the same. */
-function noEnv(reference: string, name: string): ShotlistError {
-  return new ShotlistError(
-    `no value for ${reference} — either ${name} is not set, or nothing allowed it. ` +
-      `Add it to \`allowEnv\` in the config, or pass \`--allow-env ${name}\`.`,
-  )
-}
-
-/**
- * Resolve `$name` and `${name}` in a value against the variables in scope.
- *
- * `missing` says what to do with a name nothing in scope answers to: a step means it, so
- * it fails; a macro's own arguments are resolved before the scope they will run in exists,
- * so there the name is left as written for the frame below to fill.
- */
-export function interpolate(
-  value: unknown,
-  vars: Readonly<Record<string, unknown>>,
-  missing: 'throw' | 'keep' = 'throw',
-): unknown {
-  if (typeof value === 'string') {
-    const whole = /^\$\{?([A-Za-z_][\w.]*)\}?$/.exec(value)
-    if (whole) {
-      const resolved = lookup(vars, whole[1]!)
-      if (resolved !== undefined) return resolved
-      if (missing === 'keep') return value
-      if (whole[1]!.startsWith(`${ENV}.`)) throw noEnv(value, whole[1]!.slice(ENV.length + 1))
-      throw new ShotlistError(`no value for ${value}`)
-    }
-    return value.replace(/\$\{?([A-Za-z_][\w.]*)\}?/g, (all, path: string) => {
-      const resolved = lookup(vars, path)
-      if (resolved !== undefined) return String(resolved)
-      // Left as written, a password is typed into the page as those literal characters.
-      if (missing === 'throw' && path.startsWith(`${ENV}.`)) {
-        throw noEnv(all, path.slice(ENV.length + 1))
-      }
-      return all
-    })
-  }
-  if (Array.isArray(value)) return value.map((item) => interpolate(item, vars, missing))
-  if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, inner]) => [key, interpolate(inner, vars, missing)]),
-    )
-  }
-  return value
-}
-
-/**
- * Keys that read the language rather than the data.
- *
- * `$__proto__` answered with `Object.prototype`, and a step is free to put whatever it
- * resolves into a query — so a reference could reach out of the scope it was given into
- * the shape of the interpreter. Data files hold data.
- */
-const NOT_DATA = new Set(['__proto__', 'constructor', 'prototype'])
-
-/** Read a dotted path out of the variable scope, and out of nothing else. */
-function lookup(vars: Readonly<Record<string, unknown>>, path: string): unknown {
-  return path.split('.').reduce<unknown>((current, key) => {
-    if (current === null || typeof current !== 'object') return undefined
-    if (NOT_DATA.has(key) || !Object.prototype.hasOwnProperty.call(current, key)) return undefined
-    return (current as Record<string, unknown>)[key]
-  }, vars)
 }
 
 export type { QueryInput }
