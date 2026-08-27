@@ -58,6 +58,10 @@ recipe authors what to edit. See
   resolving and passing a Session object. The Session module owns path resolution, host
   narrowing, and capture verification details.
 
+- **Library discovery uses one policy-aware module.** Run opening, linting, and document
+  counting share directory traversal, entry authorization, authored-path diagnostics, and
+  authorized reads while keeping their existing failure behavior.
+
 ### Removed
 
 - **Session implementation interfaces at the package root.** `sessionFor`, `sessionHosts`,

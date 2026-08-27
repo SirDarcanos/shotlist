@@ -1,9 +1,9 @@
-import { basename, join } from 'node:path'
-import { ShotlistError, fromRoot, loadConfig, readDocumentAt } from './config.js'
+import { ShotlistError, loadConfig } from './config.js'
 import type { Config, LoadedConfig } from './config.js'
-import { documentFiles, parseLibrary } from './recipe.js'
-import type { Library, LibraryDocument, Macro, Recipe } from './recipe.js'
-import { authorizePath, trustFromEnvironment } from './trust.js'
+import { discoverLibrary, parseLibrary } from './library.js'
+import type { Library, LibraryDocument } from './library.js'
+import type { Macro, Recipe } from './recipe.js'
+import { trustFromEnvironment } from './trust.js'
 import type { Trust } from './trust.js'
 
 /** A value whose nested arrays, mappings, and fields cannot change through the Run. */
@@ -196,14 +196,6 @@ function freezeLibrary(library: Library): ProjectLibrary {
   return Object.freeze({ recipes, macros, data: deepFreeze(library.data) })
 }
 
-type LibraryKind = 'macros' | 'data' | 'recipes'
-
-interface PendingDocument {
-  kind: LibraryKind
-  document: LibraryDocument
-  target: string
-}
-
 /** Derive immutable policy state from snapshots owned by shotlist. */
 function policyFrom(
   authority: DeepReadonly<OperatorAuthority>,
@@ -249,36 +241,33 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
   const config = loaded.config
   const { trust } = policyFrom(authority, loaded, environment)
 
-  const directories = (['macros', 'data', 'recipes'] as const).map((kind) => {
-    const authored = fromRoot(loaded, config.paths[kind])
-    return {
-      kind,
-      authored,
-      target: authorizePath(trust, authored, `paths.${kind}`),
+  const discovery = discoverLibrary(loaded, trust)
+  // Run opening is atomic: authorize every configured directory before enumeration,
+  // then every discovered entry before reading one document.
+  for (const group of discovery.groups) {
+    if ('error' in group && group.stage === 'authorization') throw group.error
+  }
+  for (const group of discovery.groups) {
+    if ('error' in group) throw group.error
+    for (const document of group.documents) {
+      if ('error' in document) throw document.error
     }
-  })
+  }
 
-  // Authorize every discovered entry before reading any of them. An entry may be a
-  // symlink even after its containing directory passed policy.
-  const pending: PendingDocument[] = directories.flatMap(({ kind, authored, target }) =>
-    documentFiles(target).map(({ name, file }) => ({
-      kind,
-      target: authorizePath(trust, file, `paths.${kind}`),
-      document: { name, file: join(authored, basename(file)), raw: undefined },
-    })),
-  )
-
-  const documents: Record<LibraryKind, LibraryDocument[]> = {
+  const documents: Record<'macros' | 'data' | 'recipes', LibraryDocument[]> = {
     macros: [],
     data: [],
     recipes: [],
   }
-  for (const pendingDocument of pending) {
-    const { kind, target, document } = pendingDocument
-    documents[kind].push({
-      ...document,
-      raw: readDocumentAt(target, document.file),
-    })
+  for (const group of discovery.groups) {
+    for (const document of group.documents) {
+      if ('error' in document) throw document.error
+      documents[group.kind].push({
+        name: document.name,
+        file: document.file,
+        raw: document.read(),
+      })
+    }
   }
 
   const library = freezeLibrary(parseLibrary(documents, config.finders))
