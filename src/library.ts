@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { fromRoot, readDocumentAt } from './config.js'
+import { ShotlistError, fromRoot, readDocumentAt } from './config.js'
 import type { LoadedConfig } from './config.js'
 import { parseMacro, parseRecipe, withNumbering } from './recipe.js'
 import type { Macro, Recipe } from './recipe.js'
@@ -9,12 +9,29 @@ import type { Trust } from './trust.js'
 
 const DOCUMENTS = new Set(['.yaml', '.yml', '.json'])
 
-export type LibraryKind = 'macros' | 'data' | 'recipes'
+type LibraryKind = 'macros' | 'data' | 'recipes'
+
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends ReadonlyMap<infer K, infer V>
+    ? ReadonlyMap<DeepReadonly<K>, DeepReadonly<V>>
+    : T extends readonly (infer V)[]
+      ? readonly DeepReadonly<V>[]
+      : T extends object
+        ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+        : T
 
 export interface Library {
   recipes: Map<string, Recipe>
   macros: Map<string, Macro>
   data: Record<string, unknown>
+}
+
+/** The immutable Library view exposed by a Run. */
+export interface ProjectLibrary {
+  readonly recipes: ReadonlyMap<string, DeepReadonly<Recipe>>
+  readonly macros: ReadonlyMap<string, DeepReadonly<Macro>>
+  readonly data: DeepReadonly<Record<string, unknown>>
 }
 
 export interface LibraryDocument {
@@ -61,48 +78,48 @@ export function parseLibrary(
   return { recipes, macros, data }
 }
 
-/** A discovered document whose authorized target stays inside its read operation. */
-export interface ReadableLibraryDocument {
-  readonly name: string
-  readonly file: string
-  read(): unknown
+/** One problem found while reviewing an incomplete Library. */
+export interface LibraryProblem {
+  file: string
+  message: string
+  /** An error refuses the document; a warning is legal but probably not meant. */
+  level: 'error' | 'warning'
 }
 
-/** A discovered document that policy refused before it could be read. */
-export interface RefusedLibraryDocument {
-  readonly name: string
-  readonly file: string
-  readonly error: unknown
+export interface LibraryReviewOptions {
+  warnings?: boolean
 }
 
-export type DiscoveredLibraryDocument = ReadableLibraryDocument | RefusedLibraryDocument
-
-/** One authorized Library directory and the entries discovered inside it. */
-export interface DiscoveredLibraryGroup {
-  readonly kind: LibraryKind
-  readonly file: string
-  readonly documents: readonly DiscoveredLibraryDocument[]
+/** Problems and document count observed in one Library traversal. */
+export interface LibraryReview {
+  readonly problems: readonly LibraryProblem[]
+  /** Discovered Library documents, including documents refused after enumeration. */
+  readonly documents: number
 }
 
-/** One configured Library directory that policy or the filesystem refused. */
-export interface RefusedLibraryGroup {
-  readonly kind: LibraryKind
-  readonly file: string
-  readonly documents: readonly []
-  readonly stage: 'authorization' | 'enumeration'
-  readonly error: unknown
-}
-
-export type LibraryGroup = DiscoveredLibraryGroup | RefusedLibraryGroup
-
-/** The complete policy-aware view of configured Library directories and entries. */
-export interface LibraryDiscovery {
-  readonly groups: readonly LibraryGroup[]
-}
-
-type PreparedGroup =
+type PreparedDirectory =
   | { kind: LibraryKind; file: string; target: string }
   | { kind: LibraryKind; file: string; stage: 'authorization'; error: unknown }
+
+type PreparedDocument =
+  { name: string; file: string; target: string } | { name: string; file: string; error: unknown }
+
+type PreparedGroup =
+  | { kind: LibraryKind; file: string; documents: readonly PreparedDocument[] }
+  | {
+      kind: LibraryKind
+      file: string
+      documents: readonly []
+      stage: 'authorization' | 'enumeration'
+      error: unknown
+    }
+
+/** Replace a private authorized target with the path the Project author wrote. */
+function authoredError(error: unknown, target: string, file: string): unknown {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!message.includes(target)) return error
+  return new ShotlistError(message.split(target).join(file))
+}
 
 /** List supported document filenames in stable order. */
 function documentFiles(dir: string): Array<{ name: string; file: string }> {
@@ -113,12 +130,12 @@ function documentFiles(dir: string): Array<{ name: string; file: string }> {
     .map((entry) => ({ name: basename(entry, extname(entry)), file: join(dir, entry) }))
 }
 
-/** Discover every configured Library directory and entry through one Trust policy. */
-export function discoverLibrary(loaded: LoadedConfig, trust: Trust): LibraryDiscovery {
+/** Prepare every policy-aware Library read without exposing an authorized target. */
+function prepareLibrary(loaded: LoadedConfig, trust: Trust): readonly PreparedGroup[] {
   const kinds: readonly LibraryKind[] = ['macros', 'data', 'recipes']
   // Authorize every directory before enumerating one, so Run opening never observes a
   // malformed document before a later configured directory is refused.
-  const prepared: PreparedGroup[] = kinds.map((kind) => {
+  const directories: PreparedDirectory[] = kinds.map((kind) => {
     const file = fromRoot(loaded, loaded.config.paths[kind])
     try {
       return { kind, file, target: authorizePath(trust, file, `paths.${kind}`) }
@@ -127,33 +144,227 @@ export function discoverLibrary(loaded: LoadedConfig, trust: Trust): LibraryDisc
     }
   })
 
-  const groups = Object.freeze(
-    prepared.map((group): LibraryGroup => {
-      if ('error' in group) return Object.freeze({ ...group, documents: [] })
+  return Object.freeze(
+    directories.map((directory): PreparedGroup => {
+      if ('error' in directory) return Object.freeze({ ...directory, documents: [] })
       try {
         const documents = Object.freeze(
-          documentFiles(group.target).map(({ name, file: target }): DiscoveredLibraryDocument => {
-            const file = join(group.file, basename(target))
+          documentFiles(directory.target).map(({ name, file: target }): PreparedDocument => {
+            const file = join(directory.file, basename(target))
             try {
-              const authorized = authorizePath(trust, target, `paths.${group.kind}`)
-              return Object.freeze({ name, file, read: () => readDocumentAt(authorized, file) })
+              return Object.freeze({
+                name,
+                file,
+                target: authorizePath(trust, target, `paths.${directory.kind}`),
+              })
             } catch (error) {
-              return Object.freeze({ name, file, error })
+              return Object.freeze({ name, file, error: authoredError(error, target, file) })
             }
           }),
         )
-        return Object.freeze({ kind: group.kind, file: group.file, documents })
+        return Object.freeze({ kind: directory.kind, file: directory.file, documents })
       } catch (error) {
         return Object.freeze({
-          kind: group.kind,
-          file: group.file,
+          kind: directory.kind,
+          file: directory.file,
           documents: [],
           stage: 'enumeration',
-          error,
+          error: authoredError(error, directory.target, directory.file),
         })
       }
     }),
   )
+}
 
-  return Object.freeze({ groups })
+/** Freeze arrays and plain object graphs assembled for a Library. */
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): DeepReadonly<T> {
+  if (typeof value !== 'object' || value === null) return value as DeepReadonly<T>
+  if (seen.has(value)) return value as DeepReadonly<T>
+  seen.add(value)
+  for (const nested of Object.values(value)) deepFreeze(nested, seen)
+  return Object.freeze(value) as DeepReadonly<T>
+}
+
+/** A Map view with no mutation methods or exposed backing Map. */
+class ImmutableMap<K, V> implements ReadonlyMap<K, V> {
+  readonly #values: Map<K, V>
+
+  /** Copy entries into an inaccessible backing Map. */
+  constructor(entries: Iterable<readonly [K, V]>) {
+    this.#values = new Map(entries)
+    Object.freeze(this)
+  }
+
+  /** Report the number of entries. */
+  get size(): number {
+    return this.#values.size
+  }
+
+  /** Return the value for a key. */
+  get(key: K): V | undefined {
+    return this.#values.get(key)
+  }
+
+  /** Report whether a key exists. */
+  has(key: K): boolean {
+    return this.#values.has(key)
+  }
+
+  /** Iterate over key-value pairs. */
+  entries(): MapIterator<[K, V]> {
+    return this.#values.entries()
+  }
+
+  /** Iterate over keys. */
+  keys(): MapIterator<K> {
+    return this.#values.keys()
+  }
+
+  /** Iterate over values. */
+  values(): MapIterator<V> {
+    return this.#values.values()
+  }
+
+  /** Call a function for each entry. */
+  forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
+    for (const [key, value] of this.#values) callbackfn.call(thisArg, value, key, this)
+  }
+
+  /** Iterate over key-value pairs. */
+  [Symbol.iterator](): MapIterator<[K, V]> {
+    return this.entries()
+  }
+}
+
+/** Publish a parsed Library through runtime read-only views. */
+function freezeLibrary(library: Library): ProjectLibrary {
+  const recipes = new ImmutableMap(
+    [...library.recipes].map(([name, recipe]) => [name, deepFreeze(recipe)] as const),
+  )
+  const macros = new ImmutableMap(
+    [...library.macros].map(([name, macro]) => [name, deepFreeze(macro)] as const),
+  )
+  return Object.freeze({ recipes, macros, data: deepFreeze(library.data) })
+}
+
+/** Read a prepared document without exposing its authorized target in a failure. */
+function readPreparedDocument(document: { file: string; target: string }): unknown {
+  try {
+    return readDocumentAt(document.target, document.file)
+  } catch (error) {
+    throw authoredError(error, document.target, document.file)
+  }
+}
+
+/** Read and publish one complete immutable Library, or expose none of it. */
+export function openLibrary(loaded: LoadedConfig, trust: Trust): ProjectLibrary {
+  const groups = prepareLibrary(loaded, trust)
+  for (const group of groups) {
+    if ('error' in group && group.stage === 'authorization') throw group.error
+  }
+  for (const group of groups) {
+    if ('error' in group) throw group.error
+    for (const document of group.documents) {
+      if ('error' in document) throw document.error
+    }
+  }
+
+  const documents: Record<LibraryKind, LibraryDocument[]> = {
+    macros: [],
+    data: [],
+    recipes: [],
+  }
+  // Read every document before parsing one, so syntax failures retain their precedence
+  // over language failures in documents that sorted before them.
+  for (const group of groups) {
+    if ('error' in group) throw group.error
+    for (const document of group.documents) {
+      if ('error' in document) throw document.error
+      documents[group.kind].push({
+        name: document.name,
+        file: document.file,
+        raw: readPreparedDocument(document),
+      })
+    }
+  }
+  return freezeLibrary(parseLibrary(documents, loaded.config.finders))
+}
+
+/** What a thrown failure says without the filename the review already carries. */
+function said(error: unknown, file: string): string {
+  const message = error instanceof ShotlistError ? error.message : String(error)
+  const withoutFile = message.startsWith(`${file}: `) ? message.slice(file.length + 2) : message
+  return withoutFile.replace(/^invalid (?:recipe|macro|config) —\n\s*/, '')
+}
+
+/** Report legal Recipe relationships that are probably not intended. */
+function suspect(recipe: Recipe, loaded: LoadedConfig): string[] {
+  const found: string[] = []
+  const pointedAt = new Set(recipe.callouts.map((callout) => callout.mark))
+  for (const name of Object.keys(recipe.marks)) {
+    if (!pointedAt.has(name)) found.push(`mark "${name}" is never used by a callout`)
+  }
+  for (const callout of recipe.callouts) {
+    if (!(callout.mark in recipe.marks)) {
+      found.push(`callout points at "${callout.mark}", which no mark defines`)
+    }
+  }
+  if (recipe.install !== undefined && !(recipe.install in loaded.config.install)) {
+    found.push(`install: "${recipe.install}" is not a destination the config names`)
+  }
+  if (recipe.session !== undefined && !(recipe.session in loaded.config.site.sessions)) {
+    found.push(`session: "${recipe.session}" is not a session the config names`)
+  }
+  return found
+}
+
+/** Review every reachable Library document and retain all countable outcomes. */
+export function reviewLibrary(
+  loaded: LoadedConfig,
+  trust: Trust,
+  options: LibraryReviewOptions = {},
+): LibraryReview {
+  const problems: LibraryProblem[] = []
+  const groups = prepareLibrary(loaded, trust)
+  let documents = 0
+
+  for (const group of groups) {
+    documents += group.documents.length
+    if ('error' in group) {
+      problems.push({ file: group.file, message: said(group.error, group.file), level: 'error' })
+      continue
+    }
+    for (const document of group.documents) {
+      const { file } = document
+      if ('error' in document) {
+        problems.push({ file, message: said(document.error, file), level: 'error' })
+        continue
+      }
+      try {
+        const raw = readPreparedDocument(document)
+        if (group.kind === 'macros') {
+          parseMacro(raw, { finders: loaded.config.finders, file })
+        } else if (group.kind === 'recipes') {
+          const recipe = withNumbering(
+            parseRecipe(raw, { finders: loaded.config.finders, file, name: document.name }),
+          )
+          if (options.warnings) {
+            for (const message of suspect(recipe, loaded)) {
+              problems.push({ file, message, level: 'warning' })
+            }
+          }
+        }
+        // Data documents may have any shape, so a successful syntax parse completes review.
+      } catch (error) {
+        problems.push({ file, message: said(error, file), level: 'error' })
+      }
+    }
+  }
+
+  return Object.freeze({ problems: Object.freeze(problems), documents })
+}
+
+/** Count documents found through policy-aware Library discovery without reading them. */
+export function countLibraryDocuments(loaded: LoadedConfig, trust: Trust): number {
+  return prepareLibrary(loaded, trust).reduce((total, group) => total + group.documents.length, 0)
 }

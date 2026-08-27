@@ -58,9 +58,10 @@ recipe authors what to edit. See
   resolving and passing a Session object. The Session module owns path resolution, host
   narrowing, and capture verification details.
 
-- **Library discovery uses one policy-aware module.** Run opening, linting, and document
-  counting share directory traversal, entry authorization, authored-path diagnostics, and
-  authorized reads while keeping their existing failure behavior.
+- **Library discovery uses one deep policy-aware module.** Run opening asks for a complete
+  immutable Library, while linting asks for one review containing both problems and the
+  document count. Directory traversal, entry authorization, authored-path diagnostics,
+  parsing, and failure order remain inside the Library module.
 
 ### Removed
 

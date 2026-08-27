@@ -10,10 +10,11 @@ The CLI loads the config and Library, selects Recipes, and starts the configured
 when at least one selected Recipe has `source: app`. It launches one Chromium browser for
 a capture or check batch and closes it in `finally`; selected Recipes run sequentially.
 
-`src/library.ts` discovers configured Library directories and documents through one policy
-report. Run opening rejects every directory or document authorization failure before it
-reads a document; lint consumes the same report one outcome at a time so one refused or
-malformed document does not hide the rest.
+`src/library.ts` owns policy-aware Library discovery, reading, parsing, and publication.
+Run opening asks it for one complete immutable Library; lint asks it for one review that
+keeps every reachable problem and the matching document count. Both authorize every
+configured directory before enumerating one and every discovered document before reading
+one.
 
 Playwright remains an optional peer. `loadPlaywright` resolves `playwright`, then
 `playwright-core`, then installations under the npm `npx` cache. Preserve the actionable
