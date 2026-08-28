@@ -47,7 +47,7 @@ export interface Run {
   readonly operatorDestinations: readonly NetworkDestination[]
   /** Allowed environment values captured while the Run opened. */
   readonly env: Readonly<Record<string, string>>
-  /** Capture one ordered Recipe selection through Run-owned resources. */
+  /** Capture one ordered Recipe selection, deferring requested Installation until cleanup succeeds. */
   capture(request: CaptureRequest): Promise<CaptureReport>
   /** Perform Checking for one ordered Recipe selection through Run-owned resources. */
   check(request: CheckRequest): Promise<CheckReport>

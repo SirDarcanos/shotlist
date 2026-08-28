@@ -75,6 +75,7 @@ Diff images are disposable PNG diagnostics. Equal-size inputs produce committed,
 and highlighted-current panels; different dimensions produce two panels because an
 overlay cannot align.
 
-`src/baseline.ts` records the rendering environment rather than a committed image. Warn on
+`src/baseline.ts` records the rendering environment rather than a committed image. Run-level
+Capture records it only after every requested Committed image replacement succeeds. Warn on
 Playwright, Chromium, shotlist, or platform drift because rasterization can change while
 the application does not.

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
@@ -22,6 +22,7 @@ import type { QueryInput, Rect } from './query.js'
 import { assertRecipe, assertRun, networkPolicyFor, workLimitsFor } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
 import { RequestCancelledError, WorkLimitError, createRecipeWork } from './work-limit.js'
+import { replaceFileFrom } from './replace-file.js'
 import type { StepWork } from './work-limit.js'
 
 /** Optional behavior for capturing a Recipe through its Run. */
@@ -73,22 +74,19 @@ function inRecipe(recipe: Recipe, path: string, cause: string): ShotlistError {
   return new ShotlistError(`recipe "${recipe.name}": ${path} — ${cause}`)
 }
 
-const CLEANUP_FAILURES = Symbol('Capture cleanup failures')
+const CLEANUP_FAILURES = new WeakMap<object, readonly unknown[]>()
 
-/** Retain the primary failure's identity while attaching one Capture cleanup failure. */
+/** Retain the primary failure's identity while accumulating Capture cleanup failures. */
 function withCaptureCleanupFailure(primary: unknown, cleanup: unknown): unknown {
   const failure = primary instanceof Error ? primary : new ShotlistError(String(primary))
-  Object.defineProperty(failure, CLEANUP_FAILURES, {
-    value: Object.freeze([cleanup]),
-    enumerable: false,
-  })
+  CLEANUP_FAILURES.set(failure, Object.freeze([...(CLEANUP_FAILURES.get(failure) ?? []), cleanup]))
   return failure
 }
 
 /** Return teardown failures attached to a failed Capture attempt. */
 export function captureCleanupFailures(error: unknown): readonly unknown[] {
   if (typeof error !== 'object' || error === null) return []
-  return (error as { [CLEANUP_FAILURES]?: readonly unknown[] })[CLEANUP_FAILURES] ?? []
+  return CLEANUP_FAILURES.get(error) ?? []
 }
 
 /** Retain Work-limit identity while adding the Recipe location that exceeded it. */
@@ -128,12 +126,9 @@ function settingsFor(recipe: Recipe, config: Config) {
   return settings
 }
 
-/** Where a recipe's image is installed, refusing a destination the config never named. */
-function destinationFor(
-  run: Run,
-  recipe: Recipe,
-  loaded: LoadedConfig,
-): { authored: string; target: string } | undefined {
+/** Resolve one Recipe's authored Install destination, refusing an unknown name. */
+export function installDestinationFor(run: Run, recipe: DeepReadonly<Recipe>): string | undefined {
+  const loaded = run.project as unknown as LoadedConfig
   if (!recipe.install || recipe.install === 'none') return undefined
   const target = loaded.config.install[recipe.install]
   if (!target) {
@@ -143,14 +138,22 @@ function destinationFor(
         (known.length ? ` — it defines ${known.join(', ')}` : ' — it defines no destinations'),
     )
   }
-  const destination = join(
+  return join(
     fromRoot(loaded, target),
     `${recipe.name}${extensionOf(recipe.format ?? loaded.config.image.format)}`,
   )
-  return {
-    authored: destination,
-    target: capturePath(run, destination, `recipe "${recipe.name}": install."${recipe.install}"`),
-  }
+}
+
+/** Safely replace one Recipe's Committed image with its completed Output image. */
+export function installOutput(
+  run: Run,
+  recipe: DeepReadonly<Recipe>,
+  output: string,
+): string | undefined {
+  const destination = installDestinationFor(run, recipe)
+  if (!destination) return undefined
+  replaceFileFrom(run, output, destination, `recipe "${recipe.name}": install."${recipe.install}"`)
+  return destination
 }
 
 /** Turn the recipe's callouts into what the drawing layer needs, once the rects are known. */
@@ -859,16 +862,15 @@ export async function shoot(
     await work.run(async () => undefined)
     if (options.signal?.aborted) throw new RequestCancelledError(options.signal.reason)
     writeFileSync(outputTarget, written)
-    const destination = destinationFor(run, recipe, loaded)
-    if (options.install && destination) {
+    let installed: string | undefined
+    if (options.install) {
       if (options.signal?.aborted) throw new RequestCancelledError(options.signal.reason)
-      mkdirSync(dirname(destination.target), { recursive: true })
-      copyFileSync(outputTarget, destination.target)
+      installed = installOutput(run, recipe, file)
     }
     return {
       name: recipe.name!,
       file,
-      ...(options.install && destination ? { installed: destination.authored } : {}),
+      ...(installed ? { installed } : {}),
       size: drawn.size,
       ...(ignored.length ? { ignored } : {}),
       ...(drawn.warnings.length ? { warnings: drawn.warnings } : {}),

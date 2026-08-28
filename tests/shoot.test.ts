@@ -211,8 +211,9 @@ describe('shoot', () => {
     expect(result.size.height).toBeGreaterThan(700)
   })
 
-  it('refuses an install destination the config never named', async () => {
+  it('refuses an undefined Install destination only when Installation is requested', async () => {
     const { run, recipe } = recipeProject('modal', { install: 'nowhere' })
+    await expect(shoot(run, recipe)).resolves.toMatchObject({ name: 'modal' })
     await expect(shoot(run, recipe, { install: true })).rejects.toThrow(
       /installs to "nowhere".*it defines guide/s,
     )

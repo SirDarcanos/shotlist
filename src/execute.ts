@@ -2,9 +2,15 @@ import { join } from 'node:path'
 import { ShotlistError, fromRoot } from './config.js'
 import { check, skippedCheckResult } from './check.js'
 import type { CheckResult } from './check.js'
-import { captureCleanupFailures, shoot } from './capture.js'
+import { captureCleanupFailures, installDestinationFor, installOutput, shoot } from './capture.js'
 import type { Retry, ShotResult } from './capture.js'
-import { describeEnvironment, environmentDrift, readBaseline, writeBaseline } from './baseline.js'
+import {
+  baselineFile,
+  describeEnvironment,
+  environmentDrift,
+  readBaseline,
+  writeBaseline,
+} from './baseline.js'
 import type { Drift, Environment } from './baseline.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser } from './playwright.js'
@@ -31,7 +37,11 @@ interface RunRequestOptions {
 }
 
 /** One request to Capture through an authentic Run. */
-export type CaptureRequest = CaptureSelection & RunRequestOptions
+export type CaptureRequest = CaptureSelection &
+  RunRequestOptions & {
+    /** Install only after every selected Capture and required cleanup succeeds. */
+    readonly install?: boolean
+  }
 
 /** Select Recipes for Checking with the same guarantees as Capture selection. */
 export type CheckSelection = CaptureSelection
@@ -76,6 +86,47 @@ export interface UnattemptedCaptureResult {
 export type CaptureRecipeResult =
   CapturedRecipeResult | FailedCaptureResult | CancelledCaptureResult | UnattemptedCaptureResult
 
+/** The Installation outcome for exactly one selected Recipe. */
+export type CaptureInstallationResult =
+  | { readonly name: string; readonly status: 'not-requested' }
+  | { readonly name: string; readonly status: 'no-destination' }
+  | {
+      readonly name: string
+      readonly status: 'withheld'
+      readonly file?: string
+      readonly reason: string
+    }
+  | { readonly name: string; readonly status: 'installed'; readonly file: string }
+  | {
+      readonly name: string
+      readonly status: 'failed'
+      readonly file?: string
+      readonly error: unknown
+    }
+  | {
+      readonly name: string
+      readonly status: 'not-attempted'
+      readonly file?: string
+      readonly reason: string
+    }
+
+/** Whether this Capture request recorded its rendering environment. */
+export type CaptureBaselineResult =
+  | { readonly status: 'not-requested' }
+  | {
+      readonly status: 'not-recorded'
+      readonly reason:
+        'no-install-destination' | 'capture-withheld' | 'request-cancelled' | 'installation-failed'
+    }
+  | { readonly status: 'recorded'; readonly file: string }
+  | { readonly status: 'failed'; readonly file: string; readonly error: unknown }
+
+/** Deferred Installation and Baseline accounting for one Capture request. */
+export interface CaptureInstallationReport {
+  readonly results: readonly CaptureInstallationResult[]
+  readonly baseline: CaptureBaselineResult
+}
+
 /** A site, browser, or owned-resource failure outside one Recipe attempt. */
 export interface CaptureResourceFailure {
   readonly resource: 'site' | 'browser'
@@ -87,6 +138,7 @@ export interface CaptureResourceFailure {
 export interface CaptureReport {
   readonly results: readonly CaptureRecipeResult[]
   readonly failures: readonly CaptureResourceFailure[]
+  readonly installation: CaptureInstallationReport
   readonly operatorDestinations: readonly NetworkDestination[]
   readonly cancellation?: Readonly<{ reason: unknown }>
   readonly warnings?: readonly string[]
@@ -163,6 +215,22 @@ export type RunProgress =
       readonly index: number
       readonly total: number
       readonly result: CaptureRecipeResult | CheckRecipeResult
+    }
+  | {
+      readonly type: 'installation-start'
+      readonly operation: 'capture'
+      readonly name: string
+      readonly index: number
+      readonly total: number
+      readonly file?: string
+    }
+  | {
+      readonly type: 'installation-complete'
+      readonly operation: 'capture'
+      readonly name: string
+      readonly index: number
+      readonly total: number
+      readonly result: CaptureInstallationResult
     }
   | {
       readonly type: 'request-complete'
@@ -273,12 +341,48 @@ function freezeCaptureResult(result: CaptureRecipeResult): CaptureRecipeResult {
   return Object.freeze(result)
 }
 
+/** Freeze one Installation result before reports or observers publish it. */
+function freezeInstallationResult(result: CaptureInstallationResult): CaptureInstallationResult {
+  if (result.status === 'failed' && typeof result.error === 'object' && result.error !== null) {
+    Object.freeze(result.error)
+  }
+  return Object.freeze(result)
+}
+
+/** Freeze deferred Installation and Baseline accounting before publishing it. */
+function freezeInstallation(report: CaptureInstallationReport): CaptureInstallationReport {
+  for (const result of report.results) freezeInstallationResult(result)
+  if (
+    report.baseline.status === 'failed' &&
+    typeof report.baseline.error === 'object' &&
+    report.baseline.error !== null
+  ) {
+    Object.freeze(report.baseline.error)
+  }
+  Object.freeze(report.baseline)
+  return Object.freeze({ results: Object.freeze([...report.results]), baseline: report.baseline })
+}
+
+/** Report that Installation was not part of this Capture request. */
+function installationNotRequested(
+  results: readonly CaptureRecipeResult[],
+): CaptureInstallationReport {
+  return {
+    results: results.map(({ name }) => ({ name, status: 'not-requested' })),
+    baseline: { status: 'not-requested' },
+  }
+}
+
 /** Freeze one Run-level Capture report and every result record it owns. */
 function captureReport(
   run: Run,
   results: readonly CaptureRecipeResult[],
   failures: readonly CaptureResourceFailure[] = [],
-  facts: Readonly<{ cancellation?: unknown; warnings?: readonly string[] }> = {},
+  facts: Readonly<{
+    cancellation?: unknown
+    warnings?: readonly string[]
+    installation?: CaptureInstallationReport
+  }> = {},
 ): CaptureReport {
   for (const result of results) freezeCaptureResult(result)
   for (const failure of failures) {
@@ -290,9 +394,11 @@ function captureReport(
   )
   const cancellation =
     facts.cancellation === undefined ? undefined : Object.freeze({ reason: facts.cancellation })
+  const installation = freezeInstallation(facts.installation ?? installationNotRequested(results))
   return Object.freeze({
     results: Object.freeze([...results]),
     failures: Object.freeze([...failures]),
+    installation,
     operatorDestinations,
     ...(cancellation ? { cancellation } : {}),
     ...(facts.warnings?.length ? { warnings: Object.freeze([...facts.warnings]) } : {}),
@@ -383,23 +489,201 @@ function selectedRecipes(
   })
 }
 
+/** Account for an Installation request that Capture or cleanup prevented. */
+function withheldInstallation(
+  run: Run,
+  recipes: readonly DeepReadonly<Recipe>[],
+  reason: string,
+  cancelled: boolean,
+): CaptureInstallationReport {
+  let hasDestination = false
+  const results = recipes.map((recipe): CaptureInstallationResult => {
+    if (!recipe.install || recipe.install === 'none') {
+      return { name: recipe.name!, status: 'no-destination' }
+    }
+    hasDestination = true
+    let file: string | undefined
+    try {
+      file = installDestinationFor(run, recipe)
+    } catch {
+      // Capture or cleanup already failed. A malformed destination must not replace that
+      // primary outcome, and lint names the invalid Project reference independently.
+    }
+    return cancelled
+      ? {
+          name: recipe.name!,
+          status: 'not-attempted',
+          ...(file ? { file } : {}),
+          reason,
+        }
+      : { name: recipe.name!, status: 'withheld', ...(file ? { file } : {}), reason }
+  })
+  return {
+    results,
+    baseline: {
+      status: 'not-recorded',
+      reason: !hasDestination
+        ? 'no-install-destination'
+        : cancelled
+          ? 'request-cancelled'
+          : 'capture-withheld',
+    },
+  }
+}
+
+/** Install completed Output images sequentially, then record their Baseline. */
+async function performInstallation(
+  run: Run,
+  recipes: readonly DeepReadonly<Recipe>[],
+  captured: readonly CapturedRecipeResult[],
+  environment: Environment,
+  options: Readonly<{ signal?: AbortSignal; progress: ProgressEmitter }>,
+): Promise<Readonly<{ report: CaptureInstallationReport; cancellation?: RequestCancelledError }>> {
+  const results: CaptureInstallationResult[] = []
+  let cancellation = cancellationFrom(options.signal)
+  let stopped = false
+  let installed = 0
+
+  for (const [index, recipe] of recipes.entries()) {
+    if (!recipe.install || recipe.install === 'none') {
+      results.push({ name: recipe.name!, status: 'no-destination' })
+      continue
+    }
+
+    cancellation ??= cancellationFrom(options.signal)
+    if (cancellation || stopped) {
+      let file: string | undefined
+      try {
+        file = installDestinationFor(run, recipe)
+      } catch {
+        // This Installation is not attempted, so an invalid later destination does not
+        // replace the earlier failure that stopped the sequence.
+      }
+      results.push({
+        name: recipe.name!,
+        status: 'not-attempted',
+        ...(file ? { file } : {}),
+        reason: cancellation ? 'request was cancelled' : 'an earlier Installation failed',
+      })
+      continue
+    }
+
+    let file: string | undefined
+    let resolutionFailure: unknown
+    try {
+      file = installDestinationFor(run, recipe)
+    } catch (error) {
+      resolutionFailure = error
+    }
+    await options.progress.emit({
+      type: 'installation-start',
+      operation: 'capture',
+      name: recipe.name!,
+      index,
+      total: recipes.length,
+      ...(file ? { file } : {}),
+    })
+    cancellation = cancellationFrom(options.signal)
+    if (cancellation) {
+      const result = freezeInstallationResult({
+        name: recipe.name!,
+        status: 'not-attempted',
+        ...(file ? { file } : {}),
+        reason: 'request was cancelled',
+      })
+      results.push(result)
+      await options.progress.emit({
+        type: 'installation-complete',
+        operation: 'capture',
+        name: recipe.name!,
+        index,
+        total: recipes.length,
+        result,
+      })
+      continue
+    }
+
+    const capturedRecipe = captured[index]!
+    let result: CaptureInstallationResult
+    try {
+      if (resolutionFailure) throw resolutionFailure
+      installOutput(run, recipe, capturedRecipe.shot.file)
+      result = { name: recipe.name!, status: 'installed', file: file! }
+      installed++
+    } catch (error) {
+      if (isUnexpectedDefect(error)) throw error
+      result = {
+        name: recipe.name!,
+        status: 'failed',
+        ...(file ? { file } : {}),
+        error,
+      }
+      stopped = true
+    }
+    freezeInstallationResult(result)
+    results.push(result)
+    await options.progress.emit({
+      type: 'installation-complete',
+      operation: 'capture',
+      name: recipe.name!,
+      index,
+      total: recipes.length,
+      result,
+    })
+  }
+
+  cancellation ??= cancellationFrom(options.signal)
+  let baseline: CaptureBaselineResult
+  if (cancellation) {
+    baseline = { status: 'not-recorded', reason: 'request-cancelled' }
+  } else if (stopped) {
+    baseline = { status: 'not-recorded', reason: 'installation-failed' }
+  } else if (!installed) {
+    baseline = { status: 'not-recorded', reason: 'no-install-destination' }
+  } else {
+    const file = baselineFile(run)
+    try {
+      writeBaseline(run, environment)
+      baseline = { status: 'recorded', file }
+    } catch (error) {
+      if (isUnexpectedDefect(error)) throw error
+      baseline = { status: 'failed', file, error }
+    }
+  }
+
+  return { report: { results, baseline }, ...(cancellation ? { cancellation } : {}) }
+}
+
 /** Capture one validated selection through request-owned site and browser lifetimes. */
 async function performCaptureRequest(
   run: Run,
   recipes: readonly DeepReadonly<Recipe>[],
   options: Readonly<{
     keepGoing?: boolean
+    install?: boolean
     signal?: AbortSignal
     progress: ProgressEmitter
   }>,
 ): Promise<CaptureReport> {
-  if (!recipes.length) return captureReport(run, [])
+  if (!recipes.length) {
+    return captureReport(run, [], [], {
+      ...(options.install
+        ? {
+            installation: {
+              results: [],
+              baseline: { status: 'not-recorded', reason: 'no-install-destination' },
+            },
+          }
+        : {}),
+    })
+  }
 
   const results: CaptureRecipeResult[] = []
   const failures: CaptureResourceFailure[] = []
   let cancellation = cancellationFrom(options.signal)
   let server: Awaited<ReturnType<typeof startServer>> = null
   let browser: Browser | undefined
+  let environment: Environment | undefined
 
   if (cancellation) {
     return captureReport(
@@ -410,7 +694,14 @@ async function performCaptureRequest(
         reason: 'request was cancelled',
       })),
       failures,
-      { cancellation: cancellation.reason },
+      {
+        cancellation: cancellation.reason,
+        ...(options.install
+          ? {
+              installation: withheldInstallation(run, recipes, 'request was cancelled', true),
+            }
+          : {}),
+      },
     )
   }
 
@@ -428,7 +719,14 @@ async function performCaptureRequest(
             reason: 'request was cancelled',
           })),
           failures,
-          { cancellation: cancellation.reason },
+          {
+            cancellation: cancellation.reason,
+            ...(options.install
+              ? {
+                  installation: withheldInstallation(run, recipes, 'request was cancelled', true),
+                }
+              : {}),
+          },
         )
       }
       if (isUnexpectedDefect(error)) throw error
@@ -441,6 +739,11 @@ async function performCaptureRequest(
           reason: 'site startup failed',
         })),
         failures,
+        options.install
+          ? {
+              installation: withheldInstallation(run, recipes, 'site startup failed', false),
+            }
+          : {},
       )
     }
   }
@@ -450,6 +753,7 @@ async function performCaptureRequest(
     if (!cancellation) {
       try {
         browser = await loadPlaywright().chromium.launch()
+        environment = describeEnvironment(browser)
       } catch (error) {
         if (isUnexpectedDefect(error)) throw error
         failures.push({ resource: 'browser', stage: 'startup', error })
@@ -570,8 +874,36 @@ async function performCaptureRequest(
       failures.push({ resource: 'site', stage: 'cleanup', error })
     }
   }
+  cancellation ??= cancellationFrom(options.signal)
+  let installation: CaptureInstallationReport | undefined
+  if (options.install) {
+    const complete =
+      !cancellation &&
+      !failures.length &&
+      results.length === recipes.length &&
+      results.every((result) => result.status === 'captured')
+    if (complete) {
+      const installed = await performInstallation(
+        run,
+        recipes,
+        results as readonly CapturedRecipeResult[],
+        environment!,
+        options,
+      )
+      installation = installed.report
+      cancellation = installed.cancellation
+    } else {
+      installation = withheldInstallation(
+        run,
+        recipes,
+        cancellation ? 'request was cancelled' : 'Capture or required cleanup failed',
+        Boolean(cancellation),
+      )
+    }
+  }
   return captureReport(run, results, failures, {
     ...(cancellation ? { cancellation: cancellation.reason } : {}),
+    ...(installation ? { installation } : {}),
   })
 }
 
@@ -579,9 +911,14 @@ async function performCaptureRequest(
 export async function captureRun(run: Run, request: CaptureRequest): Promise<CaptureReport> {
   assertRun(run)
   const { recipes, keepGoing, signal, onProgress } = selectedRecipes(run, request, 'Capture')
+  const install = request.install
+  if (install !== undefined && typeof install !== 'boolean') {
+    throw new ShotlistError('Capture request `install` must be a boolean')
+  }
   const progress = progressEmitter(onProgress)
   const options = Object.freeze({
     ...(keepGoing !== undefined ? { keepGoing } : {}),
+    ...(install !== undefined ? { install } : {}),
     ...(signal !== undefined ? { signal } : {}),
     progress,
   })
@@ -603,6 +940,7 @@ export async function captureRun(run: Run, request: CaptureRequest): Promise<Cap
     })
     return captureReport(run, report.results, report.failures, {
       ...(report.cancellation ? { cancellation: report.cancellation.reason } : {}),
+      installation: report.installation,
       warnings: progress.warnings,
     })
   } finally {

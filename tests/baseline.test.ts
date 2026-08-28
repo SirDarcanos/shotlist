@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -55,10 +55,12 @@ describe('the recorded baseline', () => {
     const run = openRun({ untrusted: true }, config)
     const environment: Environment = { chromium: '141.0.0.0', platform: 'darwin' }
 
+    writeBaseline(run, { platform: 'linux' })
     writeBaseline(run, environment)
 
     expect(readBaseline(run)).toEqual(environment)
     expect(readFileSync(join(loaded.root, BASELINE_FILE), 'utf8')).toContain('141.0.0.0')
+    expect(readdirSync(loaded.root).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
 
   it('refuses to read a Baseline through a path outside an untrusted Run', () => {

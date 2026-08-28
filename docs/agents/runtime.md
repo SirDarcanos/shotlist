@@ -19,7 +19,10 @@ when an actionable Application Recipe remains. A Run of only skipped Recipes sta
 the site nor Chromium. Run execution launches one Chromium browser for the remaining
 Capture or Checking work, closes it before returning, and keeps Recipes sequential. Both
 reports account for every selected Recipe and retain request-level startup and cleanup
-failures separately from Recipe results. Checking reports keep completed findings,
+failures separately from Recipe results. Run-level Capture writes every Output image and
+closes owned resources before requested Installation begins. It safely replaces Committed
+images in Recipe order, stops after the first replacement failure, and records the Baseline
+only after every requested replacement succeeds. Checking reports keep completed findings,
 environment drift, Ignore-region counts, and optional diff-image paths.
 
 `src/library.ts` owns policy-aware Library discovery, reading, parsing, and publication.

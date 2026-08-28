@@ -55,6 +55,9 @@ export type { DeepReadonly, OperatorAuthority, Project, ProjectLibrary, Run } fr
 export type {
   CancelledCaptureResult,
   CancelledCheckResult,
+  CaptureBaselineResult,
+  CaptureInstallationReport,
+  CaptureInstallationResult,
   CaptureRecipeResult,
   CaptureReport,
   CaptureRequest,

@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -36,6 +37,9 @@ describe('Run execution', () => {
       run.capture({ recipes: ['modal', 'missing', 'modal', 'also-missing'] }),
     ).rejects.toThrow(/duplicate.*modal.*unknown.*also-missing.*missing/i)
     await expect(run.capture({ recipes: [] })).rejects.toThrow(/at least one Recipe/)
+    await expect(run.capture({ recipes: ['modal'], install: 'yes' } as never)).rejects.toThrow(
+      /install.*boolean/i,
+    )
     await expect(run.capture({ all: true, recipes: ['modal'] } as never)).rejects.toThrow(
       /either.*recipes.*all/i,
     )
@@ -67,6 +71,13 @@ describe('Run execution', () => {
 
     expect(named.results.map(({ name }) => name)).toEqual(['volatile', 'modal'])
     expect(named.results.map(({ status }) => status)).toEqual(['captured', 'captured'])
+    expect(named.installation).toEqual({
+      results: [
+        { name: 'volatile', status: 'not-requested' },
+        { name: 'modal', status: 'not-requested' },
+      ],
+      baseline: { status: 'not-requested' },
+    })
     expect(all.results.map(({ name }) => name)).toEqual([
       'annotated',
       'modal',
@@ -75,6 +86,249 @@ describe('Run execution', () => {
     ])
     expect(Object.isFrozen(named)).toBe(true)
     expect(Object.isFrozen(named.results)).toBe(true)
+  }, 30_000)
+
+  it('installs captured Recipes in order after Capture completes and records the Baseline', async () => {
+    const root = tempProject()
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const events: string[] = []
+
+    const report = await run.capture({
+      recipes: ['order-row', 'annotated'],
+      install: true,
+      onProgress: (progress) =>
+        events.push(`${progress.type}:${'name' in progress ? progress.name : ''}`),
+    })
+
+    expect(report.results).toMatchObject([
+      { name: 'order-row', status: 'captured' },
+      { name: 'annotated', status: 'captured' },
+    ])
+    expect(report.installation.results).toEqual([
+      {
+        name: 'order-row',
+        status: 'installed',
+        file: join(root, 'installed', 'order-row.png'),
+      },
+      {
+        name: 'annotated',
+        status: 'installed',
+        file: join(root, 'installed', 'annotated.png'),
+      },
+    ])
+    expect(report.installation.baseline).toEqual({
+      status: 'recorded',
+      file: join(root, 'shotlist.baseline.json'),
+    })
+    expect(existsSync(join(root, 'installed', 'order-row.png'))).toBe(true)
+    expect(existsSync(join(root, 'installed', 'annotated.png'))).toBe(true)
+    expect(Object.isFrozen(report.installation)).toBe(true)
+    expect(Object.isFrozen(report.installation.results)).toBe(true)
+    expect(Object.isFrozen(report.installation.results[0])).toBe(true)
+    expect(Object.isFrozen(report.installation.baseline)).toBe(true)
+    expect(events).toEqual([
+      'request-start:',
+      'recipe-start:order-row',
+      'recipe-complete:order-row',
+      'recipe-start:annotated',
+      'recipe-complete:annotated',
+      'installation-start:order-row',
+      'installation-complete:order-row',
+      'installation-start:annotated',
+      'installation-complete:annotated',
+      'request-complete:',
+    ])
+  }, 30_000)
+
+  it('withholds every Installation when a selected Capture fails', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes', 'z-broken.yaml'),
+      'install: nowhere\nsetup:\n  - click: { css: .never-there }\n',
+    )
+    mkdirSync(join(root, 'installed'))
+    const committed = join(root, 'installed', 'order-row.png')
+    writeFileSync(committed, 'previous committed image')
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    writeBaseline(run, { platform: 'previous-platform' })
+    const baseline = readFileSync(join(root, 'shotlist.baseline.json'), 'utf8')
+
+    const report = await run.capture({
+      recipes: ['order-row', 'z-broken'],
+      install: true,
+      keepGoing: true,
+    })
+
+    expect(report.results).toMatchObject([
+      { name: 'order-row', status: 'captured' },
+      { name: 'z-broken', status: 'failed' },
+    ])
+    expect(report.installation).toMatchObject({
+      results: [
+        { name: 'order-row', status: 'withheld', file: committed },
+        { name: 'z-broken', status: 'withheld' },
+      ],
+      baseline: { status: 'not-recorded', reason: 'capture-withheld' },
+    })
+    expect(readFileSync(committed, 'utf8')).toBe('previous committed image')
+    expect(readFileSync(join(root, 'shotlist.baseline.json'), 'utf8')).toBe(baseline)
+    expect(existsSync(join(root, 'out', 'order-row.png'))).toBe(true)
+  }, 30_000)
+
+  it('stops after a failed safe replacement and preserves later Committed images', async () => {
+    const root = tempProject()
+    for (const name of ['first', 'second', 'third']) {
+      writeFileSync(
+        join(root, 'recipes', `${name}.yaml`),
+        `name: ${name}\nsource: file\nfile: incoming/invoice.png\ninstall: guide\n`,
+      )
+    }
+    mkdirSync(join(root, 'installed'))
+    writeFileSync(join(root, 'installed', 'second.png'), 'previous second image')
+    writeFileSync(join(root, 'installed', 'third.png'), 'previous third image')
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+
+    const report = await run.capture({
+      recipes: ['first', 'second', 'third'],
+      install: true,
+      onProgress: (progress) => {
+        if (progress.type === 'installation-start' && progress.name === 'second') {
+          unlinkSync(join(root, 'out', 'second.png'))
+        }
+      },
+    })
+
+    expect(report.installation).toMatchObject({
+      results: [
+        { name: 'first', status: 'installed' },
+        { name: 'second', status: 'failed', error: expect.anything() },
+        { name: 'third', status: 'not-attempted' },
+      ],
+      baseline: { status: 'not-recorded', reason: 'installation-failed' },
+    })
+    expect(readFileSync(join(root, 'installed', 'second.png'), 'utf8')).toBe(
+      'previous second image',
+    )
+    expect(readFileSync(join(root, 'installed', 'third.png'), 'utf8')).toBe('previous third image')
+    expect(readdirSync(join(root, 'installed')).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    expect(existsSync(join(root, 'shotlist.baseline.json'))).toBe(false)
+  }, 30_000)
+
+  it('reports an invalid Install destination without losing completed Captures', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes', 'bad-install.yaml'),
+      'name: bad-install\nsource: file\nfile: incoming/invoice.png\ninstall: nowhere\n',
+    )
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+
+    const report = await run.capture({
+      recipes: ['bad-install', 'annotated'],
+      install: true,
+    })
+
+    expect(report.results).toMatchObject([
+      { name: 'bad-install', status: 'captured' },
+      { name: 'annotated', status: 'captured' },
+    ])
+    expect(report.installation).toMatchObject({
+      results: [
+        { name: 'bad-install', status: 'failed', error: expect.anything() },
+        { name: 'annotated', status: 'not-attempted' },
+      ],
+      baseline: { status: 'not-recorded', reason: 'installation-failed' },
+    })
+    expect(existsSync(join(root, 'out', 'bad-install.png'))).toBe(true)
+    expect(existsSync(join(root, 'installed', 'annotated.png'))).toBe(false)
+  }, 30_000)
+
+  it('reports a Recipe with no Install destination without recording a Baseline', async () => {
+    const root = tempProject()
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+
+    const report = await run.capture({ recipes: ['modal'], install: true })
+
+    expect(report.installation).toEqual({
+      results: [{ name: 'modal', status: 'no-destination' }],
+      baseline: { status: 'not-recorded', reason: 'no-install-destination' },
+    })
+    expect(existsSync(join(root, 'out', 'modal.png'))).toBe(true)
+    expect(existsSync(join(root, 'shotlist.baseline.json'))).toBe(false)
+  }, 30_000)
+
+  it('withholds Installation when cancellation follows the final Capture', async () => {
+    const root = tempProject()
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const controller = new AbortController()
+
+    const report = await run.capture({
+      recipes: ['annotated'],
+      install: true,
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (progress.type === 'recipe-complete') controller.abort('stop before installing')
+      },
+    })
+
+    expect(report.results).toMatchObject([{ name: 'annotated', status: 'captured' }])
+    expect(report.installation).toMatchObject({
+      results: [{ name: 'annotated', status: 'not-attempted' }],
+      baseline: { status: 'not-recorded', reason: 'request-cancelled' },
+    })
+    expect(report.cancellation).toEqual({ reason: 'stop before installing' })
+    expect(existsSync(join(root, 'out', 'annotated.png'))).toBe(true)
+    expect(existsSync(join(root, 'installed', 'annotated.png'))).toBe(false)
+  }, 30_000)
+
+  it('cancels during Installation without claiming rollback of completed replacements', async () => {
+    const root = tempProject()
+    for (const name of ['first', 'second']) {
+      writeFileSync(
+        join(root, 'recipes', `${name}.yaml`),
+        `name: ${name}\nsource: file\nfile: incoming/invoice.png\ninstall: guide\n`,
+      )
+    }
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const controller = new AbortController()
+
+    const report = await run.capture({
+      recipes: ['first', 'second'],
+      install: true,
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (progress.type === 'installation-complete' && progress.name === 'first') {
+          controller.abort('stop installing')
+        }
+      },
+    })
+
+    expect(report.installation).toMatchObject({
+      results: [
+        { name: 'first', status: 'installed' },
+        { name: 'second', status: 'not-attempted', reason: 'request was cancelled' },
+      ],
+      baseline: { status: 'not-recorded', reason: 'request-cancelled' },
+    })
+    expect(report.cancellation).toEqual({ reason: 'stop installing' })
+    expect(existsSync(join(root, 'installed', 'first.png'))).toBe(true)
+    expect(existsSync(join(root, 'installed', 'second.png'))).toBe(false)
+    expect(existsSync(join(root, 'shotlist.baseline.json'))).toBe(false)
+  }, 30_000)
+
+  it('reports a Baseline write failure without rolling back installed images', async () => {
+    const root = tempProject()
+    mkdirSync(join(root, 'shotlist.baseline.json'))
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+
+    const report = await run.capture({ recipes: ['annotated'], install: true })
+
+    expect(report.installation.results).toMatchObject([{ name: 'annotated', status: 'installed' }])
+    expect(report.installation.baseline).toMatchObject({
+      status: 'failed',
+      file: join(root, 'shotlist.baseline.json'),
+      error: expect.anything(),
+    })
+    expect(existsSync(join(root, 'installed', 'annotated.png'))).toBe(true)
   }, 30_000)
 
   it('returns an empty report for all Recipes in an empty Library without resources', async () => {
@@ -96,6 +350,7 @@ describe('Run execution', () => {
     await expect(run.capture({ all: true })).resolves.toEqual({
       results: [],
       failures: [],
+      installation: { results: [], baseline: { status: 'not-requested' } },
       operatorDestinations: [],
     })
     expect(existsSync(join(root, 'out', 'modal.png'))).toBe(false)
@@ -140,11 +395,11 @@ describe('Run execution', () => {
     const root = tempProject()
     writeFileSync(
       join(root, 'recipes', 'double-failure.yaml'),
-      'setup:\n  - click: { css: .missing-setup }\nteardown:\n  - click: { css: .missing-teardown }\n',
+      'install: guide\nsetup:\n  - click: { css: .missing-setup }\nteardown:\n  - click: { css: .missing-teardown }\n',
     )
     const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
 
-    const report = await run.capture({ recipes: ['double-failure'] })
+    const report = await run.capture({ recipes: ['double-failure'], install: true })
     const result = report.results[0]!
 
     expect(result.status).toBe('failed')
@@ -152,19 +407,30 @@ describe('Run execution', () => {
       expect(result.error).toMatchObject({ message: expect.stringMatching(/setup/) })
       expect(result.cleanupFailures).toMatchObject([{ message: expect.stringMatching(/teardown/) }])
     }
+    expect(report.installation).toMatchObject({
+      results: [{ name: 'double-failure', status: 'withheld' }],
+      baseline: { status: 'not-recorded', reason: 'capture-withheld' },
+    })
   }, 30_000)
 
   it('returns a site startup failure with every Recipe not attempted', async () => {
     const root = tempProject()
     const run = openRun({ untrusted: false }, refuseSiteStartup(root))
 
-    const report = await run.capture({ recipes: ['modal', 'volatile'] })
+    const report = await run.capture({ recipes: ['modal', 'volatile'], install: true })
 
     expect(report.results).toMatchObject([
       { name: 'modal', status: 'not-attempted' },
       { name: 'volatile', status: 'not-attempted' },
     ])
     expect(report.failures).toMatchObject([{ resource: 'site' }])
+    expect(report.installation).toMatchObject({
+      results: [
+        { name: 'modal', status: 'no-destination' },
+        { name: 'volatile', status: 'withheld' },
+      ],
+      baseline: { status: 'not-recorded', reason: 'capture-withheld' },
+    })
     expect(existsSync(join(root, 'out', 'modal.png'))).toBe(false)
   })
 
@@ -313,6 +579,7 @@ describe('Run execution', () => {
 
     const captured = await run.capture({
       recipes: ['modal', 'volatile'],
+      install: true,
       signal: controller.signal,
     })
     expect(captured.results).toMatchObject([
@@ -320,6 +587,13 @@ describe('Run execution', () => {
       { name: 'volatile', status: 'not-attempted', reason: 'request was cancelled' },
     ])
     expect(captured.failures).toEqual([])
+    expect(captured.installation).toMatchObject({
+      results: [
+        { name: 'modal', status: 'no-destination' },
+        { name: 'volatile', status: 'not-attempted' },
+      ],
+      baseline: { status: 'not-recorded', reason: 'request-cancelled' },
+    })
     expect(captured.cancellation?.reason).toBe(controller.signal.reason)
 
     const checked = await run.check({
@@ -338,7 +612,7 @@ describe('Run execution', () => {
     const root = tempProject()
     writeFileSync(
       join(root, 'recipes', 'slow.yaml'),
-      'retries: 2\nsetup:\n  - wait: 10000\nteardown:\n  - click: { css: .missing-teardown }\n',
+      'install: guide\nretries: 2\nsetup:\n  - wait: 10000\nteardown:\n  - click: { css: .missing-teardown }\n',
     )
     const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
     const controller = new AbortController()
@@ -346,6 +620,7 @@ describe('Run execution', () => {
 
     const report = await run.capture({
       recipes: ['slow', 'modal'],
+      install: true,
       signal: controller.signal,
       onProgress: (progress) => {
         if (progress.type === 'recipe-start') {
@@ -364,6 +639,13 @@ describe('Run execution', () => {
       },
       { name: 'modal', status: 'not-attempted', reason: 'request was cancelled' },
     ])
+    expect(report.installation).toMatchObject({
+      results: [
+        { name: 'slow', status: 'not-attempted' },
+        { name: 'modal', status: 'no-destination' },
+      ],
+      baseline: { status: 'not-recorded', reason: 'request-cancelled' },
+    })
     expect(report.cancellation).toEqual({ reason: 'caller stopped' })
     expect(retries).toBe(0)
     await expect(run.capture({ recipes: ['modal'] })).resolves.toMatchObject({

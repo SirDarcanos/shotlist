@@ -13,6 +13,12 @@ recipe authors what to edit. See
 
 ### Added
 
+- **Deferred Installation for Run-level Capture.** `run.capture({ install: true })` writes
+  every selected Output image and completes required cleanup before replacing any Committed
+  image. Replacements use complete temporary siblings, stop after the first failure, and
+  report installed, withheld, failed, and unattempted destinations without implying
+  rollback. The Baseline is recorded only after every requested replacement succeeds.
+
 - **Request cancellation and ordered progress** for Run-level Capture and Checking.
   TypeScript callers pass an `AbortSignal` to stop active browser work while retaining
   teardown and resource-cleanup outcomes, or an awaited `onProgress` observer for request,

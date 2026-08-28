@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ShotlistError } from './config.js'
 import type { Browser } from './playwright.js'
 import { authorizePath } from './trust.js'
 import { assertRun } from './run.js'
 import type { Run } from './run.js'
+import { replaceFileWith } from './replace-file.js'
 
 /**
  * What the committed images were taken with.
@@ -61,7 +62,12 @@ function baselineTarget(run: Run): string {
 /** Record what this Run was taken with, beside the config. */
 export function writeBaseline(run: Run, environment: Environment): void {
   assertRun(run)
-  writeFileSync(baselineTarget(run), `${JSON.stringify(environment, null, 2)}\n`)
+  replaceFileWith(
+    run,
+    baselineFile(run),
+    `${JSON.stringify(environment, null, 2)}\n`,
+    BASELINE_FILE,
+  )
 }
 
 /** Read the record, or null when a Project has never installed anything. */

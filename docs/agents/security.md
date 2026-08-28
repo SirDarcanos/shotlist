@@ -10,6 +10,11 @@ Route every filesystem source and destination through `authorizePath`, then perf
 
 `src/library.ts` owns policy-aware Library discovery. It authorizes every configured directory before enumeration and every discovered document before reading any document. Authorized targets stay inside the module; diagnostics retain authored paths, including paths that name symlinks.
 
+Committed images and the Baseline are replaced through temporary siblings. Authorize the
+source, destination, and exact generated sibling at effect time, perform every filesystem
+effect on those canonical targets, and rename only after the sibling is complete. A failed
+replacement removes the sibling rather than unlinking the prior committed file.
+
 `src/network-policy.ts` owns Network destination parsing, approval merging, exact matching, sanitization, and bounded violation collection. A bare host means HTTPS port 443. HTTP and unusual ports require a full destination. A wildcard covers proper subdomains only. URL usernames and passwords are forbidden.
 
 `src/network-playwright.ts` installs context routing before the first page, blocks service workers, and intercepts WebSockets separately. Check its latched violations before capturing pixels and before writing the Output image. `src/network-node.ts` disables automatic redirects and authorizes each readiness hop before sending it. Policy failures bypass `optional` Steps and Recipe retries.
