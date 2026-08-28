@@ -5,14 +5,18 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { resolve } from 'node:path'
 import { ShotlistError, fromRoot } from './config.js'
-import type { Recipe } from './recipe.js'
-import type { Retry } from './capture.js'
-import { executeCaptureRun, executeCheckRun } from './execute.js'
+import type {
+  CaptureReport,
+  CaptureRequest,
+  CheckReport,
+  CheckRequest,
+  RunProgress,
+} from './execute.js'
 import { scaffold } from './init.js'
 import { formatProblems, reviewProject } from './lint.js'
 import { signIn } from './session.js'
 import { openRun } from './run.js'
-import type { DeepReadonly, OperatorAuthority, ProjectLibrary } from './run.js'
+import type { OperatorAuthority } from './run.js'
 import type { NetworkDestination } from './network-policy.js'
 import { BASELINE_FILE } from './baseline.js'
 import { parseWorkLimitChanges } from './work-limit.js'
@@ -70,26 +74,6 @@ const CONSOLE: Io = {
     }),
 }
 
-/** The Recipes named on the command line, or all of them, refusing an unknown name. */
-function pick(
-  library: ProjectLibrary,
-  names: readonly string[],
-  all: boolean,
-): DeepReadonly<Recipe>[] {
-  const chosen = all || names.length === 0 ? [...library.recipes.keys()] : names
-  return chosen.map((name) => {
-    const recipe = library.recipes.get(name)
-    if (!recipe) {
-      const known = [...library.recipes.keys()].sort()
-      throw new ShotlistError(
-        `unknown recipe "${name}"` +
-          (known.length ? ` — this project has ${known.join(', ')}` : ''),
-      )
-    }
-    return recipe
-  })
-}
-
 /** Render canonical Operator approvals without URL paths or other request data. */
 function destinationList(destinations: readonly NetworkDestination[]): string {
   if (!destinations.length) return 'none'
@@ -102,6 +86,150 @@ function destinationList(destinations: readonly NetworkDestination[]): string {
       return `${destination.protocol}//${host}${standard ? '' : `:${destination.port}`}`
     })
     .join(', ')
+}
+
+/** Turn an unknown report failure into one line for a terminal. */
+function failureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** Render retry progress while the Run remains active. */
+function renderProgress(progress: RunProgress, say: (line: string) => void): void {
+  if (progress.type === 'recipe-start') {
+    say(`  … ${progress.name}`)
+  } else if (progress.type === 'retry') {
+    say(
+      `  ↻ ${progress.name} — attempt ${progress.attempt} of ${progress.of} failed: ` +
+        progress.why.replace(`recipe "${progress.name}": `, ''),
+    )
+  } else if (progress.type === 'installation-start') {
+    say(`  … installing ${progress.name}`)
+  }
+}
+
+/** Render one complete Capture report and return whether execution failed. */
+function renderCaptureReport(
+  report: CaptureReport,
+  say: (line: string) => void,
+  complain: (line: string) => void,
+): boolean {
+  for (const result of report.results) {
+    if (result.status === 'captured') {
+      say(`  ✓ ${result.name} → ${result.shot.file}`)
+      for (const warning of result.shot.warnings ?? []) say(`    ! ${warning}`)
+    } else if (result.status === 'failed') {
+      complain(`  ✗ ${result.name} — ${failureMessage(result.error)}`)
+      for (const failure of result.cleanupFailures ?? []) {
+        complain(`    cleanup also failed: ${failureMessage(failure)}`)
+      }
+    } else if (result.status === 'cancelled') {
+      complain(`  ✗ ${result.name} — cancelled: ${failureMessage(result.reason)}`)
+      for (const failure of result.cleanupFailures ?? []) {
+        complain(`    cleanup also failed: ${failureMessage(failure)}`)
+      }
+    } else {
+      complain(`  - ${result.name} — not attempted: ${result.reason}`)
+    }
+  }
+
+  for (const failure of report.failures) {
+    complain(`  ✗ ${failure.resource} ${failure.stage} failed: ${failureMessage(failure.error)}`)
+  }
+
+  for (const result of report.installation.results) {
+    if (result.status === 'installed') {
+      say(`    installed ${result.file}`)
+    } else if (result.status === 'withheld') {
+      complain(`    ! installation withheld for ${result.name} — ${result.reason}`)
+    } else if (result.status === 'failed') {
+      complain(`    ✗ installation failed for ${result.name}: ${failureMessage(result.error)}`)
+    } else if (result.status === 'not-attempted') {
+      complain(`    - installation not attempted for ${result.name} — ${result.reason}`)
+    }
+  }
+
+  if (report.installation.baseline.status === 'recorded') {
+    say(`  recorded this machine in ${BASELINE_FILE}`)
+  } else if (report.installation.baseline.status === 'failed') {
+    complain(
+      `  ✗ Baseline could not be recorded: ${failureMessage(report.installation.baseline.error)}`,
+    )
+  }
+  for (const warning of report.warnings ?? []) complain(`  ! ${warning}`)
+
+  return (
+    report.results.some((result) => result.status !== 'captured') ||
+    report.failures.length > 0 ||
+    report.installation.results.some(
+      (result) =>
+        result.status === 'withheld' ||
+        result.status === 'failed' ||
+        result.status === 'not-attempted',
+    ) ||
+    report.installation.baseline.status === 'failed'
+  )
+}
+
+/** Note the regions a result did not cover, so a pass is not read as covering them. */
+function notCompared(result: { ignored?: number }): string {
+  return result.ignored
+    ? `  (${result.ignored} region${result.ignored === 1 ? '' : 's'} not compared)`
+    : ''
+}
+
+/** Render one complete Checking report and return its attention count. */
+function renderCheckReport(report: CheckReport, say: (line: string) => void): number {
+  if (report.drift.length) {
+    say('! this is not the machine the committed images were taken on:')
+    for (const { field, was, now } of report.drift) say(`    ${field}: ${was} → ${now}`)
+    say('  Differences below may be that, rather than the site.')
+  }
+
+  let attention = 0
+  for (const result of report.results) {
+    if (result.status === 'same') {
+      say(`  same     ${result.name}${notCompared(result)}`)
+    } else if (result.status === 'changed') {
+      attention++
+      const why = result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
+      say(`  CHANGED  ${result.name} — ${why}${notCompared(result)}`)
+      say(`           committed: ${result.against}`)
+      say(`           re-shot:   ${result.shot}`)
+      if (result.diff) say(`           diff:      ${result.diff}`)
+    } else if (result.status === 'new') {
+      attention++
+      say(`  NEW      ${result.name} — nothing committed at ${result.against}`)
+    } else if (result.status === 'skipped') {
+      say(`  skipped  ${result.name} — ${result.reason}`)
+    } else if (result.status === 'failed') {
+      attention++
+      say(`  FAILED   ${result.name} — ${failureMessage(result.error)}`)
+      for (const failure of result.cleanupFailures ?? []) {
+        say(`           cleanup also failed: ${failureMessage(failure)}`)
+      }
+    } else if (result.status === 'cancelled') {
+      attention++
+      say(`  FAILED   ${result.name} — cancelled: ${failureMessage(result.reason)}`)
+      for (const failure of result.cleanupFailures ?? []) {
+        say(`           cleanup also failed: ${failureMessage(failure)}`)
+      }
+    } else {
+      attention++
+      say(`  FAILED   ${result.name} — not attempted: ${result.reason}`)
+    }
+  }
+  for (const failure of report.failures) {
+    say(`  FAILED   ${failure.resource} ${failure.stage} — ${failureMessage(failure.error)}`)
+  }
+  for (const warning of report.warnings ?? []) say(`  ! ${warning}`)
+  say(
+    attention
+      ? `${attention} of ${report.results.length} need attention`
+      : report.failures.length
+        ? `checking failed with ${report.failures.length} Run-level failure${report.failures.length === 1 ? '' : 's'}`
+        : 'every screenshot is current',
+  )
+  return attention
 }
 
 /** Run the command line, returning the exit code rather than exiting. */
@@ -153,6 +281,10 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
 
   if (values.json && !values.check) {
     io.err('--json reports a --check run, and there is nothing else for it to report')
+    return 1
+  }
+  if (values.json && (values.init || values.lint || values.login !== undefined)) {
+    io.err('--json cannot report --init, --lint, or --login')
     return 1
   }
   if (values.using !== undefined && values.login === undefined) {
@@ -221,106 +353,53 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
       return 0
     }
 
-    const recipes = pick(library, positionals, values.all)
+    const selection =
+      values.all || (values.check && positionals.length === 0)
+        ? ({ all: true } as const)
+        : ({ recipes: positionals } as const)
     const keepGoing = values['keep-going']
-
-    /** Note the regions a result did not cover, so a pass is not read as covering them. */
-    const notCompared = (result: { ignored?: number }) =>
-      result.ignored
-        ? `  (${result.ignored} region${result.ignored === 1 ? '' : 's'} not compared)`
-        : ''
-
-    /** Say an attempt failed while it is happening, so a retrying run is not silent. */
-    const onRetry = (retry: Retry) =>
-      io.out(
-        `  ↻ ${retry.name} — attempt ${retry.attempt} of ${retry.of} failed: ` +
-          // The line already names the recipe, so the message repeating it says nothing.
-          retry.why.replace(`recipe "${retry.name}": `, ''),
-      )
 
     if (values.check) {
       // With `--json` the report is stdout, so everything written for a person moves
       // aside — `shotlist --check --json > report.json` has to leave a usable file.
       const say = values.json ? io.err : io.out
       say(`Operator Network destinations: ${destinationList(shotRun.operatorDestinations)}`)
-      const { results, drift } = await executeCheckRun(shotRun, recipes, {
+      const request: CheckRequest = {
+        ...selection,
         keepGoing,
-        onRetry,
         diff: values.diff,
-      })
-      // Said before the results, so they are read in the light of it: a different
-      // Chromium rasterizes text differently, and that is not the site changing.
-      if (drift.length) {
-        say('! this is not the machine the committed images were taken on:')
-        for (const { field, was, now } of drift) say(`    ${field}: ${was} → ${now}`)
-        say('  Differences below may be that, rather than the site.')
+        onProgress: (progress) => renderProgress(progress, say),
       }
-      let changed = 0
-      for (const result of results) {
-        if (result.status === 'same') {
-          say(`  same     ${result.name}${notCompared(result)}`)
-        } else if (result.status === 'changed') {
-          changed++
-          const why = result.reason ?? `${(100 * (result.ratio ?? 0)).toFixed(2)}% of pixels differ`
-          say(`  CHANGED  ${result.name} — ${why}${notCompared(result)}`)
-          say(`           committed: ${result.against}`)
-          say(`           re-shot:   ${result.shot}`)
-          if (result.diff) say(`           diff:      ${result.diff}`)
-        } else if (result.status === 'new') {
-          changed++
-          say(`  NEW      ${result.name} — nothing committed at ${result.against}`)
-        } else if (result.status === 'failed') {
-          changed++
-          say(`  FAILED   ${result.name} — ${result.reason}`)
-        } else {
-          say(`  skipped  ${result.name} — ${result.reason}`)
-        }
-      }
-      say(
-        changed ? `${changed} of ${results.length} need attention` : 'every screenshot is current',
-      )
+      const report = await shotRun.check(request)
+      const changed = renderCheckReport(report, say)
       if (values.json) {
         io.out(
           JSON.stringify(
-            {
-              changed,
-              total: results.length,
-              operatorDestinations: shotRun.operatorDestinations,
-              drift,
-              results,
-            },
-            null,
+            { changed, total: report.results.length, ...report },
+            (_key, value) => (value instanceof Error ? value.message : value),
             2,
           ),
         )
       }
-      return changed ? 1 : 0
+      return changed || report.failures.length || report.cancellation ? 1 : 0
     }
 
     io.out(`Operator Network destinations: ${destinationList(shotRun.operatorDestinations)}`)
-    const captured = await executeCaptureRun(shotRun, recipes, {
+    const request: CaptureRequest = {
+      ...selection,
       install: values.install,
       keepGoing,
-      onRetry,
-      onShot: (result) => {
-        io.out(`  ✓ ${result.name} → ${result.file}`)
-        if (result.installed) io.out(`    installed ${result.installed}`)
-        for (const warning of result.warnings ?? []) io.out(`    ! ${warning}`)
-      },
-      onFailure: ({ error }) =>
-        io.err(`  ✗ ${error instanceof ShotlistError ? error.message : String(error)}`),
-    })
-    if (captured.failures.length) {
-      io.err(
-        `${captured.failures.length} of ${recipes.length} failed: ` +
-          captured.failures.map((failure) => failure.name).join(', '),
-      )
-      return 1
+      onProgress: (progress) => renderProgress(progress, io.out),
     }
-    if (captured.baselineRecorded) {
-      io.out(`  recorded this machine in ${BASELINE_FILE}`)
+    const report = await shotRun.capture(request)
+    const failed = renderCaptureReport(report, io.out, io.err)
+    const failedNames = report.results
+      .filter((result) => result.status === 'failed')
+      .map((result) => result.name)
+    if (failedNames.length) {
+      io.err(`${failedNames.length} of ${report.results.length} failed: ${failedNames.join(', ')}`)
     }
-    return 0
+    return failed ? 1 : 0
   } catch (error) {
     io.err(error instanceof ShotlistError ? error.message : String(error))
     return 1

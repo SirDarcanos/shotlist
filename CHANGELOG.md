@@ -13,6 +13,24 @@ recipe authors what to edit. See
 
 ### Added
 
+- **Deferred Installation for Run-level Capture.** `run.capture({ install: true })` writes
+  every selected Output image and completes required cleanup before replacing any Committed
+  image. Replacements use complete temporary siblings, stop after the first failure, and
+  report installed, withheld, failed, and unattempted destinations without implying
+  rollback. The Baseline is recorded only after every requested replacement succeeds.
+
+- **Request cancellation and ordered progress** for Run-level Capture and Checking.
+  TypeScript callers pass an `AbortSignal` to stop active browser work while retaining
+  teardown and resource-cleanup outcomes, or an awaited `onProgress` observer for request,
+  Recipe, and retry events. A broken observer becomes one report warning rather than
+  changing execution results.
+
+- **Run-level Checking requests** through `run.check({ recipes: [...] })` or
+  `run.check({ all: true })`. Checking shares Capture's validation, ordering, resource
+  ownership, overlap, complete-report, and Run-reuse guarantees. Reports retain `same`,
+  `changed`, `new`, and `skipped` findings, Recipe and request failures, unattempted
+  Recipes, environment drift, Ignore-region counts, and optional diff-image paths.
+
 - **Run-level Capture requests** through `run.capture({ recipes: [...] })` or
   `run.capture({ all: true })`. shotlist validates complete selections before effects,
   preserves explicit or deterministic name order, processes Recipes sequentially through
@@ -65,16 +83,27 @@ recipe authors what to edit. See
 
 ### Changed
 
+- **TypeScript Capture and Checking now use Run requests and reports.** Replace direct
+  `shoot` and `check` calls with `run.capture({ recipes: names })` and
+  `run.check({ recipes: names })`. The Run owns browser startup and cleanup; callers handle
+  complete reports rather than direct one-Recipe results. Recipe and config files plus CLI
+  commands and flags do not change.
+
+- **The CLI now consumes Run execution reports.** Capture and Checking commands translate
+  selection and flags into Run requests, render ordered progress and complete report
+  outcomes, and derive human and JSON output plus exit codes from the same reports used by
+  TypeScript callers.
+
 - **Playwright 1.48 or newer is required for browser runs.** Network destination enforcement uses context-level WebSocket routing in addition to ordinary request routing.
 
 - **Operator authority names Network destinations rather than hosts.** TypeScript callers pass `destinations`; a bare value means HTTPS port 443, wildcard values cover proper subdomains only, and HTTP or unusual ports require a full destination. Untrusted Projects contribute no approvals, including for `site.url`. Application Recipes can no longer navigate to local files; use a File Recipe for a controlled local image.
 
 - **Effectful library calls require an authentic Run.** Callers open a Run with explicit
-  Operator authority, then pass the Run and its Recipes to capture, checking, Session,
-  server, step, and Baseline interfaces. shotlist rejects missing or forged Runs and copied
-  or foreign Recipes before an effect. Pass Operator authority to lint because malformed
-  Projects cannot open a complete Run. Parse Config, Recipe, Macro, Library-document, and
-  Query values in memory without Operator authority.
+  Operator authority, then use its name-based Capture and Checking methods or pass it to
+  Session, server, and Baseline interfaces. shotlist rejects missing or forged Runs before
+  an effect. Pass Operator authority to lint because malformed Projects cannot open a
+  complete Run. Parse Config, Recipe, Macro, Library-document, and Query values in memory
+  without Operator authority.
 
 - **Session reads take a configured name.** Call `readSession(run, name)` rather than
   resolving and passing a Session object. The Session module owns path resolution, host
@@ -101,6 +130,11 @@ recipe authors what to edit. See
   causes no browser effect rather than leaving an unnamed page behind.
 
 ### Removed
+
+- **Direct one-Recipe Capture and Checking package interfaces.** The package root no longer
+  exports `shoot`, `check`, `ShootOptions`, `CheckOptions`, `ShotResult`, `CheckResult`, or
+  `Retry`. Use `run.capture(request)` and `run.check(request)`; these methods select Recipe
+  names and do not accept caller-owned browsers.
 
 - **Low-level Step execution at the package root.** Use Capture, Checking, or Session operations through an authentic Run so browser contexts cannot bypass Network destination enforcement.
 

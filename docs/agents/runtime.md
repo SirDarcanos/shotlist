@@ -10,16 +10,20 @@ library callers.
 ## Project run
 
 The CLI loads the config and Library, then Run execution coordinates the selected Recipes.
-TypeScript callers use `Run.capture` with either a non-empty ordered Recipe-name list or
-`all: true`; selection is complete before effects, and one Run refuses overlap until its
-request and resource cleanup settle. Capture starts the configured site only when at least
-one selected Recipe has `source: app`.
+TypeScript callers use `Run.capture` and `Run.check` with either a non-empty ordered
+Recipe-name list or `all: true`; selection is complete before effects, and one Run refuses
+overlap until its request and resource cleanup settle. Capture starts the configured site
+only when at least one selected Recipe has `source: app`.
 Checking first removes Recipes that opt out or install nowhere, then starts the site only
 when an actionable Application Recipe remains. A Run of only skipped Recipes starts neither
 the site nor Chromium. Run execution launches one Chromium browser for the remaining
-capture or check work, closes it before returning, and keeps Recipes sequential. Capture
-reports one ordered result for every selected Recipe and retains request-level startup and
-cleanup failures separately from Recipe results.
+Capture or Checking work, closes it before returning, and keeps Recipes sequential. Both
+reports account for every selected Recipe and retain request-level startup and cleanup
+failures separately from Recipe results. Run-level Capture writes every Output image and
+closes owned resources before requested Installation begins. It safely replaces Committed
+images in Recipe order, stops after the first replacement failure, and records the Baseline
+only after every requested replacement succeeds. Checking reports keep completed findings,
+environment drift, Ignore-region counts, and optional diff-image paths.
 
 `src/library.ts` owns policy-aware Library discovery, reading, parsing, and publication.
 Run opening asks it for one complete immutable Library; lint asks it for one review that

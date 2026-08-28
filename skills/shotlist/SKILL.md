@@ -194,17 +194,25 @@ npx shotlist --all --install
 npx shotlist --check            # re-shoot and compare against what is committed
 ```
 
-A library caller opens one Run with Operator authority, then uses Recipes from that Run's
-Library. Capture, checking, Session, server, and Baseline calls reject a fabricated Run or
-a copied Recipe before an effect:
+A library caller opens one Run with Operator authority, then selects Recipe names through
+that Run. Use one name, an ordered group, or explicit all; do not copy Recipe records or
+inject a browser:
 
 ```ts
-import { openRun, shoot } from 'shotlist'
+import { openRun } from 'shotlist'
 
 const run = openRun({ untrusted: false }, 'shotlist.config.yaml')
-const recipe = run.project.library.recipes.get('order-row')!
-await shoot(run, recipe)
+const captured = await run.capture({
+  recipes: ['order-row'],
+  install: true,
+})
+const checked = await run.check({ all: true, diff: true })
 ```
+
+Capture and Checking return complete immutable reports rather than throwing expected
+operational failures. Inspect every Recipe result plus request-level `failures`, optional
+`warnings`, and `cancellation`; Capture also reports deferred Installation, while Checking
+reports environment drift. Invalid requests and fabricated Runs reject before an effect.
 
 Lint takes Operator authority directly because its job is to report a Project whose
 Library is too malformed to open as a Run:

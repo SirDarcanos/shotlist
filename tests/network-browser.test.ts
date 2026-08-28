@@ -4,7 +4,8 @@ import type { Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { openRun, shoot } from '../src/index.js'
+import { openRun } from '../src/index.js'
+import { shoot } from '../src/capture.js'
 
 const roots: string[] = []
 const servers: Server[] = []

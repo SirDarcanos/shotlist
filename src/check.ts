@@ -16,7 +16,8 @@ import type { DeepReadonly, Run } from './run.js'
 export interface CheckOptions {
   browser?: Browser
   keepGoing?: boolean
-  onRetry?: (retry: Retry) => void
+  signal?: AbortSignal
+  onRetry?: (retry: Retry) => unknown | Promise<unknown>
   /** Where to write a three-up for each shot that changed. */
   diffDir?: string
 }
@@ -268,7 +269,11 @@ export async function check(
       // a reason to stop: the other recipes still have an answer worth reporting.
       let shotResult
       try {
-        shotResult = await shoot(run, recipe, { browser, onRetry: options.onRetry })
+        shotResult = await shoot(run, recipe, {
+          browser,
+          signal: options.signal,
+          onRetry: options.onRetry,
+        })
       } catch (error) {
         if (!options.keepGoing) throw error
         results.push({
@@ -324,6 +329,7 @@ export async function check(
           reason: `size changed, ${compared.sizes[0]} to ${compared.sizes[1]}`,
           shot: shotResult.file,
           against: committed.authored,
+          ...(ignore.length ? { ignored: ignore.length } : {}),
           diff: await drawDiff(),
         })
         continue
