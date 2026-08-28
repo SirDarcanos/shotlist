@@ -41,9 +41,9 @@ recipe authors what to edit. See
 
 - **Network destination enforcement** for every browser request, redirect, WebSocket, and shotlist-owned HTTP or TCP readiness probe. Approvals match protocol, host, and port; `--allow` and protected `SHOTLIST_ALLOW` settings grant Operator destinations. Browser-contained `data:` and `blob:` content remains available, while blocked requests fail the Recipe before shotlist writes an Output image.
 
-- **Run-owned Work limits** for Library document bytes, authored Step count and nesting,
-  Macro depth and expansion, predictable and actual Step execution, `each` list length,
-  matching-pattern safety, and elapsed Recipe work. Lint rejects predictable excess and
+- **Run-owned Work limits** for Library document bytes, Authored Step count and nesting,
+  Macro depth and expansion, Predictable Work and Executed Step counts, `each` list length,
+  matching-pattern safety, and elapsed Recipe work. Lint rejects Predictable Work excess and
   warns at 80%. Operators may change numerical values through `--work-limit`, protected
   `SHOTLIST_WORK_LIMITS`, or `OperatorAuthority.workLimits`; Project configuration cannot.
   A Work-limit failure does not retry, and teardown retains 1,000 Steps and one cleanup
@@ -82,6 +82,11 @@ recipe authors what to edit. See
   imports.
 
 ### Changed
+
+- **Step declarations now own Predictable Work composition.** Authored Step traversal and
+  preflight projection derive recursive fields, waits, blocks, iteration, and Macro
+  semantics from the same private declarations as validation and execution. Recipe, CLI,
+  and package-root interfaces do not change.
 
 - **TypeScript Capture and Checking now use Run requests and reports.** Replace direct
   `shoot` and `check` calls with `run.capture({ recipes: names })` and
@@ -125,6 +130,10 @@ recipe authors what to edit. See
   and package interfaces remain unchanged.
 
 ### Fixed
+
+- **Unresolved `each` Steps retain their nested structure during Predictable Work preflight.**
+  shotlist now counts nested Expanded Steps and Macro depth before site or browser startup
+  without predicting nested executions or deliberate waits from an unknown list length.
 
 - **`openPage` authorizes its interpolated URL before opening a page.** A refused URL now
   causes no browser effect rather than leaving an unnamed page behind.

@@ -2,12 +2,13 @@ import { z } from 'zod'
 import { ShotlistError, distance, pageMessage } from './config.js'
 import { NetworkPolicyError } from './network-policy.js'
 import type { NetworkAccess } from './network-policy.js'
+import { matchingMeasurementsIn } from './matching.js'
 import { makeQuery, resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
 import type { ElementHandle, Frame, Page, QueryTarget } from './playwright.js'
 import type { Run } from './run.js'
-import { WorkLimitError, matchingMeasurementsIn } from './work-limit.js'
-import type { StepWork } from './work-limit.js'
+import { WorkLimitError } from './work.js'
+import type { StepWork } from './work.js'
 
 /** A value a Step can hold literally or reference with `$name`. */
 const Ref = z.union([z.string(), z.number(), z.boolean()])
@@ -76,11 +77,57 @@ type StepExecution = {
   nested(scope?: Readonly<Record<string, unknown>>): Promise<void>
 }
 
+export interface PredictableFold<Result> {
+  /** Combine Step contributions lazily so Work policy can stop before later Steps. */
+  sequence(parts: Iterable<() => Result>): Result
+  /** Contribute one Expanded Step and one predictable Executed Step. */
+  one(milliseconds?: number): Result
+  /** Expand a body once and retain no predictable execution or waits. */
+  structural(body: () => Result): Result
+  /** Expand a body once and execute it a known number of times. */
+  repetition(times: number, body: () => Result): Result
+  /** Project a body under every known item scope, retaining empty-list structure. */
+  knownIteration(
+    items: readonly unknown[],
+    body: (item: unknown) => Result,
+    empty: () => Result,
+  ): Result
+  /** Project one Macro frame at the declaration-owned scope. */
+  macroExpansion(depth: number, body: () => Result): Result
+}
+
+interface PredictableMacro {
+  readonly defaults: Readonly<Record<string, unknown>>
+  readonly steps: readonly StepInput[]
+}
+
+interface PredictableFrame<Result> {
+  readonly step: StepInput
+  readonly scope: Readonly<Record<string, unknown>>
+  one(milliseconds?: number): Result
+  sequence(parts: Iterable<() => Result>): Result
+  nested(scope?: Readonly<Record<string, unknown>>): Result
+  structural(body: () => Result): Result
+  repetition(times: number, body: () => Result): Result
+  knownIteration(
+    items: readonly unknown[],
+    body: (item: unknown) => Result,
+    empty: () => Result,
+  ): Result
+  known(value: unknown): unknown
+  expandMacro(name: string, withValues: Readonly<Record<string, unknown>>): Result
+}
+
+type PredictableSemantics = <Result>(frame: PredictableFrame<Result>) => Result
+
+const ordinaryWork: PredictableSemantics = <Result>(frame: PredictableFrame<Result>) => frame.one()
+
 type RuntimeDefinition = {
   verb: string
   shapes: ShapeFactory
   kind: 'runtime'
   execute(frame: StepExecution): Promise<void>
+  predictable: PredictableSemantics
 }
 
 type BlockDefinition = {
@@ -89,33 +136,37 @@ type BlockDefinition = {
   kind: 'block'
   nested: 'steps' | 'optional'
   execute(frame: StepExecution): Promise<void>
+  predictable: PredictableSemantics
 }
 
 type MacroDefinition = {
   verb: string
   shapes: ShapeFactory
   kind: 'macro'
+  predictable: PredictableSemantics
 }
 
 type StepDefinition = RuntimeDefinition | BlockDefinition | MacroDefinition
 
-/** Declare an ordinary built-in Step with its authored shape and runtime behavior. */
+/** Declare an ordinary built-in Step with default or specialized Predictable Work. */
 function runtimeStep<const Verb extends string>(
   verb: Verb,
   shapes: ShapeFactory,
   execute: RuntimeDefinition['execute'],
+  predictable: PredictableSemantics = ordinaryWork,
 ): RuntimeDefinition & { verb: Verb } {
-  return { verb, shapes, kind: 'runtime', execute }
+  return { verb, shapes, kind: 'runtime', execute, predictable }
 }
 
-/** Declare a recursive built-in Step and the field containing its nested Steps. */
+/** Declare a recursive Step whose Work composition cannot be omitted. */
 function blockStep<const Verb extends string>(
   verb: Verb,
   nested: BlockDefinition['nested'],
   shapes: ShapeFactory,
   execute: BlockDefinition['execute'],
+  predictable: PredictableSemantics,
 ): BlockDefinition & { verb: Verb } {
-  return { verb, shapes, kind: 'block', nested, execute }
+  return { verb, shapes, kind: 'block', nested, execute, predictable }
 }
 
 /** Declare a Step consumed by Macro expansion rather than Run execution. */
@@ -123,7 +174,15 @@ function macroStep<const Verb extends string>(
   verb: Verb,
   shapes: ShapeFactory,
 ): MacroDefinition & { verb: Verb } {
-  return { verb, shapes, kind: 'macro' }
+  return {
+    verb,
+    shapes,
+    kind: 'macro',
+    predictable: (frame) => {
+      const withValues = frame.step['with'] as Readonly<Record<string, unknown>> | undefined
+      return frame.expandMacro(String(frame.step[verb]), withValues ?? {})
+    },
+  }
 }
 
 const DEFINITIONS = [
@@ -240,6 +299,7 @@ const DEFINITIONS = [
         await waitFor(page, query('wait'), ctx)
       }
     },
+    ({ step, one }) => one(typeof step['wait'] === 'number' ? step['wait'] : 0),
   ),
   runtimeStep(
     'dialog',
@@ -278,6 +338,8 @@ const DEFINITIONS = [
     async ({ step, nested }) => {
       for (let index = 0; index < Number(step['repeat']); index++) await nested()
     },
+    ({ step, one, sequence, repetition, nested }) =>
+      sequence([() => one(), () => repetition(Number(step['repeat']), () => nested())]),
   ),
   blockStep(
     'each',
@@ -297,6 +359,22 @@ const DEFINITIONS = [
       const name = text('as')
       for (const item of items) await nested({ ...outer, [name]: item })
     },
+    ({ step, scope, one, sequence, nested, structural, known, knownIteration }) => {
+      const items = known(step['each'])
+      if (!Array.isArray(items)) {
+        return sequence([() => one(), () => structural(() => nested(scope))])
+      }
+      const name = typeof step['as'] === 'string' ? step['as'] : 'item'
+      return sequence([
+        () => one(),
+        () =>
+          knownIteration(
+            items,
+            (item) => nested({ ...scope, [name]: item }),
+            () => nested(scope),
+          ),
+      ])
+    },
   ),
   blockStep(
     'optional',
@@ -310,6 +388,7 @@ const DEFINITIONS = [
         // `optional` exists for the dialog that is sometimes already closed.
       }
     },
+    ({ one, sequence, nested }) => sequence([() => one(), () => nested()]),
   ),
   runtimeStep(
     'openPage',
@@ -383,6 +462,141 @@ function definitionFor(step: StepInput): StepDefinition | undefined {
     if (definition) return definition
   }
   return undefined
+}
+
+export interface AuthoredStepPosition {
+  readonly step: unknown
+  readonly path: string
+  /** Root Steps have depth one. */
+  readonly depth: number
+}
+
+/** Visit raw Authored Step positions iteratively before recursive validation. */
+export function visitAuthoredSteps(
+  raw: unknown,
+  roots: readonly string[],
+  visit: (position: AuthoredStepPosition) => void | false,
+): void {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return
+  const document = raw as Record<string, unknown>
+  const pending: Array<{ value: unknown; depth: number; path: string }> = roots.flatMap((root) => {
+    const value = document[root]
+    return Array.isArray(value) ? [{ value, depth: 1, path: root }] : []
+  })
+
+  while (pending.length) {
+    const current = pending.pop()!
+    if (!Array.isArray(current.value)) continue
+    for (let index = 0; index < current.value.length; index++) {
+      const step = current.value[index]
+      const path = `${current.path}[${index}]`
+      if (visit({ step, path, depth: current.depth }) === false) return
+      if (typeof step !== 'object' || step === null || Array.isArray(step)) continue
+      const mapping = step as StepInput
+      for (const nested of NESTED_KEYS) {
+        if (Array.isArray(mapping[nested])) {
+          pending.push({
+            value: mapping[nested],
+            depth: current.depth + 1,
+            path: `${path}.${nested}`,
+          })
+        }
+      }
+    }
+  }
+}
+
+/** Resolve chained whole-value references while projecting known Data document loops. */
+function knownValue(
+  value: unknown,
+  scope: Readonly<Record<string, unknown>>,
+  seen: ReadonlySet<string> = new Set(),
+): unknown {
+  if (typeof value !== 'string') return value
+  const matched = /^\$\{?([A-Za-z_][\w.]*)\}?$/.exec(value)
+  if (!matched || seen.has(value)) return matched ? undefined : value
+  let current: unknown = scope
+  for (const key of matched[1]!.split('.')) {
+    if (typeof current !== 'object' || current === null) return undefined
+    if (!Object.prototype.hasOwnProperty.call(current, key)) return undefined
+    current = (current as Record<string, unknown>)[key]
+  }
+  return knownValue(current, scope, new Set([...seen, value]))
+}
+
+/** Resolve the Macro frame values that Predictable Work can know from its enclosing scope. */
+function knownFrameValue(value: unknown, scope: Readonly<Record<string, unknown>>): unknown {
+  if (Array.isArray(value)) return value.map((item) => knownFrameValue(item, scope))
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([name, nested]) => [name, knownFrameValue(nested, scope)]),
+    )
+  }
+  return knownValue(value, scope) ?? value
+}
+
+/** Resolve Macro defaults and arguments against their enclosing scope before overlaying them. */
+function knownMacroScope(
+  scope: Readonly<Record<string, unknown>>,
+  defaults: Readonly<Record<string, unknown>>,
+  withValues: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const frame = { ...defaults, ...withValues }
+  const resolved = Object.fromEntries(
+    Object.entries(frame).map(([name, value]) => [name, knownFrameValue(value, scope)]),
+  )
+  return { ...scope, ...resolved }
+}
+
+/** Fold validated Steps through declaration-owned Predictable Work semantics. */
+export function foldPredictableSteps<Result>(
+  steps: readonly StepInput[],
+  macros: ReadonlyMap<string, PredictableMacro>,
+  scope: Readonly<Record<string, unknown>>,
+  fold: PredictableFold<Result>,
+): Result {
+  const project = (
+    current: readonly StepInput[],
+    currentScope: Readonly<Record<string, unknown>>,
+    seen: readonly string[],
+  ): Result =>
+    fold.sequence(
+      current.map((step) => () => {
+        const definition = definitionFor(step)
+        if (!definition) throw new ShotlistError(`unrecognized step ${JSON.stringify(step)}`)
+        const nested = (nestedScope: Readonly<Record<string, unknown>> = currentScope): Result => {
+          if (definition.kind !== 'block') return fold.sequence([])
+          return project(step[definition.nested] as readonly StepInput[], nestedScope, seen)
+        }
+        const frame: PredictableFrame<Result> = {
+          step,
+          scope: currentScope,
+          one: (milliseconds) => fold.one(milliseconds),
+          sequence: (parts) => fold.sequence(parts),
+          nested,
+          structural: (body) => fold.structural(body),
+          repetition: (times, body) => fold.repetition(times, body),
+          knownIteration: (items, body, empty) => fold.knownIteration(items, body, empty),
+          known: (value) => knownValue(value, currentScope),
+          expandMacro: (name, withValues) => {
+            const macro = macros.get(name)
+            if (!macro) throw new ShotlistError(`unknown macro "${name}"`)
+            if (seen.includes(name)) {
+              throw new ShotlistError(
+                `macro "${name}" uses itself (${[...seen, name].join(' → ')})`,
+              )
+            }
+            const macroScope = knownMacroScope(currentScope, macro.defaults, withValues)
+            return fold.macroExpansion(seen.length + 1, () =>
+              project(macro.steps, macroScope, [...seen, name]),
+            )
+          },
+        }
+        return definition.predictable(frame)
+      }),
+    )
+
+  return project(steps, scope, [])
 }
 
 /** Build the recursive Step schema against one Project's Finders. */

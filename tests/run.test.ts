@@ -44,7 +44,7 @@ describe('openRun', () => {
     expect(() => call({}, 'shotlist.config.yaml')).toThrow(/untrusted.*boolean/)
   })
 
-  it('stops actual Step execution at the Run-owned Work limit', async () => {
+  it('stops Executed Steps at the Run-owned Work limit', async () => {
     const root = project(config())
     const run = openRun(
       { untrusted: false, workLimits: { executedSteps: 1 } },
@@ -113,6 +113,24 @@ describe('openRun', () => {
         join(root, 'shotlist.config.json'),
       ),
     ).toThrow(/would run 5 Steps; the Work limit is 4/)
+  })
+
+  it('rejects unresolved loop structure before a Run can start browser work', () => {
+    const root = project(config(), {
+      'screenshots/recipes/loop.yaml': `setup:
+  - each: $rows
+    steps:
+      - click: { css: .first }
+      - click: { css: .second }
+`,
+    })
+
+    expect(() =>
+      openRun(
+        { untrusted: false, workLimits: { expandedSteps: 2 } },
+        join(root, 'shotlist.config.json'),
+      ),
+    ).toThrow(/expands to more than 2 Steps/)
   })
 
   it('counts deliberate waits before running a Recipe', () => {

@@ -34,6 +34,21 @@ One instruction in an ordered sequence that establishes, observes, or restores a
 state, or composes other Steps.
 _Avoid_: Action, command
 
+**Authored Step**:
+A Step mapping physically present in a Recipe or Macro document.
+
+**Expanded Step**:
+A non-`use` Step in the structure produced by Macro expansion.
+
+**Executed Step**:
+One invocation of a Step implementation, including an invocation repeated by `repeat` or
+`each`.
+_Avoid_: Actual Step
+
+**Predictable Work**:
+Work that shotlist can determine from the validated Library before it starts a site or
+browser.
+
 **Query**:
 A declarative description that resolves to an element, a rectangle, or the bounding union
 of several rectangles.

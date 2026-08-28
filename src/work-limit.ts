@@ -1,31 +1,17 @@
 import { ShotlistError } from './config.js'
 import { MAX_MATCHING_CHARACTERS, validateMatchingIn } from './matching.js'
+import { foldPredictableSteps, visitAuthoredSteps } from './step.js'
+import type { PredictableFold, StepInput } from './step.js'
+import { WorkLimitError } from './work.js'
+import type { StepWork, WorkLimitName, WorkLimitOverrides, WorkLimits } from './work.js'
 export {
   MAX_MATCHING_CHARACTERS,
   matchingMeasurementsIn,
   validateMatching,
   validateMatchingIn,
 } from './matching.js'
-
-/** Numerical ceilings owned by the Operator for one Run. */
-export interface WorkLimits {
-  readonly recipeBytes: number
-  readonly macroBytes: number
-  readonly dataBytes: number
-  readonly authoredSteps: number
-  readonly stepDepth: number
-  readonly macroDepth: number
-  readonly expandedSteps: number
-  readonly executedSteps: number
-  readonly eachItems: number
-  readonly matchingCharacters: number
-  readonly recipeMilliseconds: number
-  readonly teardownSteps: number
-  readonly teardownMilliseconds: number
-}
-
-export type WorkLimitName = keyof WorkLimits
-export type WorkLimitOverrides = Readonly<Partial<WorkLimits>>
+export { WorkLimitError } from './work.js'
+export type { StepWork, WorkLimitName, WorkLimitOverrides, WorkLimits } from './work.js'
 
 /** Safe Work limits applied to every Run unless the Operator changes a numerical value. */
 export const DEFAULT_WORK_LIMITS: Readonly<WorkLimits> = Object.freeze({
@@ -46,26 +32,13 @@ export const DEFAULT_WORK_LIMITS: Readonly<WorkLimits> = Object.freeze({
 
 export const MAX_STEP_DEPTH = DEFAULT_WORK_LIMITS.stepDepth
 
-/** The Work allowance used by one attempt, teardown, or scripted sign-in. */
-export interface StepWork {
-  readonly signal?: AbortSignal
-  /** Count one Step immediately before its implementation starts. */
-  step(): void
-  /** Refuse an interpolated each list before its first item runs. */
-  each(items: number): void
-  /** Recheck matching patterns revealed by interpolation. */
-  matching(value: unknown): void
-  /** Race one effect against the phase deadline and stop its owner when time expires. */
-  run<T>(operation: () => Promise<T>, stop?: () => Promise<void>): Promise<T>
-}
-
 interface WorkDeadline {
   readonly signal: AbortSignal
   readonly error: WorkLimitError
   readonly expiresAt: number
 }
 
-/** Create one actual-Step meter for an attempt, teardown, or scripted sign-in. */
+/** Create one Executed Step meter for an attempt, teardown, or scripted sign-in. */
 export function createStepWork(
   limits: Readonly<WorkLimits>,
   phase: 'attempt' | 'teardown' | 'sign-in' = 'attempt',
@@ -249,27 +222,6 @@ export function createRecipeWork(
   }
 }
 
-/** A Work limit failure that deterministic Recipe retries cannot repair. */
-export class WorkLimitError extends ShotlistError {
-  readonly code = 'SHOTLIST_WORK_LIMIT'
-
-  constructor(
-    readonly detail: string,
-    readonly limit: WorkLimitName,
-    readonly observed: number,
-    readonly allowed: number,
-    file?: string,
-    readonly raiseable = true,
-  ) {
-    super(
-      raiseable
-        ? `${detail}. The Operator may raise it with --work-limit ${limit}=<number>.`
-        : detail,
-      file,
-    )
-  }
-}
-
 /** Validate and freeze numerical changes without filling unspecified defaults. */
 export function workLimitOverrides(value: unknown): WorkLimitOverrides {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -327,13 +279,13 @@ export interface AuthoredWork {
 
 interface WorkMacro {
   readonly defaults: Readonly<Record<string, unknown>>
-  readonly steps: readonly unknown[]
+  readonly steps: readonly StepInput[]
 }
 
 interface WorkRecipe {
   readonly name?: string
-  readonly setup: readonly unknown[]
-  readonly teardown: readonly unknown[]
+  readonly setup: readonly StepInput[]
+  readonly teardown: readonly StepInput[]
 }
 
 interface WorkLibrary {
@@ -350,117 +302,69 @@ export interface PlannedWork {
   readonly macroDepth: number
 }
 
-/** Resolve one whole-value reference while planning known Data document loops. */
-function knownValue(value: unknown, scope: Readonly<Record<string, unknown>>): unknown {
-  if (typeof value !== 'string') return value
-  const matched = /^\$\{?([A-Za-z_][\w.]*)\}?$/.exec(value)
-  if (!matched) return value
-  let current: unknown = scope
-  for (const key of matched[1]!.split('.')) {
-    if (typeof current !== 'object' || current === null) return undefined
-    if (!Object.prototype.hasOwnProperty.call(current, key)) return undefined
-    current = (current as Record<string, unknown>)[key]
-  }
-  return current === value ? undefined : knownValue(current, scope)
-}
-
-/** Saturate multiplied work before JavaScript loses integer precision. */
-function boundedArithmetic(value: number, _limit: number): number {
+/** Saturate accumulated work before JavaScript loses integer precision. */
+function boundedArithmetic(value: number): number {
   return Math.min(value, Number.MAX_SAFE_INTEGER)
 }
 
-/** Calculate expanded and predictable executed Steps without constructing their expansion. */
-function planSteps(
-  steps: readonly unknown[],
-  library: WorkLibrary,
+/** Construct Work-policy arithmetic for the declaration-driven Step fold. */
+function planningFold(
   limits: Readonly<WorkLimits>,
-  scope: Readonly<Record<string, unknown>>,
-  seen: readonly string[] = [],
-  executionLimit = limits.executedSteps,
-  timeLimit = limits.recipeMilliseconds,
-): PlannedWork {
-  let expanded = 0
-  let executed = 0
-  let milliseconds = 0
-  let eachItems = 0
-  let macroDepth = seen.length
-  const measured = (): PlannedWork => ({ expanded, executed, milliseconds, eachItems, macroDepth })
-  const exceeded = () =>
-    expanded > limits.expandedSteps || executed > executionLimit || milliseconds > timeLimit
+  executionLimit: number,
+  timeLimit: number,
+): PredictableFold<PlannedWork> {
+  const none = (): PlannedWork => ({
+    expanded: 0,
+    executed: 0,
+    milliseconds: 0,
+    eachItems: 0,
+    macroDepth: 0,
+  })
+  let structuralDepth = 0
+  const exceeded = (work: PlannedWork) =>
+    work.expanded > limits.expandedSteps ||
+    (structuralDepth === 0 && (work.executed > executionLimit || work.milliseconds > timeLimit))
+  const add = (left: PlannedWork, right: PlannedWork): PlannedWork => ({
+    expanded: boundedArithmetic(left.expanded + right.expanded),
+    executed: boundedArithmetic(left.executed + right.executed),
+    milliseconds: boundedArithmetic(left.milliseconds + right.milliseconds),
+    eachItems: Math.max(left.eachItems, right.eachItems),
+    macroDepth: Math.max(left.macroDepth, right.macroDepth),
+  })
+  const retainStructure = (body: () => PlannedWork): PlannedWork => {
+    structuralDepth++
+    try {
+      const nested = body()
+      return { ...nested, executed: 0, milliseconds: 0 }
+    } finally {
+      structuralDepth--
+    }
+  }
 
-  for (const raw of steps) {
-    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue
-    const step = raw as Record<string, unknown>
-    if (typeof step['use'] === 'string') {
-      const name = step['use']
-      const macro = library.macros.get(name)
-      if (!macro) throw new ShotlistError(`unknown macro "${name}"`)
-      if (seen.includes(name)) {
-        throw new ShotlistError(`macro "${name}" uses itself (${[...seen, name].join(' → ')})`)
+  return {
+    sequence(parts) {
+      let measured = none()
+      for (const part of parts) {
+        measured = add(measured, part())
+        if (exceeded(measured)) break
       }
-      if (seen.length + 1 > limits.macroDepth) {
-        throw new WorkLimitError(
-          `Macro expansion is more than ${limits.macroDepth} deep; the Work limit is ${limits.macroDepth}`,
-          'macroDepth',
-          seen.length + 1,
-          limits.macroDepth,
-        )
+      return measured
+    },
+    one(milliseconds = 0) {
+      return { ...none(), expanded: 1, executed: 1, milliseconds }
+    },
+    structural(body) {
+      return retainStructure(body)
+    },
+    repetition(times, body) {
+      const nested = body()
+      return {
+        ...nested,
+        executed: boundedArithmetic(nested.executed * times),
+        milliseconds: boundedArithmetic(nested.milliseconds * times),
       }
-      const withValues =
-        typeof step['with'] === 'object' && step['with'] !== null
-          ? (step['with'] as Record<string, unknown>)
-          : {}
-      const nested = planSteps(
-        macro.steps,
-        library,
-        limits,
-        { ...scope, ...macro.defaults, ...withValues },
-        [...seen, name],
-        executionLimit,
-        timeLimit,
-      )
-      expanded = boundedArithmetic(expanded + nested.expanded, limits.expandedSteps)
-      executed = boundedArithmetic(executed + nested.executed, limits.executedSteps)
-      milliseconds = boundedArithmetic(milliseconds + nested.milliseconds, timeLimit)
-      eachItems = Math.max(eachItems, nested.eachItems)
-      macroDepth = Math.max(macroDepth, nested.macroDepth)
-      if (exceeded()) return measured()
-      continue
-    }
-
-    expanded = boundedArithmetic(expanded + 1, limits.expandedSteps)
-    executed = boundedArithmetic(executed + 1, limits.executedSteps)
-    if (typeof step['wait'] === 'number') {
-      milliseconds = boundedArithmetic(milliseconds + step['wait'], timeLimit)
-    }
-    if (exceeded()) return measured()
-    const nested = Array.isArray(step['steps'])
-      ? step['steps']
-      : Array.isArray(step['optional'])
-        ? step['optional']
-        : undefined
-    if (!nested) continue
-
-    if (typeof step['repeat'] === 'number') {
-      const planned = planSteps(nested, library, limits, scope, seen, executionLimit, timeLimit)
-      expanded = boundedArithmetic(expanded + planned.expanded, limits.expandedSteps)
-      executed = boundedArithmetic(
-        executed + planned.executed * step['repeat'],
-        limits.executedSteps,
-      )
-      milliseconds = boundedArithmetic(
-        milliseconds + planned.milliseconds * step['repeat'],
-        timeLimit,
-      )
-      eachItems = Math.max(eachItems, planned.eachItems)
-      macroDepth = Math.max(macroDepth, planned.macroDepth)
-      if (exceeded()) return measured()
-      continue
-    }
-
-    if (step['each'] !== undefined) {
-      const items = knownValue(step['each'], scope)
-      if (!Array.isArray(items)) continue
+    },
+    knownIteration(items, body, empty) {
       if (items.length > limits.eachItems) {
         throw new WorkLimitError(
           `each would process ${items.length} items; the Work limit is ${limits.eachItems}`,
@@ -469,57 +373,52 @@ function planSteps(
           limits.eachItems,
         )
       }
-      eachItems = Math.max(eachItems, items.length)
-      const name = typeof step['as'] === 'string' ? step['as'] : 'item'
-      let nestedExpanded = 0
-      let nestedExecuted = 0
-      let nestedMilliseconds = 0
+      if (!items.length) return retainStructure(empty)
+
+      let measured = none()
       for (const item of items) {
-        const planned = planSteps(
-          nested,
-          library,
-          limits,
-          { ...scope, [name]: item },
-          seen,
-          executionLimit,
-          timeLimit,
-        )
-        nestedExpanded = Math.max(nestedExpanded, planned.expanded)
-        nestedExecuted = boundedArithmetic(nestedExecuted + planned.executed, limits.executedSteps)
-        nestedMilliseconds = boundedArithmetic(nestedMilliseconds + planned.milliseconds, timeLimit)
-        eachItems = Math.max(eachItems, planned.eachItems)
-        macroDepth = Math.max(macroDepth, planned.macroDepth)
-        if (
-          nestedExpanded > limits.expandedSteps ||
-          nestedExecuted > executionLimit ||
-          nestedMilliseconds > timeLimit
-        ) {
-          break
+        const nested = body(item)
+        measured = {
+          expanded: Math.max(measured.expanded, nested.expanded),
+          executed: boundedArithmetic(measured.executed + nested.executed),
+          milliseconds: boundedArithmetic(measured.milliseconds + nested.milliseconds),
+          eachItems: Math.max(items.length, measured.eachItems, nested.eachItems),
+          macroDepth: Math.max(measured.macroDepth, nested.macroDepth),
         }
+        if (exceeded(measured)) break
       }
-      if (!items.length) {
-        const planned = planSteps(nested, library, limits, scope, seen, executionLimit, timeLimit)
-        nestedExpanded = planned.expanded
-        eachItems = Math.max(eachItems, planned.eachItems)
-        macroDepth = Math.max(macroDepth, planned.macroDepth)
+      return measured
+    },
+    macroExpansion(depth, body) {
+      if (depth > limits.macroDepth) {
+        throw new WorkLimitError(
+          `Macro expansion is more than ${limits.macroDepth} deep; the Work limit is ${limits.macroDepth}`,
+          'macroDepth',
+          depth,
+          limits.macroDepth,
+        )
       }
-      expanded = boundedArithmetic(expanded + nestedExpanded, limits.expandedSteps)
-      executed = boundedArithmetic(executed + nestedExecuted, limits.executedSteps)
-      milliseconds = boundedArithmetic(milliseconds + nestedMilliseconds, timeLimit)
-      if (exceeded()) return measured()
-      continue
-    }
-
-    const planned = planSteps(nested, library, limits, scope, seen, executionLimit, timeLimit)
-    expanded = boundedArithmetic(expanded + planned.expanded, limits.expandedSteps)
-    executed = boundedArithmetic(executed + planned.executed, limits.executedSteps)
-    milliseconds = boundedArithmetic(milliseconds + planned.milliseconds, timeLimit)
-    eachItems = Math.max(eachItems, planned.eachItems)
-    macroDepth = Math.max(macroDepth, planned.macroDepth)
-    if (exceeded()) return measured()
+      const nested = body()
+      return { ...nested, macroDepth: Math.max(depth, nested.macroDepth) }
+    },
   }
+}
 
-  return measured()
+/** Calculate predictable work through Step declaration semantics. */
+function planSteps(
+  steps: readonly StepInput[],
+  library: WorkLibrary,
+  limits: Readonly<WorkLimits>,
+  scope: Readonly<Record<string, unknown>>,
+  executionLimit = limits.executedSteps,
+  timeLimit = limits.recipeMilliseconds,
+): PlannedWork {
+  return foldPredictableSteps(
+    steps,
+    library.macros,
+    scope,
+    planningFold(limits, executionLimit, timeLimit),
+  )
 }
 
 export interface RecipeWorkMeasurement {
@@ -564,7 +463,6 @@ export function preflightRecipe(
     library,
     limits,
     library.data,
-    [],
     limits.teardownSteps,
     limits.teardownMilliseconds,
   )
@@ -646,54 +544,31 @@ export function authoredWork(
   file?: string,
 ): AuthoredWork {
   limits = limits ?? DEFAULT_WORK_LIMITS
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { count: 0, depth: 0 }
-  const document = raw as Record<string, unknown>
-  const pending: Array<{ value: unknown; depth: number; path: string }> = roots.flatMap((root) => {
-    const value = document[root]
-    return Array.isArray(value) ? [{ value, depth: 1, path: root }] : []
-  })
   let count = 0
   let deepest = 0
 
-  while (pending.length) {
-    const current = pending.pop()!
-    if (!Array.isArray(current.value)) continue
-    for (let index = 0; index < current.value.length; index++) {
-      const step = current.value[index]
-      const path = `${current.path}[${index}]`
-      count++
-      deepest = Math.max(deepest, current.depth)
-      if (count > limits.authoredSteps) {
-        throw new WorkLimitError(
-          `${roots.join(' and ')} contain ${count} authored Steps; the Work limit is ${limits.authoredSteps}`,
-          'authoredSteps',
-          count,
-          limits.authoredSteps,
-          file,
-        )
-      }
-      if (current.depth > limits.stepDepth) {
-        throw new WorkLimitError(
-          `${path}: Steps nested more than ${limits.stepDepth} deep, which is deeper than a Recipe can mean`,
-          'stepDepth',
-          current.depth,
-          limits.stepDepth,
-          file,
-        )
-      }
-      if (typeof step !== 'object' || step === null || Array.isArray(step)) continue
-      const mapping = step as Record<string, unknown>
-      for (const nested of ['steps', 'optional']) {
-        if (Array.isArray(mapping[nested])) {
-          pending.push({
-            value: mapping[nested],
-            depth: current.depth + 1,
-            path: `${path}.${nested}`,
-          })
-        }
-      }
+  visitAuthoredSteps(raw, roots, ({ path, depth }) => {
+    count++
+    deepest = Math.max(deepest, depth)
+    if (count > limits.authoredSteps) {
+      throw new WorkLimitError(
+        `${roots.join(' and ')} contain ${count} authored Steps; the Work limit is ${limits.authoredSteps}`,
+        'authoredSteps',
+        count,
+        limits.authoredSteps,
+        file,
+      )
     }
-  }
+    if (depth > limits.stepDepth) {
+      throw new WorkLimitError(
+        `${path}: Steps nested more than ${limits.stepDepth} deep, which is deeper than a Recipe can mean`,
+        'stepDepth',
+        depth,
+        limits.stepDepth,
+        file,
+      )
+    }
+  })
 
   return { count, depth: deepest }
 }
