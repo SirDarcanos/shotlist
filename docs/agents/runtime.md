@@ -48,7 +48,7 @@ An application recipe performs one complete attempt in a fresh browser context:
 6. Annotate and encode in separate pages, then write output and optional install copies.
 
 A retry repeats the whole attempt in a fresh context rather than inheriting cookies, pages,
-or failed UI state. Every retry gets a fresh actual-Step Work limit, while the Recipe and
+or failed UI state. Every retry gets a fresh Executed Step Work limit, while the Recipe and
 all retries share one elapsed Work limit. A Work-limit failure is deterministic and is not
 retried. Teardown runs after success and failure under its reserved Step count and cleanup
 minute. If capture already failed, a teardown failure does not replace the error that
@@ -59,7 +59,7 @@ so setup and teardown are invalid and every mark or mask must resolve without a 
 
 ## Steps and pages
 
-`runSteps` awaits every `runStep` in source order and charges each actual Step to the
+`runSteps` awaits every `runStep` in source order and charges each Executed Step to the
 current attempt or teardown meter. `each` checks its interpolated list before the first item
 runs. Keep every Playwright call awaited,
 because unfinished interaction produces a wrong screenshot rather than an exception; the

@@ -44,7 +44,7 @@ describe('openRun', () => {
     expect(() => call({}, 'shotlist.config.yaml')).toThrow(/untrusted.*boolean/)
   })
 
-  it('stops actual Step execution at the Run-owned Work limit', async () => {
+  it('stops Executed Steps at the Run-owned Work limit', async () => {
     const root = project(config())
     const run = openRun(
       { untrusted: false, workLimits: { executedSteps: 1 } },

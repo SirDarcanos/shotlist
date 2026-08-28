@@ -18,9 +18,10 @@ that a caller has already read without requiring Operator authority.
 
 Most authored mappings are strict. Preserve addressed validation errors and typo
 suggestions when extending a union, because raw Zod branches turn one misspelled key into a
-screen of unrelated failures. Add a Step verb as one built-in declaration in `src/step.ts`;
-`VERBS`, nested diagnostics, Macro expansion, and runtime dispatch derive from those
-declarations.
+screen of unrelated failures. Add a Step verb as one built-in declaration in `src/step.ts`.
+Its authored shape, recursive field identity, runtime behavior, and Predictable Work
+semantics belong in that declaration, alongside the derived `VERBS`, nested diagnostics,
+Macro expansion, and runtime dispatch.
 
 ## Finders and queries
 
@@ -49,7 +50,7 @@ page.
 ## Macros and interpolation
 
 Macro expansion fixes the step structure before execution. It rejects unknown macros and
-recursive expansion while retaining each expanded step's macro arguments.
+recursive expansion while retaining each Expanded Step's Macro arguments.
 
 Interpolation happens immediately before a step runs because `each`, macro arguments, and
 `readValue` create runtime values. Scope precedence is library data, enclosing loop scope,
@@ -66,12 +67,15 @@ interpolation rather than the executable vocabulary.
 
 ## Work limits
 
-Inspect Recipe and Macro Step trees iteratively before recursive schema validation. Library
-opening refuses predictable work beyond the Run's Work limits; review retains all reachable
-failures and warns when a measurement reaches 80%. Count Macro expansion separately from
-actual Step execution because a small expansion can run many times through `repeat` or
-`each`. Validate every `matching:` pattern after Finder expansion and again after Step
-interpolation.
+Inspect raw Authored Step positions iteratively before recursive schema validation, using
+the recursive fields named by Step declarations. Fold validated Steps through those same
+declarations for Predictable Work. The fold exposes sequence, one Step, repetition, known
+iteration, and Macro expansion while `src/work-limit.ts` owns arithmetic, ceilings, and
+phase policy. Library opening refuses Predictable Work beyond the Run's Work limits; review
+retains all reachable failures and warns when a measurement reaches 80%. Count Macro
+expansion separately from Executed Steps because a small Macro expansion can run many times
+through `repeat` or `each`. Validate every `matching:` pattern after Finder expansion and
+again after Step interpolation.
 
 ## Network destinations
 
