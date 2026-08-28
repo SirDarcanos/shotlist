@@ -13,25 +13,34 @@ import { assertRecipe, assertRun } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
 import type { NetworkDestination } from './network-policy.js'
 import { startServer, withServer } from './serve.js'
+import { RequestCancelledError } from './work-limit.js'
 
 /** Select named Recipes in caller order or every Recipe in deterministic name order. */
 export type CaptureSelection =
   | { readonly recipes: readonly string[]; readonly all?: never }
   | { readonly all: true; readonly recipes?: never }
 
-/** One request to Capture through an authentic Run. */
-export type CaptureRequest = CaptureSelection & {
+/** Observe ordered facts from one Run request. */
+export type RunProgressObserver = (progress: RunProgress) => unknown | Promise<unknown>
+
+/** Options shared by Capture and Checking requests. */
+interface RunRequestOptions {
   readonly keepGoing?: boolean
+  readonly signal?: AbortSignal
+  readonly onProgress?: RunProgressObserver
 }
+
+/** One request to Capture through an authentic Run. */
+export type CaptureRequest = CaptureSelection & RunRequestOptions
 
 /** Select Recipes for Checking with the same guarantees as Capture selection. */
 export type CheckSelection = CaptureSelection
 
 /** One request to perform Checking through an authentic Run. */
-export type CheckRequest = CheckSelection & {
-  readonly keepGoing?: boolean
-  readonly diff?: boolean
-}
+export type CheckRequest = CheckSelection &
+  RunRequestOptions & {
+    readonly diff?: boolean
+  }
 
 /** One selected Recipe that produced an Output image. */
 export interface CapturedRecipeResult {
@@ -48,6 +57,14 @@ export interface FailedCaptureResult {
   readonly cleanupFailures?: readonly unknown[]
 }
 
+/** One selected Recipe interrupted by caller cancellation. */
+export interface CancelledCaptureResult {
+  readonly name: string
+  readonly status: 'cancelled'
+  readonly reason: unknown
+  readonly cleanupFailures?: readonly unknown[]
+}
+
 /** One selected Recipe not attempted after an earlier or request-level failure. */
 export interface UnattemptedCaptureResult {
   readonly name: string
@@ -57,7 +74,7 @@ export interface UnattemptedCaptureResult {
 
 /** The result for exactly one selected Recipe. */
 export type CaptureRecipeResult =
-  CapturedRecipeResult | FailedCaptureResult | UnattemptedCaptureResult
+  CapturedRecipeResult | FailedCaptureResult | CancelledCaptureResult | UnattemptedCaptureResult
 
 /** A site, browser, or owned-resource failure outside one Recipe attempt. */
 export interface CaptureResourceFailure {
@@ -71,6 +88,8 @@ export interface CaptureReport {
   readonly results: readonly CaptureRecipeResult[]
   readonly failures: readonly CaptureResourceFailure[]
   readonly operatorDestinations: readonly NetworkDestination[]
+  readonly cancellation?: Readonly<{ reason: unknown }>
+  readonly warnings?: readonly string[]
 }
 
 /** One selected Recipe whose Checking failed operationally. */
@@ -78,6 +97,14 @@ export interface FailedCheckResult {
   readonly name: string
   readonly status: 'failed'
   readonly error: unknown
+  readonly cleanupFailures?: readonly unknown[]
+}
+
+/** One selected Recipe interrupted by caller cancellation. */
+export interface CancelledCheckResult {
+  readonly name: string
+  readonly status: 'cancelled'
+  readonly reason: unknown
   readonly cleanupFailures?: readonly unknown[]
 }
 
@@ -94,7 +121,8 @@ export type CheckFindingResult = Omit<Readonly<CheckResult>, 'status'> & {
 }
 
 /** The Checking finding or operational result for exactly one selected Recipe. */
-export type CheckRecipeResult = CheckFindingResult | FailedCheckResult | UnattemptedCheckResult
+export type CheckRecipeResult =
+  CheckFindingResult | FailedCheckResult | CancelledCheckResult | UnattemptedCheckResult
 
 /** A resource failure outside one Recipe's Checking attempt. */
 export interface CheckResourceFailure {
@@ -109,9 +137,69 @@ export interface CheckReport {
   readonly failures: readonly CheckResourceFailure[]
   readonly drift: readonly Drift[]
   readonly operatorDestinations: readonly NetworkDestination[]
+  readonly cancellation?: Readonly<{ reason: unknown }>
+  readonly warnings?: readonly string[]
 }
 
+/** Ordered facts emitted by Capture and Checking requests. */
+export type RunProgress =
+  | {
+      readonly type: 'request-start'
+      readonly operation: 'capture' | 'check'
+      readonly recipes: readonly string[]
+    }
+  | {
+      readonly type: 'recipe-start'
+      readonly operation: 'capture' | 'check'
+      readonly name: string
+      readonly index: number
+      readonly total: number
+    }
+  | ({ readonly type: 'retry'; readonly operation: 'capture' | 'check' } & Readonly<Retry>)
+  | {
+      readonly type: 'recipe-complete'
+      readonly operation: 'capture' | 'check'
+      readonly name: string
+      readonly index: number
+      readonly total: number
+      readonly result: CaptureRecipeResult | CheckRecipeResult
+    }
+  | {
+      readonly type: 'request-complete'
+      readonly operation: 'capture' | 'check'
+      readonly results: readonly (CaptureRecipeResult | CheckRecipeResult)[]
+    }
+
 const ACTIVE_REQUESTS = new WeakSet<Run>()
+
+interface ProgressEmitter {
+  readonly warnings: readonly string[]
+  emit(progress: RunProgress): Promise<void>
+}
+
+/** Await progress in order and isolate the first observer failure. */
+function progressEmitter(observer?: RunProgressObserver): ProgressEmitter {
+  let active = observer
+  const warnings: string[] = []
+  return {
+    warnings,
+    async emit(progress) {
+      if (!active) return
+      try {
+        await active(Object.freeze(progress))
+      } catch (error) {
+        active = undefined
+        const why = error instanceof Error ? error.message : String(error)
+        warnings.push(`Progress observer failed: ${why}`)
+      }
+    },
+  }
+}
+
+/** Return the request cancellation represented by an aborted standard signal. */
+function cancellationFrom(signal?: AbortSignal): RequestCancelledError | undefined {
+  return signal?.aborted ? new RequestCancelledError(signal.reason) : undefined
+}
 
 /** Distinguish programming defects from operational failures a report can account for. */
 function isUnexpectedDefect(error: unknown): boolean {
@@ -162,33 +250,37 @@ export interface CaptureRunResult {
   operatorDestinations: readonly NetworkDestination[]
 }
 
+/** Freeze one Capture result before reports or observers can publish it. */
+function freezeCaptureResult(result: CaptureRecipeResult): CaptureRecipeResult {
+  if (result.status === 'failed') {
+    if (typeof result.error === 'object' && result.error !== null) Object.freeze(result.error)
+  }
+  if ((result.status === 'failed' || result.status === 'cancelled') && result.cleanupFailures) {
+    for (const failure of result.cleanupFailures) {
+      if (typeof failure === 'object' && failure !== null) Object.freeze(failure)
+    }
+    Object.freeze(result.cleanupFailures)
+  }
+  if (result.status === 'captured') {
+    Object.freeze(result.shot.size)
+    if (result.shot.ignored) {
+      for (const rect of result.shot.ignored) Object.freeze(rect)
+      Object.freeze(result.shot.ignored)
+    }
+    if (result.shot.warnings) Object.freeze(result.shot.warnings)
+    Object.freeze(result.shot)
+  }
+  return Object.freeze(result)
+}
+
 /** Freeze one Run-level Capture report and every result record it owns. */
 function captureReport(
   run: Run,
   results: readonly CaptureRecipeResult[],
   failures: readonly CaptureResourceFailure[] = [],
+  facts: Readonly<{ cancellation?: unknown; warnings?: readonly string[] }> = {},
 ): CaptureReport {
-  for (const result of results) {
-    if (result.status === 'failed') {
-      if (typeof result.error === 'object' && result.error !== null) Object.freeze(result.error)
-      if (result.cleanupFailures) {
-        for (const failure of result.cleanupFailures) {
-          if (typeof failure === 'object' && failure !== null) Object.freeze(failure)
-        }
-        Object.freeze(result.cleanupFailures)
-      }
-    }
-    if (result.status === 'captured') {
-      Object.freeze(result.shot.size)
-      if (result.shot.ignored) {
-        for (const rect of result.shot.ignored) Object.freeze(rect)
-        Object.freeze(result.shot.ignored)
-      }
-      if (result.shot.warnings) Object.freeze(result.shot.warnings)
-      Object.freeze(result.shot)
-    }
-    Object.freeze(result)
-  }
+  for (const result of results) freezeCaptureResult(result)
   for (const failure of failures) {
     if (typeof failure.error === 'object' && failure.error !== null) Object.freeze(failure.error)
     Object.freeze(failure)
@@ -196,10 +288,14 @@ function captureReport(
   const operatorDestinations = Object.freeze(
     run.operatorDestinations.map((destination) => Object.freeze({ ...destination })),
   )
+  const cancellation =
+    facts.cancellation === undefined ? undefined : Object.freeze({ reason: facts.cancellation })
   return Object.freeze({
     results: Object.freeze([...results]),
     failures: Object.freeze([...failures]),
     operatorDestinations,
+    ...(cancellation ? { cancellation } : {}),
+    ...(facts.warnings?.length ? { warnings: Object.freeze([...facts.warnings]) } : {}),
   })
 }
 
@@ -211,13 +307,29 @@ function selectedRecipes(
 ): {
   recipes: readonly DeepReadonly<Recipe>[]
   keepGoing?: boolean
+  signal?: AbortSignal
+  onProgress?: RunProgressObserver
 } {
   if (typeof request !== 'object' || request === null || Array.isArray(request)) {
     throw new ShotlistError(`A ${operation} request is required`)
   }
   const keepGoing = request.keepGoing
+  const signal = request.signal
+  const onProgress = request.onProgress
   if (keepGoing !== undefined && typeof keepGoing !== 'boolean') {
     throw new ShotlistError(`${operation} request \`keepGoing\` must be a boolean`)
+  }
+  if (
+    signal !== undefined &&
+    (typeof signal !== 'object' ||
+      typeof signal.aborted !== 'boolean' ||
+      typeof signal.addEventListener !== 'function' ||
+      typeof signal.removeEventListener !== 'function')
+  ) {
+    throw new ShotlistError(`${operation} request \`signal\` must be an AbortSignal`)
+  }
+  if (onProgress !== undefined && typeof onProgress !== 'function') {
+    throw new ShotlistError(`${operation} request \`onProgress\` must be a function`)
   }
   const hasNames = Object.hasOwn(request, 'recipes')
   const hasAll = Object.hasOwn(request, 'all')
@@ -236,7 +348,7 @@ function selectedRecipes(
     const recipes = [...run.project.library.recipes.entries()]
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([, recipe]) => recipe)
-    return Object.freeze({ recipes: Object.freeze(recipes), keepGoing })
+    return Object.freeze({ recipes: Object.freeze(recipes), keepGoing, signal, onProgress })
   }
 
   const names = request.recipes
@@ -266,6 +378,8 @@ function selectedRecipes(
   return Object.freeze({
     recipes: Object.freeze(names.map((name) => run.project.library.recipes.get(name)!)),
     keepGoing,
+    signal,
+    onProgress,
   })
 }
 
@@ -273,20 +387,50 @@ function selectedRecipes(
 async function performCaptureRequest(
   run: Run,
   recipes: readonly DeepReadonly<Recipe>[],
-  options: Readonly<{ keepGoing?: boolean }>,
+  options: Readonly<{
+    keepGoing?: boolean
+    signal?: AbortSignal
+    progress: ProgressEmitter
+  }>,
 ): Promise<CaptureReport> {
   if (!recipes.length) return captureReport(run, [])
 
   const results: CaptureRecipeResult[] = []
   const failures: CaptureResourceFailure[] = []
+  let cancellation = cancellationFrom(options.signal)
   let server: Awaited<ReturnType<typeof startServer>> = null
   let browser: Browser | undefined
-  let cleanupDefect: unknown
+
+  if (cancellation) {
+    return captureReport(
+      run,
+      recipes.map((recipe) => ({
+        name: recipe.name!,
+        status: 'not-attempted',
+        reason: 'request was cancelled',
+      })),
+      failures,
+      { cancellation: cancellation.reason },
+    )
+  }
 
   if (recipes.some((recipe) => recipe.source === 'app')) {
     try {
       server = await startServer(run)
     } catch (error) {
+      cancellation = cancellationFrom(options.signal)
+      if (cancellation) {
+        return captureReport(
+          run,
+          recipes.map((recipe) => ({
+            name: recipe.name!,
+            status: 'not-attempted',
+            reason: 'request was cancelled',
+          })),
+          failures,
+          { cancellation: cancellation.reason },
+        )
+      }
       if (isUnexpectedDefect(error)) throw error
       failures.push({ resource: 'site', stage: 'startup', error })
       return captureReport(
@@ -302,16 +446,30 @@ async function performCaptureRequest(
   }
 
   try {
-    try {
-      browser = await loadPlaywright().chromium.launch()
-    } catch (error) {
-      if (isUnexpectedDefect(error)) throw error
-      failures.push({ resource: 'browser', stage: 'startup', error })
+    cancellation = cancellationFrom(options.signal)
+    if (!cancellation) {
+      try {
+        browser = await loadPlaywright().chromium.launch()
+      } catch (error) {
+        if (isUnexpectedDefect(error)) throw error
+        failures.push({ resource: 'browser', stage: 'startup', error })
+      }
     }
 
     if (browser) {
       let stopped = false
       for (const [index, recipe] of recipes.entries()) {
+        cancellation = cancellationFrom(options.signal)
+        if (cancellation) {
+          for (const remaining of recipes.slice(index)) {
+            results.push({
+              name: remaining.name!,
+              status: 'not-attempted',
+              reason: 'request was cancelled',
+            })
+          }
+          break
+        }
         if (stopped) {
           results.push({
             name: recipe.name!,
@@ -320,37 +478,81 @@ async function performCaptureRequest(
           })
           continue
         }
+
+        await options.progress.emit({
+          type: 'recipe-start',
+          operation: 'capture',
+          name: recipe.name!,
+          index,
+          total: recipes.length,
+        })
+        let completed: CaptureRecipeResult
         try {
-          const shot = await shoot(run, recipe, { browser })
-          results.push({ name: recipe.name!, status: 'captured', shot })
+          const shot = await shoot(run, recipe, {
+            browser,
+            signal: options.signal,
+            onRetry: (retry) =>
+              options.progress.emit({ type: 'retry', operation: 'capture', ...retry }),
+          })
+          completed = { name: recipe.name!, status: 'captured', shot }
+          results.push(completed)
         } catch (error) {
           if (isUnexpectedDefect(error)) throw error
           const cleanupFailures = captureCleanupFailures(error)
-          results.push({
-            name: recipe.name!,
-            status: 'failed',
-            error,
-            ...(cleanupFailures.length ? { cleanupFailures } : {}),
-          })
-          stopped = !options.keepGoing
-          if (stopped) {
+          if (error instanceof RequestCancelledError) {
+            cancellation = error
+            completed = {
+              name: recipe.name!,
+              status: 'cancelled',
+              reason: error.reason,
+              ...(cleanupFailures.length ? { cleanupFailures } : {}),
+            }
+            results.push(completed)
             for (const remaining of recipes.slice(index + 1)) {
               results.push({
                 name: remaining.name!,
                 status: 'not-attempted',
-                reason: 'an earlier Capture failed',
+                reason: 'request was cancelled',
               })
             }
-            break
+          } else {
+            completed = {
+              name: recipe.name!,
+              status: 'failed',
+              error,
+              ...(cleanupFailures.length ? { cleanupFailures } : {}),
+            }
+            results.push(completed)
+            stopped = !options.keepGoing
+            if (stopped) {
+              for (const remaining of recipes.slice(index + 1)) {
+                results.push({
+                  name: remaining.name!,
+                  status: 'not-attempted',
+                  reason: 'an earlier Capture failed',
+                })
+              }
+            }
           }
         }
+        freezeCaptureResult(completed)
+        await options.progress.emit({
+          type: 'recipe-complete',
+          operation: 'capture',
+          name: recipe.name!,
+          index,
+          total: recipes.length,
+          result: completed,
+        })
+        if (cancellation || stopped) break
       }
     } else {
+      const reason = cancellation ? 'request was cancelled' : 'browser startup failed'
       results.push(
         ...recipes.map((recipe) => ({
           name: recipe.name!,
           status: 'not-attempted' as const,
-          reason: 'browser startup failed',
+          reason,
         })),
       )
     }
@@ -359,35 +561,67 @@ async function performCaptureRequest(
       try {
         await browser.close()
       } catch (error) {
-        if (isUnexpectedDefect(error)) cleanupDefect = error
-        else failures.push({ resource: 'browser', stage: 'cleanup', error })
+        failures.push({ resource: 'browser', stage: 'cleanup', error })
       }
     }
     try {
       await server?.stop()
     } catch (error) {
-      if (isUnexpectedDefect(error)) cleanupDefect ??= error
-      else failures.push({ resource: 'site', stage: 'cleanup', error })
+      failures.push({ resource: 'site', stage: 'cleanup', error })
     }
-    if (cleanupDefect) throw cleanupDefect
   }
-  return captureReport(run, results, failures)
+  return captureReport(run, results, failures, {
+    ...(cancellation ? { cancellation: cancellation.reason } : {}),
+  })
 }
 
 /** Validate and Capture one request while keeping the Run reusable but non-overlapping. */
 export async function captureRun(run: Run, request: CaptureRequest): Promise<CaptureReport> {
   assertRun(run)
-  const { recipes, keepGoing } = selectedRecipes(run, request, 'Capture')
-  const options = Object.freeze({ ...(keepGoing !== undefined ? { keepGoing } : {}) })
+  const { recipes, keepGoing, signal, onProgress } = selectedRecipes(run, request, 'Capture')
+  const progress = progressEmitter(onProgress)
+  const options = Object.freeze({
+    ...(keepGoing !== undefined ? { keepGoing } : {}),
+    ...(signal !== undefined ? { signal } : {}),
+    progress,
+  })
   if (ACTIVE_REQUESTS.has(run)) {
     throw new ShotlistError('This Run is already executing a request')
   }
   ACTIVE_REQUESTS.add(run)
   try {
-    return await performCaptureRequest(run, recipes, options)
+    await progress.emit({
+      type: 'request-start',
+      operation: 'capture',
+      recipes: Object.freeze(recipes.map((recipe) => recipe.name!)),
+    })
+    const report = await performCaptureRequest(run, recipes, options)
+    await progress.emit({
+      type: 'request-complete',
+      operation: 'capture',
+      results: report.results,
+    })
+    return captureReport(run, report.results, report.failures, {
+      ...(report.cancellation ? { cancellation: report.cancellation.reason } : {}),
+      warnings: progress.warnings,
+    })
   } finally {
     ACTIVE_REQUESTS.delete(run)
   }
+}
+
+/** Freeze one Checking result before reports or observers can publish it. */
+function freezeCheckResult(result: CheckRecipeResult): CheckRecipeResult {
+  if (result.status === 'failed') {
+    if (typeof result.error === 'object' && result.error !== null) Object.freeze(result.error)
+  }
+  if ((result.status === 'failed' || result.status === 'cancelled') && result.cleanupFailures) {
+    for (const failure of result.cleanupFailures) {
+      if (typeof failure === 'object' && failure !== null) Object.freeze(failure)
+    }
+    Object.freeze(result.cleanupFailures)
+  }
+  return Object.freeze(result)
 }
 
 /** Freeze one Checking report and the nested facts it owns. */
@@ -396,19 +630,9 @@ function checkReport(
   results: readonly CheckRecipeResult[],
   failures: readonly CheckResourceFailure[] = [],
   drift: readonly Drift[] = [],
+  facts: Readonly<{ cancellation?: unknown; warnings?: readonly string[] }> = {},
 ): CheckReport {
-  for (const result of results) {
-    if (result.status === 'failed') {
-      if (typeof result.error === 'object' && result.error !== null) Object.freeze(result.error)
-      if (result.cleanupFailures) {
-        for (const failure of result.cleanupFailures) {
-          if (typeof failure === 'object' && failure !== null) Object.freeze(failure)
-        }
-        Object.freeze(result.cleanupFailures)
-      }
-    }
-    Object.freeze(result)
-  }
+  for (const result of results) freezeCheckResult(result)
   for (const failure of failures) {
     if (typeof failure.error === 'object' && failure.error !== null) Object.freeze(failure.error)
     Object.freeze(failure)
@@ -417,11 +641,15 @@ function checkReport(
   const operatorDestinations = Object.freeze(
     run.operatorDestinations.map((destination) => Object.freeze({ ...destination })),
   )
+  const cancellation =
+    facts.cancellation === undefined ? undefined : Object.freeze({ reason: facts.cancellation })
   return Object.freeze({
     results: Object.freeze([...results]),
     failures: Object.freeze([...failures]),
     drift: Object.freeze([...drift]),
     operatorDestinations,
+    ...(cancellation ? { cancellation } : {}),
+    ...(facts.warnings?.length ? { warnings: Object.freeze([...facts.warnings]) } : {}),
   })
 }
 
@@ -429,7 +657,12 @@ function checkReport(
 async function performCheckRequest(
   run: Run,
   recipes: readonly DeepReadonly<Recipe>[],
-  options: Readonly<{ keepGoing?: boolean; diff?: boolean }>,
+  options: Readonly<{
+    keepGoing?: boolean
+    diff?: boolean
+    signal?: AbortSignal
+    progress: ProgressEmitter
+  }>,
 ): Promise<CheckReport> {
   if (!recipes.length) return checkReport(run, [])
 
@@ -440,24 +673,62 @@ async function performCheckRequest(
     }),
   )
   const actionable = recipes.filter((recipe) => !skipped.has(recipe))
-  if (!actionable.length) {
-    return checkReport(
-      run,
-      recipes.map((recipe) => skipped.get(recipe)!),
+  /** Preserve completed skipped findings while cancellation accounts for actionable work. */
+  const afterCancellation = (candidates: readonly DeepReadonly<Recipe>[]): CheckRecipeResult[] =>
+    candidates.map(
+      (recipe) =>
+        skipped.get(recipe) ?? {
+          name: recipe.name!,
+          status: 'not-attempted',
+          reason: 'request was cancelled',
+        },
     )
-  }
-
   const results: CheckRecipeResult[] = []
   const failures: CheckResourceFailure[] = []
+  let cancellation = cancellationFrom(options.signal)
   let drift: readonly Drift[] = []
   let server: Awaited<ReturnType<typeof startServer>> = null
   let browser: Browser | undefined
-  let cleanupDefect: unknown
+
+  if (cancellation) {
+    return checkReport(run, afterCancellation(recipes), failures, drift, {
+      cancellation: cancellation.reason,
+    })
+  }
+
+  if (!actionable.length) {
+    for (const [index, recipe] of recipes.entries()) {
+      await options.progress.emit({
+        type: 'recipe-start',
+        operation: 'check',
+        name: recipe.name!,
+        index,
+        total: recipes.length,
+      })
+      const result = freezeCheckResult(skipped.get(recipe)!)
+      results.push(result)
+      await options.progress.emit({
+        type: 'recipe-complete',
+        operation: 'check',
+        name: recipe.name!,
+        index,
+        total: recipes.length,
+        result,
+      })
+    }
+    return checkReport(run, results)
+  }
 
   if (actionable.some((recipe) => recipe.source === 'app')) {
     try {
       server = await startServer(run)
     } catch (error) {
+      cancellation = cancellationFrom(options.signal)
+      if (cancellation) {
+        return checkReport(run, afterCancellation(recipes), failures, drift, {
+          cancellation: cancellation.reason,
+        })
+      }
       if (isUnexpectedDefect(error)) throw error
       failures.push({ resource: 'site', stage: 'startup', error })
       return checkReport(
@@ -476,11 +747,14 @@ async function performCheckRequest(
   }
 
   try {
-    try {
-      browser = await loadPlaywright().chromium.launch()
-    } catch (error) {
-      if (isUnexpectedDefect(error)) throw error
-      failures.push({ resource: 'browser', stage: 'startup', error })
+    cancellation = cancellationFrom(options.signal)
+    if (!cancellation) {
+      try {
+        browser = await loadPlaywright().chromium.launch()
+      } catch (error) {
+        if (isUnexpectedDefect(error)) throw error
+        failures.push({ resource: 'browser', stage: 'startup', error })
+      }
     }
 
     if (browser) {
@@ -493,13 +767,14 @@ async function performCheckRequest(
 
       if (!failures.length) {
         let stopped = false
-        for (const recipe of recipes) {
-          const skippedResult = skipped.get(recipe)
-          if (skippedResult) {
-            results.push(skippedResult)
-            continue
+        for (const [index, recipe] of recipes.entries()) {
+          cancellation = cancellationFrom(options.signal)
+          if (cancellation) {
+            results.push(...afterCancellation(recipes.slice(index)))
+            break
           }
-          if (stopped) {
+          const skippedResult = skipped.get(recipe)
+          if (stopped && !skippedResult) {
             results.push({
               name: recipe.name!,
               status: 'not-attempted',
@@ -507,31 +782,76 @@ async function performCheckRequest(
             })
             continue
           }
-          try {
-            const [result] = await check(run, [recipe], {
-              browser,
-              ...(options.diff
-                ? { diffDir: join(fromRoot(run.project, run.project.config.paths.out), 'diff') }
-                : {}),
-            })
-            results.push(result as CheckFindingResult)
-          } catch (error) {
-            if (isUnexpectedDefect(error)) throw error
-            const cleanupFailures = captureCleanupFailures(error)
-            results.push({
-              name: recipe.name!,
-              status: 'failed',
-              error,
-              ...(cleanupFailures.length ? { cleanupFailures } : {}),
-            })
-            stopped = !options.keepGoing
+
+          await options.progress.emit({
+            type: 'recipe-start',
+            operation: 'check',
+            name: recipe.name!,
+            index,
+            total: recipes.length,
+          })
+          let completed: CheckRecipeResult
+          if (skippedResult) {
+            completed = skippedResult
+            results.push(completed)
+          } else {
+            try {
+              const [result] = await check(run, [recipe], {
+                browser,
+                signal: options.signal,
+                onRetry: (retry) =>
+                  options.progress.emit({ type: 'retry', operation: 'check', ...retry }),
+                ...(options.diff
+                  ? { diffDir: join(fromRoot(run.project, run.project.config.paths.out), 'diff') }
+                  : {}),
+              })
+              completed = result as CheckFindingResult
+              results.push(completed)
+            } catch (error) {
+              if (isUnexpectedDefect(error)) throw error
+              const cleanupFailures = captureCleanupFailures(error)
+              if (error instanceof RequestCancelledError) {
+                cancellation = error
+                completed = {
+                  name: recipe.name!,
+                  status: 'cancelled',
+                  reason: error.reason,
+                  ...(cleanupFailures.length ? { cleanupFailures } : {}),
+                }
+                results.push(completed)
+                results.push(...afterCancellation(recipes.slice(index + 1)))
+              } else {
+                completed = {
+                  name: recipe.name!,
+                  status: 'failed',
+                  error,
+                  ...(cleanupFailures.length ? { cleanupFailures } : {}),
+                }
+                results.push(completed)
+                stopped = !options.keepGoing
+              }
+            }
           }
+          freezeCheckResult(completed)
+          await options.progress.emit({
+            type: 'recipe-complete',
+            operation: 'check',
+            name: recipe.name!,
+            index,
+            total: recipes.length,
+            result: completed,
+          })
+          if (cancellation) break
         }
       }
     }
 
     if (!browser || failures.some((failure) => failure.resource === 'baseline')) {
-      const reason = browser ? 'Baseline could not be read' : 'browser startup failed'
+      const reason = cancellation
+        ? 'request was cancelled'
+        : browser
+          ? 'Baseline could not be read'
+          : 'browser startup failed'
       results.push(
         ...recipes.map(
           (recipe) =>
@@ -548,39 +868,55 @@ async function performCheckRequest(
       try {
         await browser.close()
       } catch (error) {
-        if (isUnexpectedDefect(error)) cleanupDefect = error
-        else failures.push({ resource: 'browser', stage: 'cleanup', error })
+        failures.push({ resource: 'browser', stage: 'cleanup', error })
       }
     }
     try {
       await server?.stop()
     } catch (error) {
-      if (isUnexpectedDefect(error)) cleanupDefect ??= error
-      else failures.push({ resource: 'site', stage: 'cleanup', error })
+      failures.push({ resource: 'site', stage: 'cleanup', error })
     }
-    if (cleanupDefect) throw cleanupDefect
   }
-  return checkReport(run, results, failures, drift)
+  return checkReport(run, results, failures, drift, {
+    ...(cancellation ? { cancellation: cancellation.reason } : {}),
+  })
 }
 
 /** Validate and perform Checking while keeping the Run reusable but non-overlapping. */
 export async function checkRun(run: Run, request: CheckRequest): Promise<CheckReport> {
   assertRun(run)
-  const { recipes, keepGoing } = selectedRecipes(run, request, 'Checking')
+  const { recipes, keepGoing, signal, onProgress } = selectedRecipes(run, request, 'Checking')
   const diff = request.diff
   if (diff !== undefined && typeof diff !== 'boolean') {
     throw new ShotlistError('Checking request `diff` must be a boolean')
   }
+  const progress = progressEmitter(onProgress)
   const options = Object.freeze({
     ...(keepGoing !== undefined ? { keepGoing } : {}),
     ...(diff !== undefined ? { diff } : {}),
+    ...(signal !== undefined ? { signal } : {}),
+    progress,
   })
   if (ACTIVE_REQUESTS.has(run)) {
     throw new ShotlistError('This Run is already executing a request')
   }
   ACTIVE_REQUESTS.add(run)
   try {
-    return await performCheckRequest(run, recipes, options)
+    await progress.emit({
+      type: 'request-start',
+      operation: 'check',
+      recipes: Object.freeze(recipes.map((recipe) => recipe.name!)),
+    })
+    const report = await performCheckRequest(run, recipes, options)
+    await progress.emit({
+      type: 'request-complete',
+      operation: 'check',
+      results: report.results,
+    })
+    return checkReport(run, report.results, report.failures, report.drift, {
+      ...(report.cancellation ? { cancellation: report.cancellation.reason } : {}),
+      warnings: progress.warnings,
+    })
   } finally {
     ACTIVE_REQUESTS.delete(run)
   }

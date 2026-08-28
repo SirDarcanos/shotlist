@@ -9,6 +9,7 @@ import {
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { openRun, shoot, writeBaseline } from '../src/index.js'
+import type { RunProgress } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 afterEach(removeProjects)
@@ -303,6 +304,171 @@ describe('Run execution', () => {
       results: [{ name: 'order-row', status: 'new' }],
     })
   }, 30_000)
+
+  it('accounts for pre-cancelled requests without starting resources', async () => {
+    const root = tempProject()
+    const run = openRun({ untrusted: false }, refuseSiteStartup(root))
+    const controller = new AbortController()
+    controller.abort({ source: 'caller' })
+
+    const captured = await run.capture({
+      recipes: ['modal', 'volatile'],
+      signal: controller.signal,
+    })
+    expect(captured.results).toMatchObject([
+      { name: 'modal', status: 'not-attempted', reason: 'request was cancelled' },
+      { name: 'volatile', status: 'not-attempted', reason: 'request was cancelled' },
+    ])
+    expect(captured.failures).toEqual([])
+    expect(captured.cancellation?.reason).toBe(controller.signal.reason)
+
+    const checked = await run.check({
+      recipes: ['order-row', 'volatile'],
+      signal: controller.signal,
+    })
+    expect(checked.results).toMatchObject([
+      { name: 'order-row', status: 'not-attempted', reason: 'request was cancelled' },
+      { name: 'volatile', status: 'skipped' },
+    ])
+    expect(checked.failures).toEqual([])
+    expect(existsSync(join(root, 'out', 'modal.png'))).toBe(false)
+  })
+
+  it('cancels browser work, retains teardown failure, accounts for remaining Recipes, and reuses the Run', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes', 'slow.yaml'),
+      'retries: 2\nsetup:\n  - wait: 10000\nteardown:\n  - click: { css: .missing-teardown }\n',
+    )
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const controller = new AbortController()
+    let retries = 0
+
+    const report = await run.capture({
+      recipes: ['slow', 'modal'],
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (progress.type === 'recipe-start') {
+          setTimeout(() => controller.abort('caller stopped'), 50)
+        }
+        if (progress.type === 'retry') retries++
+      },
+    })
+
+    expect(report.results).toMatchObject([
+      {
+        name: 'slow',
+        status: 'cancelled',
+        reason: 'caller stopped',
+        cleanupFailures: [{ message: expect.stringMatching(/teardown/) }],
+      },
+      { name: 'modal', status: 'not-attempted', reason: 'request was cancelled' },
+    ])
+    expect(report.cancellation).toEqual({ reason: 'caller stopped' })
+    expect(retries).toBe(0)
+    await expect(run.capture({ recipes: ['modal'] })).resolves.toMatchObject({
+      results: [{ name: 'modal', status: 'captured' }],
+    })
+  }, 30_000)
+
+  it('cancels active Checking and accounts for later Recipes', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes', 'slow-check.yaml'),
+      'install: guide\nsetup:\n  - wait: 10000\nteardown:\n  - wait: 1\n',
+    )
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const controller = new AbortController()
+
+    const report = await run.check({
+      recipes: ['slow-check', 'order-row'],
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (progress.type === 'recipe-start') {
+          setTimeout(() => controller.abort('checking stopped'), 50)
+        }
+      },
+    })
+
+    expect(report.results).toMatchObject([
+      { name: 'slow-check', status: 'cancelled', reason: 'checking stopped' },
+      { name: 'order-row', status: 'not-attempted', reason: 'request was cancelled' },
+    ])
+    expect(report.cancellation).toEqual({ reason: 'checking stopped' })
+  }, 30_000)
+
+  it('awaits ordered Capture progress through retries and isolates observer failures', async () => {
+    const root = tempProject()
+    writeFileSync(
+      join(root, 'recipes', 'retry.yaml'),
+      'retries: 1\nsetup:\n  - click: { css: .missing }\n',
+    )
+    const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
+    const events: RunProgress[] = []
+
+    const retryReport = await run.capture({
+      recipes: ['retry'],
+      onProgress: async (progress) => {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        events.push(progress)
+      },
+    })
+
+    expect(retryReport.results).toMatchObject([{ name: 'retry', status: 'failed' }])
+    expect(events.map(({ type }) => type)).toEqual([
+      'request-start',
+      'recipe-start',
+      'retry',
+      'recipe-complete',
+      'request-complete',
+    ])
+    expect(events[0]).toMatchObject({
+      operation: 'capture',
+      recipes: ['retry'],
+    })
+    expect(events[1]).toMatchObject({ name: 'retry', index: 0, total: 1 })
+    expect(events[2]).toMatchObject({ name: 'retry', attempt: 1, of: 2, why: expect.any(String) })
+    expect(events[3]).toMatchObject({
+      name: 'retry',
+      result: { name: 'retry', status: 'failed' },
+    })
+    expect(Object.isFrozen(events[3])).toBe(true)
+    if (events[3]?.type === 'recipe-complete') {
+      expect(Object.isFrozen(events[3].result)).toBe(true)
+      expect(events[3].result).toBe(retryReport.results[0])
+    }
+
+    const observed: string[] = []
+    const completed = await run.capture({
+      recipes: ['modal'],
+      onProgress: (progress) => {
+        observed.push(progress.type)
+        if (progress.type === 'recipe-start') throw new Error('observer broke')
+      },
+    })
+    expect(completed.results).toMatchObject([{ name: 'modal', status: 'captured' }])
+    expect(observed).toEqual(['request-start', 'recipe-start'])
+    expect(completed.warnings).toEqual(['Progress observer failed: observer broke'])
+  }, 30_000)
+
+  it('emits ordered Checking progress for skipped Recipes', async () => {
+    const root = tempProject()
+    const run = openRun({ untrusted: false }, refuseSiteStartup(root))
+    const seen: string[] = []
+
+    const result = await run.check({
+      recipes: ['volatile'],
+      onProgress: (progress) => seen.push(`${progress.operation}:${progress.type}`),
+    })
+
+    expect(result.results).toMatchObject([{ name: 'volatile', status: 'skipped' }])
+    expect(seen).toEqual([
+      'check:request-start',
+      'check:recipe-start',
+      'check:recipe-complete',
+      'check:request-complete',
+    ])
+  })
 
   it('returns skipped checking facts without starting resources', async () => {
     const root = tempProject()

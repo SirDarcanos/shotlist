@@ -131,16 +131,24 @@ const run = openRun({ untrusted: false }, 'shotlist.config.yaml')
 const captured = await run.capture({
   recipes: ['order-row', 'account-menu'],
 })
-const checked = await run.check({ all: true, diff: true })
+const controller = new AbortController()
+const checked = await run.check({
+  all: true,
+  diff: true,
+  signal: controller.signal,
+  onProgress: async (progress) => console.log(progress.type),
+})
 ```
 
 Named Recipes keep caller order; `{ all: true }` uses recipe-name order. Capture results
-are `captured`, `failed`, or `not-attempted`. Checking retains `same`, `changed`, `new`,
-and `skipped` findings beside operational failures and unattempted Recipes. Both immutable
-reports retain request-level resource failures; Checking also includes environment drift,
-Ignore-region counts, and optional diff-image paths. `keepGoing: true` attempts later
-Recipes after a failure. The Run remains reusable after a request settles and rejects
-overlapping requests.
+are `captured`, `failed`, `cancelled`, or `not-attempted`. Checking retains `same`,
+`changed`, `new`, and `skipped` findings beside operational failures, cancellation, and
+unattempted Recipes. Both immutable reports retain request-level resource failures;
+Checking also includes environment drift, Ignore-region counts, and optional diff-image
+paths. `keepGoing: true` attempts later Recipes after a failure. Pass an `AbortSignal` to
+cancel one request. An awaited `onProgress` observer receives request, Recipe, and retry
+facts in order; its first failure disables later progress and becomes one report warning.
+The Run remains reusable after a request settles and rejects overlapping requests.
 
 shotlist rejects a hand-built Run before it touches the browser, filesystem, network, or a
 process. The caller grants Operator authority, including any numerical Work limit changes;

@@ -58,6 +58,41 @@ describe('Recipe Work limits', () => {
     }
   })
 
+  it('does not charge awaited observation to the Recipe deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const recipe = createRecipeWork(
+        resolveWorkLimits({ recipeMilliseconds: 10, teardownMilliseconds: 5 }),
+        'observed',
+      )
+      let release!: () => void
+      const observing = recipe.observe(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve
+          }),
+      )
+
+      await vi.advanceTimersByTimeAsync(100)
+      release()
+      await observing
+
+      const running = recipe.attempt().run(() => new Promise<never>(() => {}))
+      let settled = false
+      void running.catch(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(9)
+      expect(settled).toBe(false)
+      const rejected = expect(running).rejects.toThrow(/reached its 10ms Work limit/)
+      await vi.advanceTimersByTimeAsync(1)
+      await rejected
+      recipe.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('limits an early teardown to its own duration', async () => {
     vi.useFakeTimers()
     try {

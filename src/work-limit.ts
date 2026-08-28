@@ -76,6 +76,7 @@ export function createStepWork(
   return {
     ...(deadline ? { signal: deadline.signal } : {}),
     step() {
+      if (deadline?.signal.aborted) throw deadline.signal.reason ?? deadline.error
       if (deadline && Date.now() >= deadline.expiresAt) throw deadline.error
       executed++
       if (executed > allowed) {
@@ -115,7 +116,7 @@ export function createStepWork(
       if (!deadline) return operation()
       if (deadline.signal.aborted || Date.now() >= deadline.expiresAt) {
         await stop?.()
-        throw deadline.error
+        throw deadline.signal.reason ?? deadline.error
       }
       return new Promise<T>((resolve, reject) => {
         const running = operation()
@@ -126,7 +127,7 @@ export function createStepWork(
             try {
               await stop?.()
             } finally {
-              reject(deadline.error)
+              reject(deadline.signal.reason ?? deadline.error)
             }
           })()
         }
@@ -149,14 +150,29 @@ export function createStepWork(
 export interface RecipeWork {
   attempt(): StepWork
   teardown(): StepWork
+  /** Await observation without charging its elapsed time to the Recipe. */
+  observe<T>(observer: () => Promise<T>): Promise<T>
   dispose(): void
 }
 
+/** A caller cancelled one request without cancelling its reusable Run. */
+export class RequestCancelledError extends ShotlistError {
+  readonly code = 'SHOTLIST_REQUEST_CANCELLED'
+
+  constructor(readonly reason: unknown) {
+    super('The request was cancelled')
+  }
+}
+
 /** Start one deadline shared by every attempt plus a bounded cleanup reserve. */
-export function createRecipeWork(limits: Readonly<WorkLimits>, recipe: string): RecipeWork {
+export function createRecipeWork(
+  limits: Readonly<WorkLimits>,
+  recipe: string,
+  signal?: AbortSignal,
+): RecipeWork {
   const startedAt = Date.now()
-  const mainExpiresAt = startedAt + limits.recipeMilliseconds
-  const cleanupExpiresAt = mainExpiresAt + limits.teardownMilliseconds
+  let mainExpiresAt = startedAt + limits.recipeMilliseconds
+  let cleanupExpiresAt = mainExpiresAt + limits.teardownMilliseconds
   const main = new AbortController()
   const cleanup = new AbortController()
   const mainError = new WorkLimitError(
@@ -171,21 +187,31 @@ export function createRecipeWork(limits: Readonly<WorkLimits>, recipe: string): 
     limits.teardownMilliseconds + 1,
     limits.teardownMilliseconds,
   )
-  const mainTimer = setTimeout(() => main.abort(mainError), limits.recipeMilliseconds)
-  const cleanupTimer = setTimeout(
-    () => cleanup.abort(cleanupError),
-    limits.recipeMilliseconds + limits.teardownMilliseconds,
-  )
+  let mainTimer: ReturnType<typeof setTimeout>
+  let cleanupTimer: ReturnType<typeof setTimeout>
   const teardownTimers = new Set<ReturnType<typeof setTimeout>>()
-  mainTimer.unref?.()
-  cleanupTimer.unref?.()
+  const schedule = () => {
+    mainTimer = setTimeout(() => main.abort(mainError), Math.max(0, mainExpiresAt - Date.now()))
+    cleanupTimer = setTimeout(
+      () => cleanup.abort(cleanupError),
+      Math.max(0, cleanupExpiresAt - Date.now()),
+    )
+    mainTimer.unref?.()
+    cleanupTimer.unref?.()
+  }
+  const cancelled = () => main.abort(new RequestCancelledError(signal?.reason))
+  if (signal?.aborted) cancelled()
+  else signal?.addEventListener('abort', cancelled, { once: true })
+  schedule()
+  const mainDeadline: WorkDeadline = {
+    signal: main.signal,
+    error: mainError,
+    get expiresAt() {
+      return mainExpiresAt
+    },
+  }
   return {
-    attempt: () =>
-      createStepWork(limits, 'attempt', {
-        signal: main.signal,
-        error: mainError,
-        expiresAt: mainExpiresAt,
-      }),
+    attempt: () => createStepWork(limits, 'attempt', mainDeadline),
     teardown: () => {
       const phase = new AbortController()
       const expire = () => phase.abort(cleanupError)
@@ -200,9 +226,24 @@ export function createRecipeWork(limits: Readonly<WorkLimits>, recipe: string): 
         expiresAt: Math.min(Date.now() + limits.teardownMilliseconds, cleanupExpiresAt),
       })
     },
+    async observe<T>(observer: () => Promise<T>): Promise<T> {
+      if (main.signal.aborted) throw main.signal.reason
+      clearTimeout(mainTimer)
+      clearTimeout(cleanupTimer)
+      const pausedAt = Date.now()
+      try {
+        return await observer()
+      } finally {
+        const paused = Date.now() - pausedAt
+        mainExpiresAt += paused
+        cleanupExpiresAt += paused
+        if (!main.signal.aborted && !cleanup.signal.aborted) schedule()
+      }
+    },
     dispose() {
       clearTimeout(mainTimer)
       clearTimeout(cleanupTimer)
+      signal?.removeEventListener('abort', cancelled)
       for (const timer of teardownTimers) clearTimeout(timer)
     },
   }

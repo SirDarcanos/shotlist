@@ -13,6 +13,12 @@ recipe authors what to edit. See
 
 ### Added
 
+- **Request cancellation and ordered progress** for Run-level Capture and Checking.
+  TypeScript callers pass an `AbortSignal` to stop active browser work while retaining
+  teardown and resource-cleanup outcomes, or an awaited `onProgress` observer for request,
+  Recipe, and retry events. A broken observer becomes one report warning rather than
+  changing execution results.
+
 - **Run-level Checking requests** through `run.check({ recipes: [...] })` or
   `run.check({ all: true })`. Checking shares Capture's validation, ordering, resource
   ownership, overlap, complete-report, and Run-reuse guarantees. Reports retain `same`,

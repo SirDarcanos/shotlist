@@ -21,14 +21,15 @@ import type { Browser, Page } from './playwright.js'
 import type { QueryInput, Rect } from './query.js'
 import { assertRecipe, assertRun, networkPolicyFor, workLimitsFor } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
-import { WorkLimitError, createRecipeWork } from './work-limit.js'
+import { RequestCancelledError, WorkLimitError, createRecipeWork } from './work-limit.js'
 import type { StepWork } from './work-limit.js'
 
 /** Optional behavior for capturing a Recipe through its Run. */
 export interface ShootOptions {
   install?: boolean
   browser?: Browser
-  onRetry?: (retry: Retry) => void
+  signal?: AbortSignal
+  onRetry?: (retry: Retry) => unknown | Promise<unknown>
 }
 
 /** Authorize a Run path to its canonical target. */
@@ -536,7 +537,7 @@ export async function shoot(
   const outputTarget = capturePath(run, file, `recipe "${recipe.name}": output`)
   const source = recipe.source === 'file' ? sourceImage(run, recipe, loaded) : undefined
 
-  const recipeWork = createRecipeWork(workLimitsFor(run), recipe.name!)
+  const recipeWork = createRecipeWork(workLimitsFor(run), recipe.name!, options.signal)
   // A caller shooting a whole set passes its own browser: launching one per recipe costs
   // about a second each, which over a project's worth of recipes is most of the run.
   let browser: Browser
@@ -638,6 +639,7 @@ export async function shoot(
               () => context.close(),
             )
           } catch (error) {
+            if (error instanceof RequestCancelledError) throw error
             if (error instanceof WorkLimitError) {
               throw inRecipeWork(recipe, recipe.url ? '`url`' : '`site.url`', error)
             }
@@ -655,6 +657,7 @@ export async function shoot(
                 () => context.close(),
               )
             } catch (error) {
+              if (error instanceof RequestCancelledError) throw error
               if (error instanceof WorkLimitError) {
                 throw inRecipeWork(recipe, '`site.ready`', error)
               }
@@ -684,7 +687,9 @@ export async function shoot(
             const steps = expandSteps(recipe.setup, library.macros)
             await runSteps(run, steps, ctx, {}, work)
           } catch (error) {
-            if (error instanceof NetworkPolicyError) throw error
+            if (error instanceof NetworkPolicyError || error instanceof RequestCancelledError) {
+              throw error
+            }
             if (error instanceof WorkLimitError) throw inRecipeWork(recipe, 'setup', error)
             access.throwIfBlocked()
             throw inRecipe(recipe, 'setup', pageMessage(error))
@@ -697,6 +702,7 @@ export async function shoot(
               () => context.close(),
             )
           } catch (error) {
+            if (error instanceof RequestCancelledError) throw error
             if (error instanceof WorkLimitError) throw inRecipeWork(recipe, 'clip', error)
             throw inRecipe(recipe, 'clip', pageMessage(error))
           }
@@ -705,6 +711,7 @@ export async function shoot(
             try {
               ctx.rects[name] = (await resolveInPage(ctx.page, query, ctx)).rect
             } catch (error) {
+              if (error instanceof RequestCancelledError) throw error
               if (error instanceof WorkLimitError)
                 throw inRecipeWork(recipe, `marks.${name}`, error)
               throw inRecipe(recipe, `marks.${name}`, pageMessage(error))
@@ -721,6 +728,7 @@ export async function shoot(
                 masks.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
               }
             } catch (error) {
+              if (error instanceof RequestCancelledError) throw error
               if (error instanceof WorkLimitError) throw inRecipeWork(recipe, `mask[${i}]`, error)
               throw inRecipe(recipe, `mask[${i}]`, pageMessage(error))
             }
@@ -734,6 +742,7 @@ export async function shoot(
                 ignore.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
               }
             } catch (error) {
+              if (error instanceof RequestCancelledError) throw error
               if (error instanceof WorkLimitError) {
                 throw inRecipeWork(recipe, `check.ignore[${i}]`, error)
               }
@@ -848,9 +857,11 @@ export async function shoot(
 
     access.throwIfBlocked()
     await work.run(async () => undefined)
+    if (options.signal?.aborted) throw new RequestCancelledError(options.signal.reason)
     writeFileSync(outputTarget, written)
     const destination = destinationFor(run, recipe, loaded)
     if (options.install && destination) {
+      if (options.signal?.aborted) throw new RequestCancelledError(options.signal.reason)
       mkdirSync(dirname(destination.target), { recursive: true })
       copyFileSync(outputTarget, destination.target)
     }
@@ -873,11 +884,23 @@ export async function shoot(
       try {
         return await attempt(access, recipeWork.attempt(), recipeWork.teardown)
       } catch (error) {
-        if (error instanceof NetworkPolicyError || error instanceof WorkLimitError) throw error
+        if (
+          error instanceof NetworkPolicyError ||
+          error instanceof WorkLimitError ||
+          error instanceof RequestCancelledError
+        ) {
+          throw error
+        }
         access.throwIfBlocked()
         if (n >= attempts) throw error
         const why = error instanceof ShotlistError ? error.message : pageMessage(error)
-        options.onRetry?.({ name: recipe.name!, attempt: n, of: attempts, why })
+        if (options.onRetry) {
+          await recipeWork.observe(() =>
+            Promise.resolve(
+              options.onRetry!({ name: recipe.name!, attempt: n, of: attempts, why }),
+            ),
+          )
+        }
       }
     }
   } finally {
