@@ -60,6 +60,38 @@ describe('shotlist', () => {
     expect(existsSync(join(root, 'out/modal.png'))).toBe(true)
   })
 
+  it('reports canonical Operator Network destination approvals', { timeout: 120_000 }, async () => {
+    const root = project()
+    const captured = await cli(root, [
+      'order-row',
+      '--allow',
+      'assets.example.com',
+      '--allow',
+      'http://localhost:3000',
+    ])
+    expect(captured.out).toContain(
+      'Operator Network destinations: https://assets.example.com, http://localhost:3000',
+    )
+
+    await cli(root, ['order-row', '--install'])
+    const checked = await cli(root, [
+      '--check',
+      'order-row',
+      '--json',
+      '--allow',
+      'assets.example.com',
+    ])
+    expect(JSON.parse(checked.out).operatorDestinations).toEqual([
+      { protocol: 'https:', host: 'assets.example.com', port: 443, subdomains: false },
+    ])
+  })
+
+  it('accepts one-run Operator Work limit changes', async () => {
+    const { code, err } = await cli(project(), ['--work-limit', 'authoredSteps=1'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/authored Steps; the Work limit is 1/)
+  })
+
   it('prints usage on --help without touching the project', async () => {
     const { code, out } = await cli(project(), ['--help'])
     expect(code).toBe(0)
@@ -239,12 +271,18 @@ describe('--init', () => {
 describe('check.ignore', () => {
   /** A page with one box, whose contents and position the test controls. */
   function page(root: string, { text, top }: { text: string; top: number }) {
-    writeFileSync(
-      join(root, 'moving.html'),
-      `<html><body style="margin:0;background:#fff">
+    const html = `<html><body style="margin:0;background:#fff">
          <div id="live" style="position:absolute;left:20px;top:${top}px;width:200px;height:40px;
               background:#eee;font:16px sans-serif">${text}</div>
-       </body></html>`,
+       </body></html>`
+    writeFileSync(join(root, 'moving.html'), html)
+    const file = join(root, 'recipes/live.yaml')
+    writeFileSync(
+      file,
+      readFileSync(file, 'utf8').replace(
+        /^url: .*$/m,
+        `url: data:text/html;base64,${Buffer.from(html).toString('base64')}`,
+      ),
     )
   }
 
@@ -252,7 +290,7 @@ describe('check.ignore', () => {
   function recipe(root: string) {
     writeFileSync(
       join(root, 'recipes/live.yaml'),
-      `name: live\ninstall: guide\nurl: file://${join(root, 'moving.html')}\n` +
+      `name: live\ninstall: guide\nurl: data:text/html;base64,\n` +
         'viewport: { width: 320, height: 200 }\nclip: viewport\n' +
         "check:\n  ignore:\n    - { css: '#live' }\n",
     )
@@ -288,7 +326,7 @@ describe('check.ignore', () => {
     const root = project()
     writeFileSync(
       join(root, 'recipes/live.yaml'),
-      `name: live\ninstall: guide\nurl: file://${join(root, 'moving.html')}\n` +
+      `name: live\ninstall: guide\nurl: data:text/html;base64,\n` +
         'viewport: { width: 320, height: 200 }\nclip: viewport\n' +
         "check:\n  ignore:\n    - { css: '#nowhere' }\n",
     )

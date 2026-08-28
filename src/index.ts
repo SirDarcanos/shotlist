@@ -39,8 +39,6 @@ export type { Retry, ShootOptions, ShotResult } from './capture.js'
 export { drawAnnotations } from './annotate.js'
 export type { AnnotationSpec, Badge, DrawStyle, Mark, Place } from './annotate.js'
 export { loadPlaywright } from './playwright.js'
-export { runSteps } from './steps.js'
-export type { DialogPolicy, RunContext } from './steps.js'
 export { check } from './check.js'
 export type { CheckOptions, CheckResult } from './check.js'
 export {
@@ -54,6 +52,16 @@ export {
 export type { Drift, Environment } from './baseline.js'
 export { openRun } from './run.js'
 export type { DeepReadonly, OperatorAuthority, Project, ProjectLibrary, Run } from './run.js'
+export type {
+  CaptureRecipeResult,
+  CaptureReport,
+  CaptureRequest,
+  CaptureResourceFailure,
+  CaptureSelection,
+  CapturedRecipeResult,
+  FailedCaptureResult,
+  UnattemptedCaptureResult,
+} from './execute.js'
 export { readSession, signIn } from './session.js'
 export type { SignInOptions } from './session.js'
 export { startServer, tokenize, withServer } from './serve.js'
@@ -61,3 +69,12 @@ export type { Server } from './serve.js'
 export { countDocuments, formatProblems, lint } from './lint.js'
 export type { LintOptions, Problem } from './lint.js'
 export { SCHEMA_FILES } from './schemas.js'
+export {
+  DEFAULT_WORK_LIMITS,
+  MAX_MATCHING_CHARACTERS,
+  MAX_STEP_DEPTH,
+  WorkLimitError,
+  resolveWorkLimits,
+  validateMatching,
+} from './work-limit.js'
+export type { WorkLimitName, WorkLimitOverrides, WorkLimits } from './work-limit.js'

@@ -20,12 +20,6 @@ export interface Trust {
   /** The config file's directory: what the filesystem is confined to when untrusted. */
   root: string
   /**
-   * The hosts a run may open, always. A shotlist project shoots its own site, so the
-   * scope is whatever `site.url` names and everything under it — `site.allow` adds more,
-   * and is ignored when the config is not the operator's.
-   */
-  hosts: readonly string[]
-  /**
    * Directories outside the project a run may still read and write, named by the
    * operator with `--allow-path`. Not by the config: the point of the flag is that the
    * config does not get a say.
@@ -110,34 +104,8 @@ export function covers(pattern: string, host: string): boolean {
   return found === wanted || found.endsWith(`.${wanted}`)
 }
 
-/**
- * The hosts a config's own site covers.
- *
- * `example.com` covers `api.example.com`; a `www.` host covers the apex it is the www of,
- * because writing one and meaning the other is the ordinary case rather than a mistake.
- * There is no public-suffix list here, so nothing wider than that is inferred: a second
- * domain is something the config says out loud.
- */
-export function hostsFor(siteUrl: string, allow: readonly string[] = []): string[] {
-  let host: string
-  try {
-    host = new URL(siteUrl).hostname
-  } catch {
-    return [...allow]
-  }
-  const apex = host.replace(/^www\./i, '')
-  return [...new Set([host, apex, ...allow].filter(Boolean))]
-}
-
 /** A character no path or URL has a reason to carry, and that hides what follows it. */
 const CONTROL = /[\u0000-\u001f\u007f]/
-
-/** Addresses that are somewhere else on the network the runner happens to sit in. */
-const PRIVATE =
-  /^(localhost|.*\.localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|\[?f[cd])/i
-
-/** Hostnames the big clouds answer credentials on. */
-const METADATA = /^(metadata\.google\.internal|metadata\.goog|instance-data)$/i
 
 /**
  * Names forbidden by the environment the run happens in.
@@ -164,7 +132,6 @@ export interface TrustSource {
   allowEnv?: readonly string[]
   /** What the operator granted or forbade, which outlives `--untrusted`. */
   granted?: {
-    hosts?: readonly string[]
     paths?: readonly string[]
     deny?: readonly string[]
     env?: readonly string[]
@@ -186,10 +153,6 @@ export function trustFromEnvironment(
   return {
     untrusted,
     root: where.root,
-    hosts: hostsFor(where.siteUrl, [
-      ...(untrusted ? [] : (where.allow ?? [])),
-      ...(granted.hosts ?? []),
-    ]),
     paths: (granted.paths ?? []).map((path) => resolve(where.root, path)),
     // Both, always: neither can do anything but refuse more.
     deny: [...(where.deny ?? []), ...(granted.deny ?? []), ...denyFromEnv(environment)],
@@ -253,59 +216,6 @@ export function checkSession(trust: Trust, name: string, where: string): void {
     `${where}: an --untrusted run does not load sessions, and this one asks for "${name}". ` +
       'Shoot what does not need signing in, or run it without --untrusted.',
   )
-}
-
-/**
- * Refuse a URL that would make the runner reach somewhere it was not asked to.
- *
- * A config naming a URL is a config choosing what the machine connects to. On a build
- * runner that reaches the cloud's metadata endpoint, an internal admin page, or a
- * database — none of which is reachable from where the config was written.
- *
- * This stops what can be read off the URL. A hostname resolving to a private address is
- * not something a check here can see, so this is a fence, not a boundary: an operator
- * shooting what strangers submit wants a network that cannot reach those either.
- */
-export function checkUrl(trust: Trust, url: string, where: string): void {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    if (!trust.untrusted) return
-    throw new ShotlistError(`${where}: ${url} is not a URL, and this run is --untrusted`)
-  }
-
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    // A `file:` page is how a project shoots something it has not served, and it reaches
-    // no network. Untrusted, it is a way to read the disk, and is refused with the rest.
-    if (!trust.untrusted) return
-    throw new ShotlistError(
-      `${where}: an --untrusted run may only open http(s), and this is ${parsed.protocol.replace(':', '')}`,
-    )
-  }
-
-  // A project shoots its own site. Wandering off it is a mistake far more often than an
-  // intention, and when it is an intention `site.allow` is where it is said.
-  if (!trust.hosts.some((pattern) => covers(pattern, parsed.hostname))) {
-    throw new ShotlistError(
-      `${where}: ${parsed.hostname} is not this site — the shot list covers ` +
-        `${trust.hosts.join(', ')} and anything under them. Add it to \`site.allow\` to ` +
-        'shoot it too.',
-    )
-  }
-
-  if (CONTROL.test(decodeURIComponent(parsed.pathname))) {
-    throw new ShotlistError(`${where}: ${parsed.pathname} holds a control character`)
-  }
-  const forbidden = secretIn(decodeURIComponent(parsed.pathname), trust.deny)
-  if (forbidden !== null) throw refuse(where, forbidden)
-
-  if (trust.untrusted && (PRIVATE.test(parsed.hostname) || METADATA.test(parsed.hostname))) {
-    throw new ShotlistError(
-      `${where}: ${parsed.hostname} is on the network the runner sits in, and this run is ` +
-        '--untrusted. Only names that resolve outside it may be opened.',
-    )
-  }
 }
 
 /**

@@ -7,8 +7,9 @@ import { MEDIA, extensionOf, formatOf } from './image.js'
 import type { Retry } from './capture.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, BrowserContext } from './playwright.js'
+import { guardedContext } from './network-playwright.js'
 import type { Recipe } from './recipe.js'
-import { assertRecipe, assertRun } from './run.js'
+import { assertRecipe, assertRun, networkPolicyFor } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
 
 /** Optional behavior for checking Recipes through a Run. */
@@ -247,7 +248,10 @@ export async function check(
   const results: CheckResult[] = []
   let comparisonContext: BrowserContext | undefined
   try {
-    comparisonContext = await browser.newContext()
+    comparisonContext = await guardedContext(
+      browser,
+      networkPolicyFor(run).forOperation('Checking image comparison'),
+    )
     const page = await comparisonContext.newPage()
     await page.setContent('<body></body>')
 

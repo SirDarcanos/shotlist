@@ -1,68 +1,42 @@
 # Trust boundary
 
-Trust is operator state derived from CLI flags and environment controls. A config may
-always narrow access; it widens hosts or environment names only in trusted mode, because a
-config cannot grant itself authority.
+Trust is Operator state derived from CLI flags and environment controls. A Project may always narrow access. A trusted Project may approve Network destinations and environment names; an untrusted Project contributes no approvals. Work limits apply in every mode, and only Operator authority may change their numerical values.
 
 ## Guard every sink
 
-Route every filesystem source and destination through `authorizePath`, then perform the
-effect on the canonical target it returns. Route every authored navigation URL through
-`checkUrl`, site execution through `checkCommand`, and stored browser state through
-`checkSession`. These calls are the security boundary; adding a new sink without its check
-bypasses policy even when adjacent callers are guarded.
+Route every filesystem source and destination through `authorizePath`, then perform the effect on the canonical target it returns. Create every browser context through `guardedContext`, route shotlist-owned HTTP and TCP effects through the Node network adapter, and check site execution and stored browser state through `checkCommand` and `checkSession`. Adding a sink outside these modules bypasses policy even when adjacent callers are guarded.
 
-`authorizePath` rejects secret-looking segments, control characters, forbidden extensions,
-and deny patterns in every mode. In untrusted mode it resolves existing symlink components
-and the nearest existing ancestor of a future path before confining the result to the
-config root or operator-granted roots.
+`authorizePath` rejects secret-looking segments, control characters, forbidden extensions, and deny patterns in every mode. In untrusted mode it resolves existing symlink components and the nearest existing ancestor of a future path before confining the result to the Project root or Operator-granted roots.
 
-`src/library.ts` owns policy-aware Library discovery. It authorizes every configured
-directory before enumeration and every discovered document before reading any document.
-Authorized targets stay inside the module; diagnostics retain the authored paths, including
-paths that name symlinks.
+`src/library.ts` owns policy-aware Library discovery. It authorizes every configured directory before enumeration and every discovered document before reading any document. Authorized targets stay inside the module; diagnostics retain authored paths, including paths that name symlinks.
 
-`checkUrl` accepts only HTTP(S) in untrusted mode, checks decoded path segments, and confines
-hosts to the configured site relationship plus operator grants. It rejects obvious
-localhost, private, link-local, and cloud metadata hosts.
+`src/network-policy.ts` owns Network destination parsing, approval merging, exact matching, sanitization, and bounded violation collection. A bare host means HTTPS port 443. HTTP and unusual ports require a full destination. A wildcard covers proper subdomains only. URL usernames and passwords are forbidden.
 
-The URL policy is a fence rather than a network sandbox. It cannot observe DNS resolving a
-public hostname privately, and it does not validate every redirect or subresource started
-by a loaded page. Run hostile input behind network isolation from metadata and internal
-services.
+`src/network-playwright.ts` installs context routing before the first page, blocks service workers, and intercepts WebSockets separately. Check its latched violations before capturing pixels and before writing the Output image. `src/network-node.ts` disables automatic redirects and authorizes each readiness hop before sending it. Policy failures bypass `optional` Steps and Recipe retries.
+
+The Network destination policy is a fence rather than a network sandbox. It cannot stop DNS rebinding, a browser vulnerability, or traffic from a process started for a trusted Project. Run hostile Projects in a container or runner whose network cannot reach metadata and internal services.
 
 ## Untrusted mode
 
-An untrusted run:
+An untrusted Run:
 
 - starts no configured process
-- loads no stored session
-- ignores config-provided host and environment widening
-- exposes only operator-granted environment variables
+- loads no stored Session
+- accepts no Project-provided Network destination or environment widening
+- exposes only Operator-granted environment variables
 - confines paths to approved real roots
-- accepts only approved HTTP(S) hosts
+- contacts only Operator-approved Network destinations
 
-`deny`, `SHOTLIST_DENY`, and `SHOTLIST_ENV_DENY` only narrow policy and remain effective in
-every mode.
+`deny`, `SHOTLIST_DENY`, and `SHOTLIST_ENV_DENY` only narrow policy and remain effective in every mode. `SHOTLIST_ALLOW` adds Operator-controlled Network destination approvals for protected CI settings. `SHOTLIST_WORK_LIMITS` changes numerical Work limits from protected process settings; a Project config has no equivalent control.
 
 ## Commands and environment
 
-Managed site commands run directly with `shell: false`. Reject inline assignments,
-redirections, pipes, chaining, substitution, and backticks; put environment under
-`serve.env` and shell behavior in a project-owned script. A trusted command remains
-arbitrary executable code, which is why command execution is disabled wholesale for
-untrusted configs.
+Managed site commands run directly with `shell: false`. Reject inline assignments, redirections, pipes, chaining, substitution, and backticks; put environment under `serve.env` and shell behavior in a Project-owned script. A trusted command remains arbitrary executable code, which is why command execution is disabled for untrusted Projects.
 
-`envFor` exposes only explicitly granted names and omits empty values. Never print an
-environment value in errors or login guidance; name the variable needed rather than the
-secret it holds.
+`envFor` exposes only granted names and omits empty values. Never print an environment value in errors or login guidance; name the variable needed rather than the secret it holds.
 
 ## Sessions
 
-Session storage contains credentials. Untrusted runs cannot load it. Trusted login narrows
-cookies to domains covered by approved site hosts and local storage to directly covered
-origins; configured `keep` hosts are an explicit credential-retention decision.
+Session storage contains credentials. Untrusted Runs cannot load it. Trusted login retains cookies for the site host and configured `keep` hosts, and retains local storage for those origins. Network destination approval and credential retention remain separate: `site.allow` does not retain credentials, and Session `keep` does not grant network access.
 
-When narrowing drops state and `verify` exists, load the narrowed state into a fresh
-context and verify it before writing. Force mode `0600` on the final file so a successful
-login cannot leave credentials world-readable.
+When narrowing drops state and `verify` exists, load the narrowed state into a fresh guarded context and verify it before writing. Force mode `0600` on the final file so a successful login cannot leave credentials world-readable.

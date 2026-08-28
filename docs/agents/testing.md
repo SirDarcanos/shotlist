@@ -30,6 +30,14 @@ Test browser encoders against their returned MIME and bytes. Chromium can accept
 unsupported requested format while returning PNG, so a string-enum test cannot establish
 format support.
 
+## Work-limit evidence
+
+Test each Work limit at the accepted value, the first rejected value, and the 80% warning
+threshold. Prove recursive input is refused by an iterative check rather than a stack
+overflow. Use fake time for the shared Recipe deadline and teardown minute, then retain one
+browser test proving a timed-out Query closes its context. Break the counter or cancellation
+path and watch the test fail before trusting it.
+
 ## Completion
 
 Use the gate and completion criteria in `CONTRIBUTING.md`; they own schema generation,

@@ -100,13 +100,11 @@ Meet each criterion before you submit a pull request.
    derived types or schemas.
 4. **Write errors for someone editing YAML.** Name the file, the path inside it, and the
    fix. Use `unknown step "clik" — did you mean "click"?` rather than a Zod dump.
-5. **Guard each path and URL.** Route each path through `authorizePath` and perform the
-   filesystem effect on the canonical target it returns; route each URL through `checkUrl`
-   in `src/trust.ts`. A run may receive a config that no maintainer reviewed, and new
-   callers can bypass the trust boundary without failing a test.
-6. **Keep controls under operator authority.** The operator owns `--untrusted`, `--allow`,
-   `--allow-path`, and `SHOTLIST_*`. A config can narrow authority through `deny:` in any
-   mode. It can widen authority in trusted mode.
+5. **Guard each path and Network destination.** Route each path through `authorizePath` and perform the filesystem effect on the canonical target it returns. Create browser contexts through `guardedContext` and send shotlist-owned readiness traffic through the Node network adapter, because checking only authored URLs misses redirects and page-created requests.
+6. **Keep controls under Operator authority.** The Operator owns `--untrusted`, `--allow`,
+   `--allow-path`, `--work-limit`, and `SHOTLIST_*`. A config can narrow authority through
+   `deny:` in any mode. It can widen Network and environment authority in trusted mode, but
+   it cannot raise a Work limit.
 7. **Await each Playwright call and resolve Playwright at run time.** If you miss an await,
    shotlist captures the page before the step finishes and writes the wrong image without
    an error. Keep Playwright optional so consuming projects avoid a browser download during
@@ -120,30 +118,31 @@ Meet each criterion before you submit a pull request.
 
 ## Where things live
 
-| Path                | What it is                                                  |
-| ------------------- | ----------------------------------------------------------- |
-| `src/config.ts`     | config schema, defaults, loading, merge                     |
-| `src/library.ts`    | policy-aware discovery and Library assembly                 |
-| `src/recipe.ts`     | Recipe and Macro schemas and document validation            |
-| `src/query.ts`      | the element query language: schema, finders, page evaluator |
-| `src/step.ts`       | built-in Step declarations, expansion, and execution        |
-| `src/steps.ts`      | the authenticated Step execution facade                     |
-| `src/annotate.ts`   | the drawing layer, injected into the page                   |
-| `src/capture.ts`    | clip, scale, canvas growth, encode, write                   |
-| `src/image.ts`      | encoded format detection and image dimensions               |
-| `src/check.ts`      | pixel comparison against the committed image                |
-| `src/session.ts`    | login, storage-state narrowing, verification                |
-| `src/serve.ts`      | starting the site and stopping its process tree             |
-| `src/trust.ts`      | what a config may reach: hosts, paths, commands, sessions   |
-| `src/baseline.ts`   | what the committed images were taken with                   |
-| `src/playwright.ts` | resolving the optional Playwright peer at run time          |
-| `src/lint.ts`       | aggregate validation without starting a browser             |
-| `src/init.ts`       | the scaffold `--init` writes                                |
-| `src/schemas.ts`    | runtime schemas exported to the build generator             |
-| `src/index.ts`      | the public library surface                                  |
-| `src/execute.ts`    | shared Run planning and site and browser lifetimes          |
-| `src/cli.ts`        | argument parsing, rendering, and the `shotlist` binary      |
-| `tests/fixture/`    | neutral pages used by jsdom and browser-driven tests        |
+| Path                    | What it is                                                  |
+| ----------------------- | ----------------------------------------------------------- |
+| `src/config.ts`         | config schema, defaults, loading, merge                     |
+| `src/library.ts`        | policy-aware discovery and Library assembly                 |
+| `src/recipe.ts`         | Recipe and Macro schemas and document validation            |
+| `src/query.ts`          | the element query language: schema, finders, page evaluator |
+| `src/step.ts`           | built-in Step declarations, expansion, and execution        |
+| `src/steps.ts`          | the authenticated Step execution facade                     |
+| `src/annotate.ts`       | the drawing layer, injected into the page                   |
+| `src/capture.ts`        | clip, scale, canvas growth, encode, write                   |
+| `src/image.ts`          | encoded format detection and image dimensions               |
+| `src/check.ts`          | pixel comparison against the committed image                |
+| `src/session.ts`        | login, storage-state narrowing, verification                |
+| `src/serve.ts`          | starting the site and stopping its process tree             |
+| `src/trust.ts`          | filesystem, command, environment, and Session authority     |
+| `src/network-policy.ts` | Network destination approvals and decisions                 |
+| `src/baseline.ts`       | what the committed images were taken with                   |
+| `src/playwright.ts`     | resolving the optional Playwright peer at run time          |
+| `src/lint.ts`           | aggregate validation without starting a browser             |
+| `src/init.ts`           | the scaffold `--init` writes                                |
+| `src/schemas.ts`        | runtime schemas exported to the build generator             |
+| `src/index.ts`          | the public library surface                                  |
+| `src/execute.ts`        | shared Run planning and site and browser lifetimes          |
+| `src/cli.ts`            | argument parsing, rendering, and the `shotlist` binary      |
+| `tests/fixture/`        | neutral pages used by jsdom and browser-driven tests        |
 
 ## Adding a step verb or a query primitive
 

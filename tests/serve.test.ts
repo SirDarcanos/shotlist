@@ -134,17 +134,17 @@ describe('startServer', () => {
     expect(existsSync(marker)).toBe(false)
   })
 
-  it('authorizes a readiness URL before starting the process', async () => {
+  it('rejects credentials in a readiness URL before starting the process', () => {
     const marker = join(tempProject(), 'started.txt')
-    const domain = domainRun({
-      url: 'http://127.0.0.1:1/',
-      serve: {
-        command: `node -e "require('fs').writeFileSync('${marker}','yes')"`,
-        ready: 'https://elsewhere.example/',
-      },
-    })
-
-    await expect(start(domain)).rejects.toThrow(/site\.serve\.ready.*not this site/s)
+    expect(() =>
+      domainRun({
+        url: 'http://127.0.0.1:1/',
+        serve: {
+          command: `node -e "require('fs').writeFileSync('${marker}','yes')"`,
+          ready: 'https://user:secret@elsewhere.example/',
+        },
+      }),
+    ).toThrow(/must not contain a username or password/)
     expect(existsSync(marker)).toBe(false)
   })
 
@@ -169,7 +169,7 @@ describe('startServer', () => {
     }
   }, 30_000)
 
-  it('reuses an existing site for an untrusted Run without starting its command', async () => {
+  it('checks command authority before an untrusted readiness probe', async () => {
     const port = await freePort()
     const running = createServer((_, response) => response.end('ok'))
     await new Promise<void>((resolve) => running.listen(port, '127.0.0.1', resolve))
@@ -181,7 +181,7 @@ describe('startServer', () => {
         },
         { untrusted: true },
       )
-      expect(await start(domain)).toBeNull()
+      await expect(start(domain)).rejects.toThrow(/does not start processes/)
     } finally {
       await new Promise((resolve) => running.close(resolve))
     }

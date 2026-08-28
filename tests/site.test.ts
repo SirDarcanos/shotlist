@@ -1,13 +1,14 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { formatOf } from '../src/image.js'
 import { run } from '../src/cli.js'
 import type { Io } from '../src/cli.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
-const SITE = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'fixture/site.html')).href
+const SITE_FILE = join(dirname(fileURLToPath(import.meta.url)), 'fixture/site.html')
+const SITE = `data:text/html;base64,${readFileSync(SITE_FILE).toString('base64')}`
 
 /** Run the command line against a project, collecting what it printed. */
 async function cli(root: string, args: string[]) {

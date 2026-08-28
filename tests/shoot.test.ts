@@ -33,8 +33,12 @@ function recipeProject(name: string, patch: Record<string, unknown>) {
     join(initial.root, `recipes/zz-${name}.json`),
     JSON.stringify({ ...recipe, ...patch }),
   )
+  const destinations =
+    typeof patch['url'] === 'string' && /^https?:\/\//.test(patch['url'])
+      ? [new URL(patch['url']).origin]
+      : []
   const run = openRun(
-    { untrusted: false, hosts: ['127.0.0.1'] },
+    { untrusted: false, destinations },
     join(initial.root, 'shotlist.config.yaml'),
   )
   return {
@@ -102,7 +106,7 @@ describe('teardown', () => {
       JSON.stringify({ name: 'dash', url: `${server.origin}/index.html`, ...build(server.origin) }),
     )
     const run = openRun(
-      { untrusted: false, hosts: ['127.0.0.1'] },
+      { untrusted: false, destinations: [server.origin] },
       join(root, 'shotlist.config.yaml'),
     )
     const recipe = run.project.library.recipes.get('dash')!
@@ -235,6 +239,8 @@ describe('shoot', () => {
                 return Promise.resolve()
               },
             }),
+          route: () => Promise.resolve(),
+          routeWebSocket: () => Promise.resolve(),
           close: () => Promise.resolve(),
         })
       },
@@ -242,7 +248,7 @@ describe('shoot', () => {
     }
 
     await expect(shoot(run, recipe, { browser: browser as never })).rejects.toThrow(
-      /recipe "outside": `url`: outside\.example\.test is not this site/,
+      /recipe "outside": Network destination https:\/\/outside\.example\.test is not approved/,
     )
     expect(contexts).toBe(1)
     expect(navigations).toBe(0)
@@ -348,6 +354,33 @@ describe('retries', () => {
       '1/3 the context could not be opened',
       '2/3 the context could not be opened',
     ])
+  })
+
+  it('does not retry a Work limit failure', { timeout: 120_000 }, async () => {
+    const root = tempProject()
+    rmSync(join(root, 'recipes'), { recursive: true })
+    rmSync(join(root, 'macros'), { recursive: true })
+    mkdirSync(join(root, 'recipes'))
+    writeFileSync(
+      join(root, 'recipes/timed.yaml'),
+      'name: timed\nretries: 2\nsetup:\n  - optional: []\nclip: viewport\n',
+    )
+    const run = openRun(
+      { untrusted: false, workLimits: { recipeMilliseconds: 1 } },
+      join(root, 'shotlist.config.yaml'),
+    )
+    const recipe = run.project.library.recipes.get('timed')!
+    const retries: unknown[] = []
+
+    const error = await shoot(run, recipe, {
+      onRetry: (retry) => retries.push(retry),
+    }).then(
+      () => new Error('the Work limit did not fail'),
+      (caught: unknown) => caught as Error,
+    )
+    expect(error.message).toMatch(/Work limit/)
+    expect(error.message.match(/The Operator may raise it/g)).toHaveLength(1)
+    expect(retries).toEqual([])
   })
 
   it('keeps the Run and its authorized output target across retries', async () => {
@@ -838,13 +871,8 @@ describe('a font the project ships itself', () => {
     )
     const run = openRun({ untrusted: false }, configFile)
     const recipe = run.project.library.recipes.get('annotated')!
-    const browser = {
-      newContext: () => Promise.reject(new Error('the stylesheet URL policy was bypassed')),
-      close: () => Promise.resolve(),
-    }
-
-    await expect(shoot(run, recipe, { browser: browser as never })).rejects.toThrow(
-      /style\.label\.fontUrl: outside\.example\.test is not this site/,
+    await expect(shoot(run, recipe)).rejects.toThrow(
+      /recipe "annotated": Network destination https:\/\/outside\.example\.test is not approved/,
     )
   })
 
@@ -865,13 +893,8 @@ describe('a font the project ships itself', () => {
     )
     const run = openRun({ untrusted: false }, configFile)
     const recipe = run.project.library.recipes.get('annotated')!
-    const browser = {
-      newContext: () => Promise.reject(new Error('the font URL policy was bypassed')),
-      close: () => Promise.resolve(),
-    }
-
-    await expect(shoot(run, recipe, { browser: browser as never })).rejects.toThrow(
-      /style\.label\.fontUrl: outside\.example\.test is not this site/,
+    await expect(shoot(run, recipe)).rejects.toThrow(
+      /recipe "annotated": Network destination https:\/\/outside\.example\.test is not approved/,
     )
   })
 

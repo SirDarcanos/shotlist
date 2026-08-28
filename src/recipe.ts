@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { MAX_PIXELS, ShotlistError, formatIssues, keysIn } from './config.js'
 import { FORMATS } from './image.js'
+import { authoredWork, validateMatchingIn } from './work-limit.js'
+import type { WorkLimits } from './work-limit.js'
 import { QUERY_KEYS, makeQuery } from './query.js'
 import {
   ENV,
@@ -64,7 +66,7 @@ const Numbered = z.union([
 
 const StylePatch = z.record(z.string(), z.unknown())
 
-/** The recipe schema, bound to a project's query aliases. */
+/** The Recipe schema, bound to a Project's Finders. */
 export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
   const Query = makeQuery(aliases)
   return z
@@ -80,7 +82,7 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
         })
         .optional(),
       source: z.enum(['app', 'file']).default('app'),
-      /** With `source: file`, the PNG to annotate instead of driving the site. */
+      /** With `source: file`, the image to annotate instead of driving the site. */
       file: z.string().optional(),
       install: z.string().optional(),
       /** Which of `site.sessions` to shoot this as. Unset, the browser is a stranger. */
@@ -160,7 +162,7 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
     .strict()
 }
 
-/** The macro schema, bound to a project's query aliases. */
+/** The Macro schema, bound to a Project's Finders. */
 export function makeMacro(aliases: Readonly<Record<string, unknown>> = {}) {
   return z
     .object({
@@ -246,27 +248,49 @@ function checkKind(raw: unknown, kind: 'recipe' | 'macro', file?: string): void 
 /** Validate one macro document, checking its verbs the way a recipe's setup is checked. */
 export function parseMacro(
   raw: unknown,
-  options: { finders?: Readonly<Record<string, unknown>>; file?: string } = {},
+  options: {
+    finders?: Readonly<Record<string, unknown>>
+    file?: string
+    workLimits?: Pick<WorkLimits, 'authoredSteps' | 'stepDepth' | 'matchingCharacters'>
+  } = {},
 ): Macro {
   checkKind(raw, 'macro', options.file)
+  authoredWork(raw, ['steps'], options.workLimits, options.file)
   if (typeof raw === 'object' && raw !== null && 'steps' in raw) {
     checkStepVerbs((raw as { steps: unknown }).steps, 'steps')
   }
-  return validate(makeMacro(options.finders ?? {}), raw, 'macro', options.file)
+  const macro = validate(makeMacro(options.finders ?? {}), raw, 'macro', options.file)
+  try {
+    validateMatchingIn(macro, options.workLimits?.matchingCharacters)
+  } catch (error) {
+    throw new ShotlistError((error as Error).message, options.file)
+  }
+  return macro
 }
 
 /** Validate one recipe document against this project's aliases. */
 export function parseRecipe(
   raw: unknown,
-  options: { finders?: Readonly<Record<string, unknown>>; file?: string; name?: string } = {},
+  options: {
+    finders?: Readonly<Record<string, unknown>>
+    file?: string
+    name?: string
+    workLimits?: Pick<WorkLimits, 'authoredSteps' | 'stepDepth' | 'matchingCharacters'>
+  } = {},
 ): Recipe {
   checkKind(raw, 'recipe', options.file)
+  authoredWork(raw, ['setup', 'teardown'], options.workLimits, options.file)
   for (const key of ['setup', 'teardown'] as const) {
     if (typeof raw === 'object' && raw !== null && key in raw) {
       checkStepVerbs((raw as Record<string, unknown>)[key], key)
     }
   }
   const recipe = validate(makeRecipe(options.finders ?? {}), raw, 'recipe', options.file)
+  try {
+    validateMatchingIn(recipe, options.workLimits?.matchingCharacters)
+  } catch (error) {
+    throw new ShotlistError((error as Error).message, options.file)
+  }
   const name = recipe.name ?? options.name
   if (!name)
     throw new ShotlistError(
@@ -296,7 +320,7 @@ export function parseRecipe(
     }
   }
   if (recipe.source === 'file' && !recipe.file) {
-    throw new ShotlistError('`source: file` needs a `file:` pointing at the PNG', options.file)
+    throw new ShotlistError('`source: file` needs a `file:` pointing at an image', options.file)
   }
   // Refused rather than ignored: there is no page for them to run against, so a recipe
   // carrying them is one whose author believes something is happening that is not.

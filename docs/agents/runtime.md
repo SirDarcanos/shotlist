@@ -10,11 +10,16 @@ library callers.
 ## Project run
 
 The CLI loads the config and Library, then Run execution coordinates the selected Recipes.
-Capture starts the configured site only when at least one selected Recipe has `source: app`.
+TypeScript callers use `Run.capture` with either a non-empty ordered Recipe-name list or
+`all: true`; selection is complete before effects, and one Run refuses overlap until its
+request and resource cleanup settle. Capture starts the configured site only when at least
+one selected Recipe has `source: app`.
 Checking first removes Recipes that opt out or install nowhere, then starts the site only
 when an actionable Application Recipe remains. A Run of only skipped Recipes starts neither
 the site nor Chromium. Run execution launches one Chromium browser for the remaining
-capture or check work, closes it before returning, and keeps Recipes sequential.
+capture or check work, closes it before returning, and keeps Recipes sequential. Capture
+reports one ordered result for every selected Recipe and retains request-level startup and
+cleanup failures separately from Recipe results.
 
 `src/library.ts` owns policy-aware Library discovery, reading, parsing, and publication.
 Run opening asks it for one complete immutable Library; lint asks it for one review that
@@ -32,22 +37,27 @@ browser download on every consumer.
 An application recipe performs one complete attempt in a fresh browser context:
 
 1. Resolve recipe settings and enforce pixel, trust, and session bounds.
-2. Navigate the main page and wait for readiness, session verification, and settling.
-3. Expand and run setup steps serially.
-4. Resolve clip, marks, masks, and ignore regions, then capture a lossless PNG.
+2. Attach Network destination enforcement before creating the page, then navigate and wait for readiness, Session verification, and settling.
+3. Expand and run setup Steps serially.
+4. Resolve Clip, Marks, Masks, and Ignore regions, fail on blocked requests, then capture a lossless PNG.
 5. Run teardown in `finally` and close the attempt's context.
 6. Annotate and encode in separate pages, then write output and optional install copies.
 
 A retry repeats the whole attempt in a fresh context rather than inheriting cookies, pages,
-or failed UI state. Teardown runs after success and failure. If capture already failed, a
-teardown failure does not replace the error that explains the missing screenshot.
+or failed UI state. Every retry gets a fresh actual-Step Work limit, while the Recipe and
+all retries share one elapsed Work limit. A Work-limit failure is deterministic and is not
+retried. Teardown runs after success and failure under its reserved Step count and cleanup
+minute. If capture already failed, a teardown failure does not replace the error that
+explains the missing screenshot.
 
 A file recipe validates and reads its image before browser work. It has no application page,
 so setup and teardown are invalid and every mark or mask must resolve without a DOM.
 
 ## Steps and pages
 
-`runSteps` awaits every `runStep` in source order. Keep every Playwright call awaited,
+`runSteps` awaits every `runStep` in source order and charges each actual Step to the
+current attempt or teardown meter. `each` checks its interpolated list before the first item
+runs. Keep every Playwright call awaited,
 because unfinished interaction produces a wrong screenshot rather than an exception; the
 promise-only ESLint rules exist for this failure mode.
 
@@ -59,8 +69,7 @@ distinguishable from malformed or impossible geometry.
 standing state: each page gets one listener that reads the current policy when a dialog
 arrives. Every step ensures newly opened or selected pages have that listener.
 
-`optional` deliberately swallows any nested failure. Keep it broad only for transient UI
-whose absence is acceptable, because it trades diagnosis for optionality.
+`optional` swallows ordinary nested failures for transient UI whose absence is acceptable. It rethrows Network policy failures because Operator authority cannot become optional Recipe behavior.
 
 ## Site ownership
 
@@ -72,16 +81,11 @@ A server shotlist starts runs in its own process group and is stopped by `withSe
 existing server is never stopped. Shutdown is idempotent, sends `SIGTERM`, and escalates to
 `SIGKILL` after five seconds so child processes cannot outlive the command.
 
-Readiness may be an HTTP(S) URL, a TCP port, or an output pattern. Retain the last 40 output
-lines and race readiness against child exit, because an early crash or missing executable
-is the useful error rather than a generic timeout.
+Readiness may be an HTTP(S) URL, a TCP port, or an output pattern. Authorize the command before probing, check every HTTP redirect manually, and check a numeric port as exact TCP access to `127.0.0.1`. Retain the last 40 output lines and race readiness against child exit, because an early crash or missing executable is the useful error rather than a generic timeout.
 
 ## Session ownership
 
-A recipe names a configured session; `src/session.ts` resolves it relative to the config
-root, narrows it to approved hosts, and loads it into the attempt context. A configured
-verification selector distinguishes an authenticated page from a silent redirect to sign
-in.
+A Recipe names a configured Session; `src/session.ts` resolves it relative to the config root, narrows it to the site host and explicit `keep` hosts, and loads it into the attempt context. Network destination approvals do not retain credentials, and `keep` does not grant network access. A configured verification Query distinguishes an authenticated page from a silent redirect to sign in.
 
 Login writes narrowed storage state only after optional verification in a fresh context.
 Session files use mode `0600`, including files that already existed, because they contain

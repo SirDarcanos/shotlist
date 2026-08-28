@@ -113,31 +113,45 @@ npx shotlist --check              # compare against committed images
 npx shotlist --check --diff       # …and write a before/after/changed image
 npx shotlist --check --json       # …and report it as JSON on stdout
 npx shotlist --lint               # check every YAML; no browser, no site needed
+npx shotlist --work-limit executedSteps=20000 <name>
+                                  # let this Run execute more Steps
 npx shotlist --login admin        # sign in by hand, and save the session
 npx shotlist --help               # the full list, from the tool
 ```
 
 ## Library API
 
-Your caller grants Operator authority. Pass it to `openRun`, then select a Recipe from the
-Run's Library:
+Your caller grants Operator authority. Pass it to `openRun`, then Capture named Recipes or
+all Recipes through the Run:
 
 ```ts
-import { openRun, shoot } from 'shotlist'
+import { openRun } from 'shotlist'
 
 const run = openRun({ untrusted: false }, 'shotlist.config.yaml')
-const recipe = run.project.library.recipes.get('order-row')!
-await shoot(run, recipe, { install: true })
+const report = await run.capture({
+  recipes: ['order-row', 'account-menu'],
+})
 ```
 
-Pass the Run to capture, checking, Session, server, step, and Baseline functions. shotlist
-rejects a hand-built Run or a copied Recipe before it touches the browser, filesystem,
-network, or a process. The caller grants Operator authority; the Project config does not.
+Named Recipes keep caller order; `{ all: true }` uses recipe-name order. The immutable
+report gives every selected Recipe a `captured`, `failed`, or `not-attempted` result.
+`keepGoing: true` attempts later Recipes after a failure. The Run remains reusable after a
+request settles and rejects overlapping requests.
+
+shotlist rejects a hand-built Run before it touches the browser, filesystem, network, or a
+process. The caller grants Operator authority, including any numerical Work limit changes;
+the Project config does not.
 
 Pass authority to lint because a malformed Project cannot open a complete Run:
 `lint({ untrusted: false }, 'shotlist.config.yaml')`. Use `parseConfig`, `parseRecipe`,
 `parseMacro`, `parseLibrary`, and `parseQuery` to parse in-memory values without Operator
 authority.
+
+Every Run applies Work limits to Library document size, authored structure, Macro
+expansion, actual Steps, and elapsed Recipe work. A Project cannot raise them. An Operator
+may change a numerical limit for one command with `--work-limit name=value`, through
+protected `SHOTLIST_WORK_LIMITS`, or through `OperatorAuthority.workLimits` in TypeScript.
+`shotlist --lint` rejects predictable excess before shotlist starts a site or browser.
 
 ## A recipe is data
 
@@ -149,9 +163,7 @@ not support `eval:` or other executable recipe fields. See
 ## Running a config you did not write
 
 Automation may run a config from a fork or another contributor. In every mode, shotlist
-blocks secret-looking paths such as `.env`, `.git`, and `.ssh`. In `--untrusted` mode,
-shotlist starts no configured process, loads no stored session, accepts approved HTTP(S)
-hosts, and confines paths to approved roots.
+blocks secret-looking paths such as `.env`, `.git`, and `.ssh`. It checks browser requests, redirects, WebSockets, and readiness probes against approved protocol, host, and port values. In `--untrusted` mode, shotlist starts no configured process, loads no stored Session, accepts no Project-provided Network destination approvals, and confines paths to approved roots. Use `--allow` or protected `SHOTLIST_ALLOW` settings to grant exact destinations, and keep hostile Projects inside an isolated runner.
 
 Read the full policy and its limits in the
 **[security model](https://shotlist.dev/docs/explanation/security-model)**.

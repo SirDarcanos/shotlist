@@ -5,14 +5,18 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { ShotlistError, fromRoot, pageMessage } from './config.js'
-import { authorizePath, checkSession, checkUrl, covers } from './trust.js'
+import { authorizePath, checkSession, covers } from './trust.js'
+import { NetworkPolicyError } from './network-policy.js'
+import type { NetworkAccess } from './network-policy.js'
+import { guardedContext } from './network-playwright.js'
 import { expandSteps } from './recipe.js'
 import { runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
-import { assertRun } from './run.js'
+import { assertRun, networkPolicyFor, workLimitsFor } from './run.js'
 import type { Run } from './run.js'
+import { createRecipeWork } from './work-limit.js'
 
 /** A Session as this module needs it: where it lives, and what proves it still works. */
 interface Session {
@@ -72,7 +76,13 @@ interface Dropped {
  */
 /** Derive the hosts whose state one configured Session may retain. */
 function hostsForSession(run: Run, session: Session): readonly string[] {
-  return [...run.trust.hosts, ...session.keep]
+  let site = ''
+  try {
+    site = new URL(run.project.config.site.url).hostname
+  } catch {
+    // A non-network site has no host whose credentials can be retained.
+  }
+  return [site, ...session.keep].filter(Boolean)
 }
 
 /** The hostname of an origin, or an empty string when it is not one — which never matches. */
@@ -178,14 +188,19 @@ async function proveSession(
   session: Session,
   state: StorageState,
   dropped: Dropped,
+  access: NetworkAccess,
 ): Promise<void> {
   const site = run.project.config.site
-  const context = await browser.newContext({ viewport: site.viewport, storageState: state })
+  const context = await guardedContext(browser, access, {
+    viewport: site.viewport,
+    storageState: state,
+  })
   try {
     const page = await context.newPage()
     await page.goto(site.url, { waitUntil: 'load' })
     await page.waitForSelector(session.verify!, { timeout: site.timeout })
   } catch {
+    access.throwIfBlocked()
     throw new ShotlistError(
       `--login ${session.name}: the sign-in worked and what is left of it does not — ` +
         `"${session.verify}" never appeared at ${site.url} once ${leftOut(dropped)} were ` +
@@ -274,7 +289,8 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
   const session = resolveSession(run, name, '--login')
   const library = run.project.library
   const { site } = loaded.config
-  checkUrl(run.trust, site.url, 'site.url')
+  const access = networkPolicyFor(run).forOperation(`--login ${session.name}`)
+  access.check(site.url)
 
   const scripted = options.using !== undefined
   if (!scripted && !options.pause) {
@@ -297,11 +313,12 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
   }
   const browser = await loadPlaywright().chromium.launch({ headless: scripted })
   try {
-    const context = await browser.newContext({ viewport: site.viewport })
+    const context = await guardedContext(browser, access, { viewport: site.viewport })
     const page = await context.newPage()
     try {
       await page.goto(site.url, { waitUntil: 'load' })
     } catch (error) {
+      access.throwIfBlocked()
       throw new ShotlistError(
         `--login ${session.name}: could not open ${site.url} — ${pageMessage(error)}. ` +
           'Is the site running?',
@@ -309,6 +326,8 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
     }
 
     if (options.using !== undefined) {
+      const scriptedWork = createRecipeWork(workLimitsFor(run), `--login ${session.name}`)
+      const work = scriptedWork.attempt()
       const ctx: RunContext = {
         pages: new Map<string, Page>([['main', page]]),
         page,
@@ -316,15 +335,22 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
         rects: {},
         viewport: site.viewport,
         timeout: site.timeout,
+        network: access,
+        work,
         newPage: () => context.newPage(),
+        stop: () => context.close(),
       }
       try {
         const steps = expandSteps([{ use: options.using }], library.macros)
-        await runSteps(run, steps, ctx)
+        await runSteps(run, steps, ctx, {}, work)
       } catch (error) {
+        if (error instanceof NetworkPolicyError) throw error
+        access.throwIfBlocked()
         throw new ShotlistError(
           `--login ${session.name}: \`${options.using}\` — ${pageMessage(error)}`,
         )
+      } finally {
+        scriptedWork.dispose()
       }
     } else {
       options.say(`A browser is open at ${site.url}. Sign in there, then press Enter here.`)
@@ -342,6 +368,7 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
         )
       }
     }
+    access.throwIfBlocked()
     const hosts = hostsForSession(run, session)
     const { state, dropped } = narrowSession(await context.storageState(), hosts)
 
@@ -350,7 +377,7 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
     // the narrowed state is loaded into a context of its own and asked the same question.
     // Before the file is written, so a session that does not work leaves nothing behind.
     if ((dropped.cookies || dropped.origins) && session.verify) {
-      await proveSession(browser, run, session, state, dropped)
+      await proveSession(browser, run, session, state, dropped, access)
     }
 
     // Anyone holding this file is signed in as that account. `mode` is only honored for a

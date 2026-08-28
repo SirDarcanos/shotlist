@@ -115,8 +115,8 @@ const SessionOptions = z
      * knowing that the file then signs in as whoever that host knows you as. `--login`
      * says out loud what it kept because of this.
      *
-     * Widening, so it is honored the way `site.allow` is: an `--untrusted` run loads no
-     * session at all, so there is nothing here for a config nobody vouched for to widen.
+     * This controls credential retention rather than network access. The destination
+     * still needs its own approval. An `--untrusted` Run loads no Session at all.
      */
     keep: z.array(z.string()).default([]),
   })
@@ -135,9 +135,9 @@ const Site = z.strictObject({
   /** Signed-in states by name, written by `--login <name>` and picked by a recipe's `session:`. */
   sessions: z.record(z.string(), Session).default({}),
   /**
-   * Hosts a shot may open besides this site's own and everything under it — a sign-in
-   * provider a flow passes through, a docs domain, a third-party page worth shooting.
-   * Ignored by an `--untrusted` run, which is what makes that flag worth having.
+   * Network destinations a trusted Project approves besides `site.url`. A bare host means
+   * HTTPS port 443; HTTP, unusual ports, and wildcard subdomains must be explicit.
+   * An untrusted Project contributes no approvals, including its main site.
    */
   allow: z.array(z.string()).default([]),
   viewport: Viewport.default({ width: 1280, height: 800 }),
@@ -401,7 +401,7 @@ export function pageMessage(error: unknown): string {
 }
 
 /** Parse YAML or JSON text against the filename an author knows. */
-function parseDocumentText(text: string, file: string): unknown {
+export function parseDocumentText(text: string, file: string): unknown {
   try {
     return file.endsWith('.json') ? JSON.parse(text) : parseYaml(text)
   } catch (error) {

@@ -14,22 +14,22 @@ import {
   parseRecipe,
   readBaseline,
   readSession,
-  runSteps,
   shoot,
   signIn,
   startServer,
   withServer,
   writeBaseline,
 } from '../src/index.js'
-import type { Run, RunContext } from '../src/index.js'
+import type { Run } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 if (false) {
-  const context = {} as RunContext
   const run = {} as Run
 
-  // @ts-expect-error Steps cannot run without a Run.
-  void runSteps([], context)
+  // @ts-expect-error Low-level Step execution is not a package-root interface.
+  shotlist.runSteps
+  // @ts-expect-error Low-level browser context details are not a package-root type.
+  void ({} as shotlist.RunContext)
   // @ts-expect-error Capture no longer accepts Recipe, Library, and config arguments.
   void shoot({}, {}, {}, {})
   // @ts-expect-error Checking no longer accepts Recipe, Library, and config arguments.
@@ -78,6 +78,7 @@ describe('the contracted public interface', () => {
     expect('sessionHosts' in shotlist).toBe(false)
     expect('narrowSession' in shotlist).toBe(false)
     expect('run' in shotlist).toBe(false)
+    expect('runSteps' in shotlist).toBe(false)
   })
 
   it('parses supplied values without opening a Run', () => {
@@ -102,12 +103,6 @@ describe('the contracted public interface', () => {
     const recipe = authentic.project.library.recipes.get('order-row')!
     const forged = { ...authentic } as Run
     let touched = false
-    const context = {
-      get page() {
-        touched = true
-        throw new Error('page was touched')
-      },
-    } as unknown as RunContext
     const body = async () => {
       touched = true
       return 1
@@ -117,9 +112,6 @@ describe('the contracted public interface', () => {
     expect(() => readBaseline(forged)).toThrow(/A Run opened by shotlist is required/)
     expect(() => writeBaseline(forged, {})).toThrow(/A Run opened by shotlist is required/)
     expect(() => readSession(forged, 'admin')).toThrow(/A Run opened by shotlist is required/)
-    await expect(runSteps(forged, [], context)).rejects.toThrow(
-      /A Run opened by shotlist is required/,
-    )
     await expect(shoot(forged, recipe)).rejects.toThrow(/A Run opened by shotlist is required/)
     await expect(check(forged, [recipe])).rejects.toThrow(/A Run opened by shotlist is required/)
     await expect(startServer(forged)).rejects.toThrow(/A Run opened by shotlist is required/)

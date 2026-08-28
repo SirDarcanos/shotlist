@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { loadConfig } from '../src/config.js'
 import { countLibraryDocuments, openLibrary, reviewLibrary } from '../src/library.js'
 import { projectPolicy } from '../src/run.js'
+import { resolveWorkLimits } from '../src/work-limit.js'
 
 const made: string[] = []
 
@@ -49,6 +50,17 @@ describe('Library opening', () => {
     expect([...library.recipes.keys()]).toEqual(['a-first', 'z-last'])
     expect(Object.isFrozen(library.data['user'])).toBe(true)
     expect(() => (library.recipes as Map<string, unknown>).set('later', {})).toThrow()
+  })
+
+  it('refuses an oversized Recipe before parsing it', () => {
+    const root = project({
+      'screenshots/recipes/large.yaml': 'name: [unfinished',
+    })
+    const { loaded, trust } = under(root, false)
+
+    expect(() => openLibrary(loaded, trust, resolveWorkLimits({ recipeBytes: 8 }))).toThrow(
+      /Recipe is larger than 8 bytes; the Work limit is 8/,
+    )
   })
 
   it('opens a document symlinked through an operator-granted path', () => {
@@ -115,6 +127,57 @@ describe('Library review', () => {
     expect(review.problems).toHaveLength(1)
     expect(review.problems[0]).toMatchObject({ file: authored, level: 'error' })
     expect(review.problems[0]!.message).toMatch(/paths\.recipes: .*outside the project/)
+  })
+
+  it('warns when a Library document reaches eighty percent of its Work limit', () => {
+    const root = project({ 'screenshots/recipes/near.yaml': 'clip: viewport\n' })
+    const { loaded, trust } = under(root, false)
+
+    const review = reviewLibrary(loaded, trust, {}, resolveWorkLimits({ recipeBytes: 18 }))
+
+    expect(review.problems).toEqual([
+      expect.objectContaining({ level: 'warning', message: expect.stringMatching(/15 bytes.*18/) }),
+    ])
+  })
+
+  it('warns when authored Steps reach eighty percent of their Work limit', () => {
+    const steps = Array.from(
+      { length: 8 },
+      (_, index) => `  - click: { css: .item-${index} }`,
+    ).join('\n')
+    const root = project({ 'screenshots/recipes/near.yaml': `setup:\n${steps}\n` })
+    const { loaded, trust } = under(root, false)
+
+    const review = reviewLibrary(loaded, trust, {}, resolveWorkLimits({ authoredSteps: 10 }))
+
+    expect(review.problems).toEqual([
+      expect.objectContaining({
+        file: join(root, 'screenshots/recipes/near.yaml'),
+        level: 'warning',
+        message: expect.stringMatching(/8 authored Steps.*Work limit.*10/),
+      }),
+    ])
+  })
+
+  it('reports predictable loop work without starting a Run', () => {
+    const root = project({
+      'screenshots/recipes/loop.yaml': `setup:
+  - repeat: 2
+    steps:
+      - click: { css: .first }
+      - click: { css: .second }
+`,
+    })
+    const { loaded, trust } = under(root, false)
+
+    const review = reviewLibrary(loaded, trust, {}, resolveWorkLimits({ executedSteps: 4 }))
+
+    expect(review.problems).toEqual([
+      expect.objectContaining({
+        level: 'error',
+        message: expect.stringMatching(/would run 5 Steps/),
+      }),
+    ])
   })
 
   it('continues through other Library directories after one cannot be enumerated', () => {

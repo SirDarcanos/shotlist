@@ -21,7 +21,8 @@ export function tempProject(): string {
   const root = mkdtempSync(join(tmpdir(), 'shotlist-'))
   cpSync(join(HERE, 'project'), root, { recursive: true })
   const file = join(root, 'shotlist.config.yaml')
-  writeFileSync(file, readFileSync(file, 'utf8').replace('url: FIXTURE', `url: ${FIXTURE}`))
+  const fixtureData = `data:text/html;base64,${readFileSync(join(HERE, 'fixture/index.html')).toString('base64')}`
+  writeFileSync(file, readFileSync(file, 'utf8').replace('url: FIXTURE', `url: ${fixtureData}`))
   made.push(root)
   return root
 }

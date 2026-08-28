@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { loadPlaywright, openRun, runSteps } from '../src/index.js'
+import { loadPlaywright, openRun } from '../src/index.js'
 import type { Run } from '../src/index.js'
 import type { Browser, Page } from '../src/playwright.js'
-import { resolve } from '../src/steps.js'
+import { networkPolicyFor } from '../src/run.js'
+import { resolve, runSteps } from '../src/steps.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -124,6 +125,7 @@ describe('a query naming a frame', () => {
       rects: {},
       viewport: ctx.viewport,
       timeout: 5000,
+      network: networkPolicyFor(domainRun).forOperation('Frame test'),
       newPage: () => Promise.reject(new Error('not needed')),
     }
     const step = { click: { frame: { css: 'iframe#panel' }, css: '#pay' } }

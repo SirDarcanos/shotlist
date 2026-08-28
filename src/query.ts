@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { validateMatching, validateMatchingIn } from './matching.js'
 
 /** A rectangle in CSS pixels, relative to the viewport. */
 export interface Rect {
@@ -22,10 +23,18 @@ export const NumberOrRef = z.union([z.int(), z.string().regex(/^\$\{?[A-Za-z_]/)
  */
 const Index = NumberOrRef
 
+const Matching = z.string().superRefine((pattern, ctx) => {
+  try {
+    validateMatching(pattern, Number.MAX_SAFE_INTEGER)
+  } catch (error) {
+    ctx.addIssue({ code: 'custom', message: (error as Error).message })
+  }
+})
+
 const Filters = z.object({
   contains: z.string().optional(),
   containingAll: z.array(z.string()).optional(),
-  matching: z.string().optional(),
+  matching: Matching.optional(),
   text: z.string().optional(),
   startsWith: z.string().optional(),
   maxChildren: z.int().nonnegative().optional(),
@@ -249,7 +258,9 @@ export function parseQuery(
   aliases: Readonly<Record<string, unknown>> = {},
 ): QueryInput {
   refuseDeepNesting(node)
-  return Query.parse(resolveAliases(node, aliases)) as QueryInput
+  const expanded = resolveAliases(node, aliases)
+  validateMatchingIn(expanded)
+  return Query.parse(expanded) as QueryInput
 }
 
 /** How far a query may nest. Far past anything a person writes, and short of the stack. */
