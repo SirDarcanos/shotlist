@@ -7,6 +7,8 @@ import { compileNetworkPolicy } from './network-policy.js'
 import type { NetworkDestination, NetworkPolicy } from './network-policy.js'
 import { trustFromEnvironment } from './trust.js'
 import type { Trust } from './trust.js'
+import { resolveWorkLimits, workLimitOverrides, workLimitsFromEnvironment } from './work-limit.js'
+import type { WorkLimitOverrides, WorkLimits } from './work-limit.js'
 
 export type { DeepReadonly, ProjectLibrary } from './library.js'
 
@@ -22,6 +24,8 @@ export interface OperatorAuthority {
   readonly deny?: readonly string[]
   /** Environment names the operator grants to recipes. */
   readonly env?: readonly string[]
+  /** Numerical Work limits explicitly chosen by the Operator. */
+  readonly workLimits?: WorkLimitOverrides
 }
 
 /** A parsed configuration and its complete Library. */
@@ -47,12 +51,14 @@ export interface Run {
 export interface ProjectPolicy {
   readonly authority: DeepReadonly<OperatorAuthority>
   readonly trust: DeepReadonly<Trust>
+  readonly workLimits: Readonly<WorkLimits>
   readonly environment: Readonly<Record<string, string | undefined>>
 }
 
 /** Full process environment snapshots retained without exposing ungranted values to recipes. */
 const ENVIRONMENTS = new WeakMap<Run, Readonly<Record<string, string | undefined>>>()
 const NETWORK_POLICIES = new WeakMap<Run, NetworkPolicy>()
+const WORK_LIMITS = new WeakMap<Run, Readonly<WorkLimits>>()
 
 /** Refuse a value not created by shotlist's Run opener. */
 export function assertRun(value: unknown): asserts value is Run {
@@ -99,12 +105,14 @@ function snapshotAuthority(value: unknown): Readonly<OperatorAuthority> {
   const paths = copy('paths')
   const deny = copy('deny')
   const env = copy('env')
+  const workLimits = workLimitOverrides(source['workLimits'] ?? {})
   const authority: OperatorAuthority = {
     untrusted: source['untrusted'],
     ...(destinations !== undefined ? { destinations } : {}),
     ...(paths !== undefined ? { paths } : {}),
     ...(deny !== undefined ? { deny } : {}),
     ...(env !== undefined ? { env } : {}),
+    ...(source['workLimits'] !== undefined ? { workLimits } : {}),
   }
   return Object.freeze(authority)
 }
@@ -148,7 +156,11 @@ function policyFrom(
       environment,
     ),
   )
-  return Object.freeze({ authority, trust, environment })
+  const workLimits = resolveWorkLimits({
+    ...workLimitsFromEnvironment(environment),
+    ...authority.workLimits,
+  })
+  return Object.freeze({ authority, trust, workLimits, environment })
 }
 
 /** Derive immutable policy state for a loaded Project under explicit Operator authority. */
@@ -157,6 +169,12 @@ export function projectPolicy(
   loaded: LoadedConfig,
 ): ProjectPolicy {
   return policyFrom(operatorAuthority(authorityValue), loaded, Object.freeze({ ...process.env }))
+}
+
+/** Return the private Work limits owned by an authentic Run. */
+export function workLimitsFor(run: Run): Readonly<WorkLimits> {
+  assertRun(run)
+  return WORK_LIMITS.get(run)!
 }
 
 /** Return the private Network destination policy owned by an authentic Run. */
@@ -217,7 +235,7 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
   const environment = Object.freeze({ ...process.env })
   const loaded = loadConfig(configFile)
   const config = loaded.config
-  const { trust } = policyFrom(authority, loaded, environment)
+  const { trust, workLimits } = policyFrom(authority, loaded, environment)
 
   const network = compileNetworkPolicy({
     operator: [...(authority.destinations ?? []), ...destinationsFromEnvironment(environment)],
@@ -225,7 +243,7 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
     untrusted: authority.untrusted,
     deny: trust.deny,
   })
-  const library = openLibrary(loaded, trust)
+  const library = openLibrary(loaded, trust, workLimits)
   const project = Object.freeze({
     config: deepFreeze(config),
     root: loaded.root,
@@ -249,5 +267,6 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
   })
   ENVIRONMENTS.set(run, environment)
   NETWORK_POLICIES.set(run, network)
+  WORK_LIMITS.set(run, workLimits)
   return run
 }

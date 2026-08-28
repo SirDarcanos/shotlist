@@ -66,6 +66,7 @@
     }
   },
   "dependencies": {
+    "safe-regex2": "^5.1.1",
     "yaml": "^2.6.0",
     "zod": "^4.0.0"
   },

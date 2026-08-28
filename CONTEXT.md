@@ -97,6 +97,11 @@ Project and granted environment values. Every Recipe used by the invocation belo
 view.
 _Avoid_: Executable Project, Recipe run
 
+**Work limit**:
+An Operator-owned ceiling on Library document size, authored structure, Step execution, or
+elapsed work during a Run. A Project cannot raise a Work limit.
+_Avoid_: Budget, allowance
+
 **Capture**:
 The production of one Recipe's Output image within a Run, using its source, Clip, and
 Annotation.

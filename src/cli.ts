@@ -15,6 +15,7 @@ import { openRun } from './run.js'
 import type { DeepReadonly, OperatorAuthority, ProjectLibrary } from './run.js'
 import type { NetworkDestination } from './network-policy.js'
 import { BASELINE_FILE } from './baseline.js'
+import { parseWorkLimitChanges } from './work-limit.js'
 
 const USAGE = `shotlist — annotated UI screenshots from YAML recipes
 
@@ -42,6 +43,9 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   --allow <dest>    approve one Network destination; repeatable
   --allow-path <p>  also read and write under this directory; repeatable
   --deny <name>     never read or write this file or folder name; repeatable
+  --work-limit <n=v>
+                    change one numerical Work limit for this Run; repeatable
+                    SHOTLIST_WORK_LIMITS accepts comma-separated name=value settings
   --help            this
   --version         print the version`
 
@@ -125,6 +129,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         allow: { type: 'string', multiple: true },
         'allow-path': { type: 'string', multiple: true },
         deny: { type: 'string', multiple: true },
+        'work-limit': { type: 'string', multiple: true },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
       },
@@ -168,12 +173,19 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     return 0
   }
 
-  const authority: OperatorAuthority = {
-    untrusted: values.untrusted,
-    destinations: values.allow ?? [],
-    paths: values['allow-path'] ?? [],
-    deny: values.deny ?? [],
-    env: values['allow-env'] ?? [],
+  let authority: OperatorAuthority
+  try {
+    authority = {
+      untrusted: values.untrusted,
+      destinations: values.allow ?? [],
+      paths: values['allow-path'] ?? [],
+      deny: values.deny ?? [],
+      env: values['allow-env'] ?? [],
+      workLimits: parseWorkLimitChanges(values['work-limit'] ?? []),
+    }
+  } catch (error) {
+    io.err((error as Error).message)
+    return 1
   }
 
   // Before a complete Run is opened, because malformed Library documents are what this

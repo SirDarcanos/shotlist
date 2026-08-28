@@ -299,6 +299,11 @@ recipes/order-row.yaml
 1 error in 3 files
 ```
 
+Lint also rejects predictable work beyond a Work limit and warns at 80% of one. Every Run
+limits document size, nesting, Macro expansion, actual Steps, and elapsed Recipe work. A
+Project cannot raise these limits. When a legitimate Recipe needs more, the Operator can
+run `npx shotlist --work-limit executedSteps=20000 <name>`; keep the Recipe unchanged.
+
 It checks shape, not truth: a `css` selector that matches nothing is only knowable against
 a real page. `--warnings` adds what is legal but probably unmeant — a mark no callout
 points at, an `install:` the config does not name — and never changes the exit code.
@@ -316,6 +321,8 @@ Errors name the recipe and the key inside it. Match the message to the fix:
 | `` `site.ready` — waited …, which never appeared``      | The readiness selector, or `site.settle` for what a selector cannot see          |
 | `` `file:` — no file at …``                             | The path, which resolves from the config file's directory                        |
 | `installs to "x", which the config does not define`     | The recipe's `install:`, or add the destination to the config                    |
+| `the Work limit is …`                                   | Reduce the work, or have the Operator raise the named numerical limit            |
+| `matching … cannot run safely`                          | Use `text`, `contains`, `startsWith`, or a simpler `matching` pattern            |
 
 A query that matches the wrong element fails differently: it succeeds and produces a wrong
 image. That is why you look at the output.

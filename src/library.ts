@@ -1,11 +1,23 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readSync, readdirSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { ShotlistError, fromRoot, readDocumentAt } from './config.js'
+import { ShotlistError, fromRoot, parseDocumentText } from './config.js'
 import type { LoadedConfig } from './config.js'
 import { parseMacro, parseRecipe, withNumbering } from './recipe.js'
 import type { Macro, Recipe } from './recipe.js'
 import { authorizePath } from './trust.js'
 import type { Trust } from './trust.js'
+import {
+  DEFAULT_WORK_LIMITS,
+  WorkLimitError,
+  authoredWork,
+  matchingMeasurementsIn,
+  nearWorkLimit,
+  preflightLibrary,
+  preflightMacro,
+  preflightRecipe,
+  validateMatchingIn,
+} from './work-limit.js'
+import type { WorkLimits } from './work-limit.js'
 
 const DOCUMENTS = new Set(['.yaml', '.yml', '.json'])
 
@@ -51,10 +63,11 @@ export interface LibraryDocuments {
 export function parseLibrary(
   documents: LibraryDocuments,
   finders: Readonly<Record<string, unknown>> = {},
+  workLimits: Readonly<WorkLimits> = DEFAULT_WORK_LIMITS,
 ): Library {
   const macros = new Map<string, Macro>()
   for (const { name, file, raw } of documents.macros) {
-    const macro = parseMacro(raw, { finders, file })
+    const macro = parseMacro(raw, { finders, file, workLimits })
     macros.set(macro.name ?? name, macro)
   }
 
@@ -71,11 +84,13 @@ export function parseLibrary(
 
   const recipes = new Map<string, Recipe>()
   for (const { name, file, raw } of documents.recipes) {
-    const recipe = withNumbering(parseRecipe(raw, { finders, file, name }))
+    const recipe = withNumbering(parseRecipe(raw, { finders, file, name, workLimits }))
     recipes.set(recipe.name!, recipe)
   }
 
-  return { recipes, macros, data }
+  const library = { recipes, macros, data }
+  preflightLibrary(library, workLimits)
+  return library
 }
 
 /** One problem found while reviewing an incomplete Library. */
@@ -247,17 +262,60 @@ function freezeLibrary(library: Library): ProjectLibrary {
   return Object.freeze({ recipes, macros, data: deepFreeze(library.data) })
 }
 
-/** Read a prepared document without exposing its authorized target in a failure. */
-function readPreparedDocument(document: { file: string; target: string }): unknown {
+/** Read one Library document through the Work limit before parsing its text. */
+function readPreparedDocument(
+  document: { file: string; target: string },
+  kind: LibraryKind,
+  workLimits: Readonly<WorkLimits>,
+): { raw: unknown; bytes: number; limitName: 'recipeBytes' | 'macroBytes' | 'dataBytes' } {
+  const limitName =
+    kind === 'recipes' ? 'recipeBytes' : kind === 'macros' ? 'macroBytes' : 'dataBytes'
+  const allowed = workLimits[limitName]
+  const chunks: Buffer[] = []
+  let bytes = 0
+  let descriptor: number | undefined
   try {
-    return readDocumentAt(document.target, document.file)
+    descriptor = openSync(document.target, 'r')
+    for (;;) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, allowed - bytes + 1))
+      const read = readSync(descriptor, chunk, 0, chunk.length, null)
+      if (!read) break
+      bytes += read
+      if (bytes > allowed) {
+        const label = kind === 'recipes' ? 'Recipe' : kind === 'macros' ? 'Macro' : 'Data document'
+        throw new WorkLimitError(
+          `${label} is larger than ${allowed} bytes; the Work limit is ${allowed}`,
+          limitName,
+          bytes,
+          allowed,
+          document.file,
+        )
+      }
+      chunks.push(chunk.subarray(0, read))
+    }
+    return {
+      raw: parseDocumentText(Buffer.concat(chunks, bytes).toString('utf8'), document.file),
+      bytes,
+      limitName,
+    }
   } catch (error) {
     throw authoredError(error, document.target, document.file)
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor)
   }
 }
 
 /** Read and publish one complete immutable Library, or expose none of it. */
-export function openLibrary(loaded: LoadedConfig, trust: Trust): ProjectLibrary {
+export function openLibrary(
+  loaded: LoadedConfig,
+  trust: Trust,
+  workLimits: Readonly<WorkLimits> = DEFAULT_WORK_LIMITS,
+): ProjectLibrary {
+  try {
+    validateMatchingIn(loaded.config.finders, workLimits.matchingCharacters)
+  } catch (error) {
+    throw new ShotlistError((error as Error).message, loaded.file)
+  }
   const groups = prepareLibrary(loaded, trust)
   for (const group of groups) {
     if ('error' in group && group.stage === 'authorization') throw group.error
@@ -283,11 +341,11 @@ export function openLibrary(loaded: LoadedConfig, trust: Trust): ProjectLibrary 
       documents[group.kind].push({
         name: document.name,
         file: document.file,
-        raw: readPreparedDocument(document),
+        raw: readPreparedDocument(document, group.kind, workLimits).raw,
       })
     }
   }
-  return freezeLibrary(parseLibrary(documents, loaded.config.finders))
+  return freezeLibrary(parseLibrary(documents, loaded.config.finders, workLimits))
 }
 
 /** What a thrown failure says without the filename the review already carries. */
@@ -323,9 +381,27 @@ export function reviewLibrary(
   loaded: LoadedConfig,
   trust: Trust,
   options: LibraryReviewOptions = {},
+  workLimits: Readonly<WorkLimits> = DEFAULT_WORK_LIMITS,
 ): LibraryReview {
   const problems: LibraryProblem[] = []
+  try {
+    validateMatchingIn(loaded.config.finders, workLimits.matchingCharacters)
+    for (const matching of matchingMeasurementsIn(loaded.config.finders)) {
+      if (nearWorkLimit(matching.characters, workLimits.matchingCharacters)) {
+        problems.push({
+          file: loaded.file,
+          level: 'warning',
+          message: `finders.${matching.path} has ${matching.characters} matching characters; the Work limit is ${workLimits.matchingCharacters}`,
+        })
+      }
+    }
+  } catch (error) {
+    problems.push({ file: loaded.file, level: 'error', message: (error as Error).message })
+  }
   const groups = prepareLibrary(loaded, trust)
+  const reviewLibrary: Library = { recipes: new Map(), macros: new Map(), data: {} }
+  const recipeFiles = new Map<string, string>()
+  const macroFiles = new Map<string, string>()
   let documents = 0
 
   for (const group of groups) {
@@ -341,23 +417,156 @@ export function reviewLibrary(
         continue
       }
       try {
-        const raw = readPreparedDocument(document)
+        const read = readPreparedDocument(document, group.kind, workLimits)
+        const { raw } = read
+        if (nearWorkLimit(read.bytes, workLimits[read.limitName])) {
+          problems.push({
+            file,
+            level: 'warning',
+            message: `${read.bytes} bytes approach the Work limit of ${workLimits[read.limitName]}`,
+          })
+        }
         if (group.kind === 'macros') {
-          parseMacro(raw, { finders: loaded.config.finders, file })
+          const macro = parseMacro(raw, { finders: loaded.config.finders, file, workLimits })
+          const name = macro.name ?? document.name
+          reviewLibrary.macros.set(name, macro)
+          macroFiles.set(name, file)
+          const measured = authoredWork(raw, ['steps'], workLimits, file)
+          if (nearWorkLimit(measured.count, workLimits.authoredSteps)) {
+            problems.push({
+              file,
+              level: 'warning',
+              message: `${measured.count} authored Steps approach the Work limit of ${workLimits.authoredSteps}`,
+            })
+          }
+          if (nearWorkLimit(measured.depth, workLimits.stepDepth)) {
+            problems.push({
+              file,
+              level: 'warning',
+              message: `Step nesting of ${measured.depth} approaches the Work limit of ${workLimits.stepDepth}`,
+            })
+          }
+          for (const matching of matchingMeasurementsIn(raw)) {
+            if (nearWorkLimit(matching.characters, workLimits.matchingCharacters)) {
+              problems.push({
+                file,
+                level: 'warning',
+                message: `${matching.path} has ${matching.characters} matching characters; the Work limit is ${workLimits.matchingCharacters}`,
+              })
+            }
+          }
         } else if (group.kind === 'recipes') {
           const recipe = withNumbering(
-            parseRecipe(raw, { finders: loaded.config.finders, file, name: document.name }),
+            parseRecipe(raw, {
+              finders: loaded.config.finders,
+              file,
+              name: document.name,
+              workLimits,
+            }),
           )
+          reviewLibrary.recipes.set(recipe.name!, recipe)
+          recipeFiles.set(recipe.name!, file)
+          const measured = authoredWork(raw, ['setup', 'teardown'], workLimits, file)
+          if (nearWorkLimit(measured.count, workLimits.authoredSteps)) {
+            problems.push({
+              file,
+              level: 'warning',
+              message: `${measured.count} authored Steps approach the Work limit of ${workLimits.authoredSteps}`,
+            })
+          }
+          if (nearWorkLimit(measured.depth, workLimits.stepDepth)) {
+            problems.push({
+              file,
+              level: 'warning',
+              message: `Step nesting of ${measured.depth} approaches the Work limit of ${workLimits.stepDepth}`,
+            })
+          }
+          for (const matching of matchingMeasurementsIn(raw)) {
+            if (nearWorkLimit(matching.characters, workLimits.matchingCharacters)) {
+              problems.push({
+                file,
+                level: 'warning',
+                message: `${matching.path} has ${matching.characters} matching characters; the Work limit is ${workLimits.matchingCharacters}`,
+              })
+            }
+          }
           if (options.warnings) {
             for (const message of suspect(recipe, loaded)) {
               problems.push({ file, message, level: 'warning' })
             }
           }
+        } else {
+          Object.defineProperty(reviewLibrary.data, document.name, {
+            value: raw,
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          })
         }
-        // Data documents may have any shape, so a successful syntax parse completes review.
       } catch (error) {
         problems.push({ file, message: said(error, file), level: 'error' })
       }
+    }
+  }
+
+  for (const name of reviewLibrary.macros.keys()) {
+    const file = macroFiles.get(name)!
+    try {
+      const measured = preflightMacro(name, reviewLibrary, workLimits)
+      const checks: Array<[number, number, string]> = [
+        [measured.expanded, workLimits.expandedSteps, 'expanded Steps'],
+        [measured.executed, workLimits.executedSteps, 'predictable Steps'],
+        [measured.milliseconds, workLimits.recipeMilliseconds, 'predictable wait milliseconds'],
+        [measured.eachItems, workLimits.eachItems, 'each items'],
+        [measured.macroDepth, workLimits.macroDepth, 'Macro depth'],
+      ]
+      for (const [observed, allowed, label] of checks) {
+        if (nearWorkLimit(observed, allowed)) {
+          problems.push({
+            file,
+            level: 'warning',
+            message: `${label}: ${observed} approaches the Work limit of ${allowed}`,
+          })
+        }
+      }
+    } catch (error) {
+      problems.push({ file, message: said(error, file), level: 'error' })
+    }
+  }
+
+  for (const [name, recipe] of reviewLibrary.recipes) {
+    const file = recipeFiles.get(name)!
+    try {
+      const measured = preflightRecipe(name, recipe, reviewLibrary, workLimits)
+      const checks: Array<[number, number, string]> = [
+        [measured.setup.expanded, workLimits.expandedSteps, 'expanded Steps'],
+        [measured.setup.executed, workLimits.executedSteps, 'predictable Steps'],
+        [
+          measured.setup.milliseconds,
+          workLimits.recipeMilliseconds,
+          'predictable wait milliseconds',
+        ],
+        [measured.setup.eachItems, workLimits.eachItems, 'each items'],
+        [measured.setup.macroDepth, workLimits.macroDepth, 'Macro depth'],
+        [measured.teardown.expanded, workLimits.expandedSteps, 'expanded teardown Steps'],
+        [measured.teardown.executed, workLimits.teardownSteps, 'predictable teardown Steps'],
+        [
+          measured.teardown.milliseconds,
+          workLimits.teardownMilliseconds,
+          'predictable teardown wait milliseconds',
+        ],
+      ]
+      for (const [observed, allowed, label] of checks) {
+        if (nearWorkLimit(observed, allowed)) {
+          problems.push({
+            file,
+            level: 'warning',
+            message: `${label}: ${observed} approaches the Work limit of ${allowed}`,
+          })
+        }
+      }
+    } catch (error) {
+      problems.push({ file, message: said(error, file), level: 'error' })
     }
   }
 

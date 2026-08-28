@@ -1,10 +1,17 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { Macro, expandSteps, loadPlaywright, openRun, parseRecipe } from '../src/index.js'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  Macro,
+  WorkLimitError,
+  expandSteps,
+  loadPlaywright,
+  openRun,
+  parseRecipe,
+} from '../src/index.js'
 import type { OperatorAuthority, Run } from '../src/index.js'
 import { networkPolicyFor } from '../src/run.js'
-import { runSteps } from '../src/steps.js'
+import { resolve, runSteps } from '../src/steps.js'
 import type { RunContext } from '../src/steps.js'
 import type { Browser, BrowserContext, Page } from '../src/playwright.js'
 import { removeProjects, tempProject } from './tempProject.js'
@@ -13,6 +20,83 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const VERBS = pathToFileURL(join(HERE, 'fixture/verbs.html')).href
 const INDEX = pathToFileURL(join(HERE, 'fixture/index.html')).href
 const VIEWPORT = { width: 800, height: 600 }
+
+describe('stoppable Query work', () => {
+  it('stops the browser owner before reporting matching work that exceeds its timeout', async () => {
+    let stopped = false
+    const stop = vi.fn(async () => {
+      await Promise.resolve()
+      stopped = true
+    })
+    const page = {
+      evaluateHandle: () => new Promise<never>(() => {}),
+    } as unknown as Page
+
+    await expect(
+      resolve(page, { matching: 'safe text' }, { rects: {}, viewport: VIEWPORT, timeout: 1, stop }),
+    ).rejects.toThrow(/gave up after 1ms/)
+    expect(stop).toHaveBeenCalledOnce()
+    expect(stopped).toBe(true)
+  })
+
+  it('refuses matching work without a browser owner it can stop', async () => {
+    const page = {} as Page
+
+    await expect(
+      resolve(page, { matching: 'safe text' }, { rects: {}, viewport: VIEWPORT, timeout: 1 }),
+    ).rejects.toThrow(/requires a browser context that shotlist can stop safely/)
+  })
+
+  it('does not let optional swallow an unsafe pattern revealed by interpolation', async () => {
+    const run = openRun({ untrusted: false }, join(tempProject(), 'shotlist.config.yaml'))
+    const page = {} as Page
+    const ctx: RunContext = {
+      pages: new Map([['main', page]]),
+      page,
+      vars: { pattern: '(a+)+$' },
+      rects: {},
+      viewport: VIEWPORT,
+      timeout: 1,
+      network: networkPolicyFor(run).forOperation('interpolated matching Step test'),
+      newPage: async () => page,
+      stop: () => Promise.resolve(),
+    }
+    const recipe = parseRecipe(
+      { setup: [{ optional: [{ click: { matching: '$pattern' } }] }] },
+      { name: 'interpolated-matching' },
+    )
+
+    await expect(runSteps(run, expandSteps(recipe.setup, new Map()), ctx)).rejects.toBeInstanceOf(
+      WorkLimitError,
+    )
+  })
+
+  it('retains Work-limit identity through an element Step', async () => {
+    const run = openRun({ untrusted: false }, join(tempProject(), 'shotlist.config.yaml'))
+    const page = { evaluateHandle: () => new Promise<never>(() => {}) } as unknown as Page
+    const stop = vi.fn(() => Promise.resolve())
+    const ctx: RunContext = {
+      pages: new Map([['main', page]]),
+      page,
+      vars: {},
+      rects: {},
+      viewport: VIEWPORT,
+      timeout: 1,
+      network: networkPolicyFor(run).forOperation('matching Step test'),
+      newPage: async () => page,
+      stop,
+    }
+    const recipe = parseRecipe(
+      { setup: [{ click: { matching: 'safe text' } }] },
+      { name: 'matching' },
+    )
+
+    await expect(runSteps(run, expandSteps(recipe.setup, new Map()), ctx)).rejects.toBeInstanceOf(
+      WorkLimitError,
+    )
+    expect(stop).toHaveBeenCalledOnce()
+  })
+})
 
 let browser: Browser
 let context: BrowserContext

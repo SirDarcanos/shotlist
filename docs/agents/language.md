@@ -64,6 +64,15 @@ misspelled environment name. Property lookup follows own properties and blocks
 Data documents deliberately have no schema. They extend values available to loops and
 interpolation rather than the executable vocabulary.
 
+## Work limits
+
+Inspect Recipe and Macro Step trees iteratively before recursive schema validation. Library
+opening refuses predictable work beyond the Run's Work limits; review retains all reachable
+failures and warns when a measurement reaches 80%. Count Macro expansion separately from
+actual Step execution because a small expansion can run many times through `repeat` or
+`each`. Validate every `matching:` pattern after Finder expansion and again after Step
+interpolation.
+
 ## Network destinations
 
 `site.url` and `site.allow` contribute Network destination approvals only for a trusted Project. A bare `site.allow` host means HTTPS port 443. Use a full HTTP(S) destination for HTTP or an unusual port, and `*.example.com` for proper HTTPS subdomains without the apex. Application Recipes may use browser-contained `data:` and `blob:` content but may not navigate to `file:` URLs; File Recipes remain the controlled local-image path.

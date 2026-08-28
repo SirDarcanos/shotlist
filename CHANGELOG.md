@@ -15,6 +15,14 @@ recipe authors what to edit. See
 
 - **Network destination enforcement** for every browser request, redirect, WebSocket, and shotlist-owned HTTP or TCP readiness probe. Approvals match protocol, host, and port; `--allow` and protected `SHOTLIST_ALLOW` settings grant Operator destinations. Browser-contained `data:` and `blob:` content remains available, while blocked requests fail the Recipe before shotlist writes an Output image.
 
+- **Run-owned Work limits** for Library document bytes, authored Step count and nesting,
+  Macro depth and expansion, predictable and actual Step execution, `each` list length,
+  matching-pattern safety, and elapsed Recipe work. Lint rejects predictable excess and
+  warns at 80%. Operators may change numerical values through `--work-limit`, protected
+  `SHOTLIST_WORK_LIMITS`, or `OperatorAuthority.workLimits`; Project configuration cannot.
+  A Work-limit failure does not retry, and teardown retains 1,000 Steps and one cleanup
+  minute. Query timeouts close the attempt context so in-page work stops.
+
 - **Explicit Run opening** through `openRun(authority, configFile)`. shotlist authorizes
   each configured Library directory before it lists the directory and each document before
   it reads the document. The Run holds frozen authority, environment, config, and Library

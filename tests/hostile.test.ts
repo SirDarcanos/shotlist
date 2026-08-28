@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_QUERY_DEPTH, interpolate, parseQuery, parseRecipe } from '../src/index.js'
+import {
+  MAX_MATCHING_CHARACTERS,
+  MAX_QUERY_DEPTH,
+  MAX_STEP_DEPTH,
+  interpolate,
+  parseQuery,
+  parseRecipe,
+} from '../src/index.js'
 import { compileNetworkPolicy } from '../src/network-policy.js'
 import { checkPath, secretIn, trustFrom } from '../src/trust.js'
 
@@ -126,6 +133,35 @@ describe('a query nested past what anyone means', () => {
     expect(() =>
       parseQuery({ span: [{ span: [{ css: '.a' }, { css: '.b' }] }, { css: '.c' }] }),
     ).not.toThrow()
+  })
+})
+
+describe('a text pattern that can consume unbounded work', () => {
+  it('is refused before a browser sees it', () => {
+    for (const matching of ['(a+)+$', '(a|aa)+$', '(.*a){10}', String.raw`^(a+)\1+$`, '(?<=a)b']) {
+      expect(() => parseQuery({ matching }), matching).toThrow(/cannot run safely/)
+    }
+  })
+
+  it('refuses malformed and oversized patterns while retaining ordinary matching', () => {
+    expect(() => parseQuery({ matching: '[' })).toThrow(/valid text pattern/)
+    expect(() => parseQuery({ matching: 'a'.repeat(MAX_MATCHING_CHARACTERS + 1) })).toThrow(
+      new RegExp(`more than ${MAX_MATCHING_CHARACTERS} characters`),
+    )
+    expect(parseQuery({ matching: String.raw`^Order \d+$` })).toMatchObject({
+      matching: String.raw`^Order \d+$`,
+    })
+  })
+})
+
+describe('Steps nested past what anyone means', () => {
+  it('are refused before recursive validation can overflow the stack', () => {
+    let deep: unknown[] = [{ click: { css: 'button' } }]
+    for (let i = 0; i < 5000; i++) deep = [{ optional: deep }]
+
+    expect(() => parseRecipe({ setup: deep }, { name: 'deep' })).toThrow(
+      new RegExp(`Steps nested more than ${MAX_STEP_DEPTH} deep`),
+    )
   })
 })
 

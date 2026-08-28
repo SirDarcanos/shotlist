@@ -19,8 +19,10 @@ import type { DrawStyle, Mark } from './annotate.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
 import type { QueryInput, Rect } from './query.js'
-import { assertRecipe, assertRun, networkPolicyFor } from './run.js'
+import { assertRecipe, assertRun, networkPolicyFor, workLimitsFor } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
+import { WorkLimitError, createRecipeWork } from './work-limit.js'
+import type { StepWork } from './work-limit.js'
 
 /** Optional behavior for capturing a Recipe through its Run. */
 export interface ShootOptions {
@@ -68,6 +70,18 @@ export interface Retry {
  */
 function inRecipe(recipe: Recipe, path: string, cause: string): ShotlistError {
   return new ShotlistError(`recipe "${recipe.name}": ${path} — ${cause}`)
+}
+
+/** Retain Work-limit identity while adding the Recipe location that exceeded it. */
+function inRecipeWork(recipe: Recipe, path: string, error: WorkLimitError): WorkLimitError {
+  return new WorkLimitError(
+    `recipe "${recipe.name}": ${path} — ${error.detail}`,
+    error.limit,
+    error.observed,
+    error.allowed,
+    undefined,
+    error.raiseable,
+  )
 }
 
 /** The viewport, scale and theme this recipe runs at: the site's, with its own on top. */
@@ -269,6 +283,7 @@ async function annotate(
   sourceMedia: string,
   timeout: number,
   access: NetworkAccess,
+  work: StepWork,
 ): Promise<{
   png: Buffer
   size: { width: number; height: number }
@@ -280,83 +295,88 @@ async function annotate(
     deviceScaleFactor: scale,
   })
   try {
-    const page = await context.newPage()
-    let slow: string | undefined
-    // Escaped even where the schema already held it to a URL: this is markup, and the
-    // two checks fail independently.
-    const escape = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
-    const sheet = font.href
-      ? `<link rel="stylesheet" href="${escape(font.href)}">`
-      : font.css
-        ? `<style>${font.css.replace(/<\/style/gi, '<\\/style')}</style>`
-        : ''
-    await page.setContent(
-      sheet +
-        `<style>html,body{margin:0}img{display:block}</style>` +
-        `<img id="shotlist-image" src="data:${sourceMedia};base64,${image.toString('base64')}">`,
+    return await work.run(
+      async () => {
+        const page = await context.newPage()
+        let slow: string | undefined
+        // Escaped even where the schema already held it to a URL: this is markup, and the
+        // two checks fail independently.
+        const escape = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+        const sheet = font.href
+          ? `<link rel="stylesheet" href="${escape(font.href)}">`
+          : font.css
+            ? `<style>${font.css.replace(/<\/style/gi, '<\\/style')}</style>`
+            : ''
+        await page.setContent(
+          sheet +
+            `<style>html,body{margin:0}img{display:block}</style>` +
+            `<img id="shotlist-image" src="data:${sourceMedia};base64,${image.toString('base64')}">`,
+        )
+        // A webfont arrives after the document does; measuring before it lands would size
+        // every label against the fallback.
+        // Ask for the face by name rather than waiting on `document.fonts.ready`. A webfont
+        // is fetched when something uses it, and until the callouts are drawn nothing here
+        // does — so `ready` resolves against an empty queue and the drawing measures a font
+        // that has not arrived. The label renders correctly in the end, but the check for
+        // whether the family resolved runs before it and reports a fallback that never was.
+        // Bounded, because nothing else here bounds it: `page.evaluate` has no timeout of its
+        // own, so a stylesheet host that accepts a connection and then says nothing would hold
+        // the run open for as long as it cared to. Giving up draws the labels in whatever
+        // resolved, which is the same outcome as a font that is not installed, and the probe
+        // below reports it either way.
+        if (font.href || font.css) {
+          const wanted = `${style.label.weight} ${style.label.size}px ${style.label.font}`
+          const arrived = await page.evaluate(
+            ({ spec, ms }) =>
+              Promise.race([
+                document.fonts
+                  .load(spec)
+                  .catch(() => undefined)
+                  .then(() => document.fonts.ready)
+                  .then(() => true),
+                new Promise<boolean>((done) => setTimeout(() => done(false), ms)),
+              ]),
+            { spec: wanted, ms: timeout },
+          )
+          access.throwIfBlocked()
+          if (!arrived) {
+            slow = `style.label.fontUrl did not load within ${timeout}ms — labels are drawn in whatever the browser had`
+          }
+        }
+        await page.evaluate(
+          () =>
+            new Promise<void>((done) => {
+              const img = document.getElementById('shotlist-image') as HTMLImageElement | null
+              if (!img || img.complete) return done()
+              img.addEventListener('load', () => done(), { once: true })
+              img.addEventListener('error', () => done(), { once: true })
+            }),
+          undefined,
+        )
+        const canvas = await page.evaluate(drawAnnotations, {
+          image: size,
+          scale,
+          style: style as unknown as DrawStyle,
+          marks,
+          masks,
+        })
+        await page.setViewportSize({
+          width: Math.ceil(canvas.width),
+          height: Math.ceil(canvas.height),
+        })
+        const png = await page.screenshot({
+          clip: { x: 0, y: 0, width: canvas.width, height: canvas.height },
+          animations: 'disabled',
+        })
+        return {
+          png,
+          size: { width: canvas.width, height: canvas.height },
+          margin: canvas.margin,
+          warnings: [slow, canvas.fontWarning].filter((one): one is string => one !== undefined),
+        }
+      },
+      () => context.close(),
     )
-    // A webfont arrives after the document does; measuring before it lands would size
-    // every label against the fallback.
-    // Ask for the face by name rather than waiting on `document.fonts.ready`. A webfont
-    // is fetched when something uses it, and until the callouts are drawn nothing here
-    // does — so `ready` resolves against an empty queue and the drawing measures a font
-    // that has not arrived. The label renders correctly in the end, but the check for
-    // whether the family resolved runs before it and reports a fallback that never was.
-    // Bounded, because nothing else here bounds it: `page.evaluate` has no timeout of its
-    // own, so a stylesheet host that accepts a connection and then says nothing would hold
-    // the run open for as long as it cared to. Giving up draws the labels in whatever
-    // resolved, which is the same outcome as a font that is not installed, and the probe
-    // below reports it either way.
-    if (font.href || font.css) {
-      const wanted = `${style.label.weight} ${style.label.size}px ${style.label.font}`
-      const arrived = await page.evaluate(
-        ({ spec, ms }) =>
-          Promise.race([
-            document.fonts
-              .load(spec)
-              .catch(() => undefined)
-              .then(() => document.fonts.ready)
-              .then(() => true),
-            new Promise<boolean>((done) => setTimeout(() => done(false), ms)),
-          ]),
-        { spec: wanted, ms: timeout },
-      )
-      access.throwIfBlocked()
-      if (!arrived) {
-        slow = `style.label.fontUrl did not load within ${timeout}ms — labels are drawn in whatever the browser had`
-      }
-    }
-    await page.evaluate(
-      () =>
-        new Promise<void>((done) => {
-          const img = document.getElementById('shotlist-image') as HTMLImageElement | null
-          if (!img || img.complete) return done()
-          img.addEventListener('load', () => done(), { once: true })
-          img.addEventListener('error', () => done(), { once: true })
-        }),
-      undefined,
-    )
-    const canvas = await page.evaluate(drawAnnotations, {
-      image: size,
-      scale,
-      style: style as unknown as DrawStyle,
-      marks,
-      masks,
-    })
-    await page.setViewportSize({
-      width: Math.ceil(canvas.width),
-      height: Math.ceil(canvas.height),
-    })
-    const png = await page.screenshot({
-      clip: { x: 0, y: 0, width: canvas.width, height: canvas.height },
-      animations: 'disabled',
-    })
-    return {
-      png,
-      size: { width: canvas.width, height: canvas.height },
-      margin: canvas.margin,
-      warnings: [slow, canvas.fontWarning].filter((one): one is string => one !== undefined),
-    }
   } finally {
     await context.close()
   }
@@ -375,40 +395,54 @@ async function reEncode(
   format: Format,
   quality: number,
   access: NetworkAccess,
+  work: StepWork,
 ): Promise<Buffer> {
   const context = await guardedContext(browser, access)
   try {
-    const page = await context.newPage()
-    await page.setContent('<body></body>')
-    const url = await page.evaluate(
-      (input) =>
-        new Promise<string>((done, fail) => {
-          const img = new Image()
-          img.addEventListener('error', () => fail(new Error('the image could not be decoded')), {
-            once: true,
-          })
-          img.addEventListener(
-            'load',
-            () => {
-              const canvas = document.createElement('canvas')
-              canvas.width = img.naturalWidth
-              canvas.height = img.naturalHeight
-              canvas.getContext('2d')!.drawImage(img, 0, 0)
-              done(canvas.toDataURL(input.media, input.quality / 100))
-            },
-            { once: true },
+    return await work.run(
+      async () => {
+        const page = await context.newPage()
+        await page.setContent('<body></body>')
+        const url = await page.evaluate(
+          (input) =>
+            new Promise<string>((done, fail) => {
+              const img = new Image()
+              img.addEventListener(
+                'error',
+                () => fail(new Error('the image could not be decoded')),
+                {
+                  once: true,
+                },
+              )
+              img.addEventListener(
+                'load',
+                () => {
+                  const canvas = document.createElement('canvas')
+                  canvas.width = img.naturalWidth
+                  canvas.height = img.naturalHeight
+                  canvas.getContext('2d')!.drawImage(img, 0, 0)
+                  done(canvas.toDataURL(input.media, input.quality / 100))
+                },
+                { once: true },
+              )
+              img.src = input.source
+            }),
+          {
+            source: `data:image/png;base64,${png.toString('base64')}`,
+            media: MEDIA[format],
+            quality,
+          },
+        )
+        if (!url.startsWith(`data:${MEDIA[format]}`)) {
+          throw new ShotlistError(
+            `this browser cannot write ${format}, and answered with ` +
+              `${url.slice(5, url.indexOf(';'))} instead`,
           )
-          img.src = input.source
-        }),
-      { source: `data:image/png;base64,${png.toString('base64')}`, media: MEDIA[format], quality },
+        }
+        return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')
+      },
+      () => context.close(),
     )
-    if (!url.startsWith(`data:${MEDIA[format]}`)) {
-      throw new ShotlistError(
-        `this browser cannot write ${format}, and answered with ` +
-          `${url.slice(5, url.indexOf(';'))} instead`,
-      )
-    }
-    return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')
   } finally {
     await context.close()
   }
@@ -484,13 +518,24 @@ export async function shoot(
   const outputTarget = capturePath(run, file, `recipe "${recipe.name}": output`)
   const source = recipe.source === 'file' ? sourceImage(run, recipe, loaded) : undefined
 
+  const recipeWork = createRecipeWork(workLimitsFor(run), recipe.name!)
   // A caller shooting a whole set passes its own browser: launching one per recipe costs
   // about a second each, which over a project's worth of recipes is most of the run.
-  const browser = options.browser ?? (await loadPlaywright().chromium.launch())
+  let browser: Browser
+  try {
+    browser = options.browser ?? (await loadPlaywright().chromium.launch())
+  } catch (error) {
+    recipeWork.dispose()
+    throw error
+  }
   const ours = options.browser === undefined
 
   /** One attempt at the whole shot: a fresh context, through to the written file. */
-  const attempt = async (access: NetworkAccess): Promise<ShotResult> => {
+  const attempt = async (
+    access: NetworkAccess,
+    work: StepWork,
+    teardownWork: () => StepWork,
+  ): Promise<ShotResult> => {
     let image: Buffer
     let size: { width: number; height: number }
     let marks: Mark[]
@@ -553,7 +598,9 @@ export async function shoot(
           viewport: settings.viewport,
           timeout: config.site.timeout,
           network: access,
+          work,
           newPage: () => context.newPage(),
+          stop: () => context.close(),
         }
         // Held rather than thrown from the `finally`, because a shot that already failed
         // is the more useful thing to report: an error about tidying up a page that never
@@ -564,8 +611,14 @@ export async function shoot(
           // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
           access.check(settings.url)
           try {
-            await page.goto(settings.url, { waitUntil: 'load' })
+            await work.run(
+              () => page.goto(settings.url, { waitUntil: 'load' }),
+              () => context.close(),
+            )
           } catch (error) {
+            if (error instanceof WorkLimitError) {
+              throw inRecipeWork(recipe, recipe.url ? '`url`' : '`site.url`', error)
+            }
             access.throwIfBlocked()
             throw inRecipe(
               recipe,
@@ -575,8 +628,14 @@ export async function shoot(
           }
           if (config.site.ready) {
             try {
-              await page.waitForSelector(config.site.ready, { timeout: config.site.timeout })
-            } catch {
+              await work.run(
+                () => page.waitForSelector(config.site.ready!, { timeout: config.site.timeout }),
+                () => context.close(),
+              )
+            } catch (error) {
+              if (error instanceof WorkLimitError) {
+                throw inRecipeWork(recipe, '`site.ready`', error)
+              }
               throw inRecipe(
                 recipe,
                 '`site.ready`',
@@ -586,22 +645,37 @@ export async function shoot(
           }
           // An expired Session redirects rather than failing, and `--install` would commit
           // a run's worth of sign-in forms.
-          await session?.verify(page, settings.url, config.site.timeout)
-          if (config.site.settle) await page.waitForTimeout(config.site.settle)
+          if (session) {
+            await work.run(
+              () => session.verify(page, settings.url, config.site.timeout),
+              () => context.close(),
+            )
+          }
+          if (config.site.settle) {
+            await work.run(
+              () => page.waitForTimeout(config.site.settle),
+              () => context.close(),
+            )
+          }
 
           try {
             const steps = expandSteps(recipe.setup, library.macros)
-            await runSteps(run, steps, ctx)
+            await runSteps(run, steps, ctx, {}, work)
           } catch (error) {
             if (error instanceof NetworkPolicyError) throw error
+            if (error instanceof WorkLimitError) throw inRecipeWork(recipe, 'setup', error)
             access.throwIfBlocked()
             throw inRecipe(recipe, 'setup', pageMessage(error))
           }
 
           let clip: Rect
           try {
-            clip = await clipRect(recipe.clip, ctx, settings.viewport)
+            clip = await work.run(
+              () => clipRect(recipe.clip, ctx, settings.viewport),
+              () => context.close(),
+            )
           } catch (error) {
+            if (error instanceof WorkLimitError) throw inRecipeWork(recipe, 'clip', error)
             throw inRecipe(recipe, 'clip', pageMessage(error))
           }
           ctx.rects['clip'] = clip
@@ -609,6 +683,8 @@ export async function shoot(
             try {
               ctx.rects[name] = (await resolveInPage(ctx.page, query, ctx)).rect
             } catch (error) {
+              if (error instanceof WorkLimitError)
+                throw inRecipeWork(recipe, `marks.${name}`, error)
               throw inRecipe(recipe, `marks.${name}`, pageMessage(error))
             }
           }
@@ -623,6 +699,7 @@ export async function shoot(
                 masks.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
               }
             } catch (error) {
+              if (error instanceof WorkLimitError) throw inRecipeWork(recipe, `mask[${i}]`, error)
               throw inRecipe(recipe, `mask[${i}]`, pageMessage(error))
             }
           }
@@ -635,6 +712,9 @@ export async function shoot(
                 ignore.push({ ...rect, x: rect.x - clip.x, y: rect.y - clip.y })
               }
             } catch (error) {
+              if (error instanceof WorkLimitError) {
+                throw inRecipeWork(recipe, `check.ignore[${i}]`, error)
+              }
               throw inRecipe(recipe, `check.ignore[${i}]`, pageMessage(error))
             }
           }
@@ -644,13 +724,22 @@ export async function shoot(
           // measured against the page. Without this, `clip: full` quietly returned one
           // viewport: the tall half of the page was never in the picture.
           const below = clip.y + clip.height > settings.viewport.height
-          const scrolled = below ? await ctx.page.evaluate(() => window.scrollY, undefined) : 0
+          const scrolled = below
+            ? await work.run(
+                () => ctx.page.evaluate(() => window.scrollY, undefined),
+                () => context.close(),
+              )
+            : 0
           access.throwIfBlocked()
-          image = await ctx.page.screenshot({
-            clip: below ? { ...clip, y: clip.y + scrolled } : clip,
-            ...(below ? { fullPage: true } : {}),
-            animations: 'disabled',
-          })
+          image = await work.run(
+            () =>
+              ctx.page.screenshot({
+                clip: below ? { ...clip, y: clip.y + scrolled } : clip,
+                ...(below ? { fullPage: true } : {}),
+                animations: 'disabled',
+              }),
+            () => context.close(),
+          )
           size = { width: clip.width, height: clip.height }
           marks = marksFor(recipe, ctx.rects, clip)
         } finally {
@@ -658,12 +747,18 @@ export async function shoot(
           // and leaves everything `setup` asked the application itself to do.
           if (recipe.teardown.length) {
             try {
+              const cleanupWork = teardownWork()
+              ctx.work = cleanupWork
               const steps = expandSteps(recipe.teardown, library.macros)
-              await runSteps(run, steps, ctx)
+              await runSteps(run, steps, ctx, {}, cleanupWork)
             } catch (error) {
               if (error instanceof NetworkPolicyError) throw error
-              access.throwIfBlocked()
-              tidying = inRecipe(recipe, 'teardown', pageMessage(error))
+              if (error instanceof WorkLimitError) {
+                tidying = inRecipeWork(recipe, 'teardown', error)
+              } else {
+                access.throwIfBlocked()
+                tidying = inRecipe(recipe, 'teardown', pageMessage(error))
+              }
             }
           }
         }
@@ -689,6 +784,7 @@ export async function shoot(
             source ? MEDIA[source.format] : MEDIA.png,
             config.site.timeout,
             access,
+            work,
           )
         : {
             png: image,
@@ -710,9 +806,10 @@ export async function shoot(
     // hand back losslessly. The format the project asked for is applied once, at the end.
     const written = isLossless(settings.format)
       ? drawn.png
-      : await reEncode(browser, drawn.png, settings.format, settings.quality, access)
+      : await reEncode(browser, drawn.png, settings.format, settings.quality, access, work)
 
     access.throwIfBlocked()
+    await work.run(async () => undefined)
     writeFileSync(outputTarget, written)
     const destination = destinationFor(run, recipe, loaded)
     if (options.install && destination) {
@@ -736,9 +833,9 @@ export async function shoot(
     for (let n = 1; ; n++) {
       const access = networkPolicyFor(run).forRecipe(recipe.name!)
       try {
-        return await attempt(access)
+        return await attempt(access, recipeWork.attempt(), recipeWork.teardown)
       } catch (error) {
-        if (error instanceof NetworkPolicyError) throw error
+        if (error instanceof NetworkPolicyError || error instanceof WorkLimitError) throw error
         access.throwIfBlocked()
         if (n >= attempts) throw error
         const why = error instanceof ShotlistError ? error.message : pageMessage(error)
@@ -746,6 +843,7 @@ export async function shoot(
       }
     }
   } finally {
+    recipeWork.dispose()
     if (ours) await browser.close()
   }
 }

@@ -356,6 +356,33 @@ describe('retries', () => {
     ])
   })
 
+  it('does not retry a Work limit failure', { timeout: 120_000 }, async () => {
+    const root = tempProject()
+    rmSync(join(root, 'recipes'), { recursive: true })
+    rmSync(join(root, 'macros'), { recursive: true })
+    mkdirSync(join(root, 'recipes'))
+    writeFileSync(
+      join(root, 'recipes/timed.yaml'),
+      'name: timed\nretries: 2\nsetup:\n  - optional: []\nclip: viewport\n',
+    )
+    const run = openRun(
+      { untrusted: false, workLimits: { recipeMilliseconds: 1 } },
+      join(root, 'shotlist.config.yaml'),
+    )
+    const recipe = run.project.library.recipes.get('timed')!
+    const retries: unknown[] = []
+
+    const error = await shoot(run, recipe, {
+      onRetry: (retry) => retries.push(retry),
+    }).then(
+      () => new Error('the Work limit did not fail'),
+      (caught: unknown) => caught as Error,
+    )
+    expect(error.message).toMatch(/Work limit/)
+    expect(error.message.match(/The Operator may raise it/g)).toHaveLength(1)
+    expect(retries).toEqual([])
+  })
+
   it('keeps the Run and its authorized output target across retries', async () => {
     const root = tempProject()
     writeFileSync(join(root, 'recipes/retried.yaml'), 'name: retried\nretries: 1\nclip: viewport\n')

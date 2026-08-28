@@ -1,6 +1,6 @@
 # Trust boundary
 
-Trust is Operator state derived from CLI flags and environment controls. A Project may always narrow access. A trusted Project may approve Network destinations and environment names; an untrusted Project contributes no approvals.
+Trust is Operator state derived from CLI flags and environment controls. A Project may always narrow access. A trusted Project may approve Network destinations and environment names; an untrusted Project contributes no approvals. Work limits apply in every mode, and only Operator authority may change their numerical values.
 
 ## Guard every sink
 
@@ -27,7 +27,7 @@ An untrusted Run:
 - confines paths to approved real roots
 - contacts only Operator-approved Network destinations
 
-`deny`, `SHOTLIST_DENY`, and `SHOTLIST_ENV_DENY` only narrow policy and remain effective in every mode. `SHOTLIST_ALLOW` adds Operator-controlled Network destination approvals for protected CI settings.
+`deny`, `SHOTLIST_DENY`, and `SHOTLIST_ENV_DENY` only narrow policy and remain effective in every mode. `SHOTLIST_ALLOW` adds Operator-controlled Network destination approvals for protected CI settings. `SHOTLIST_WORK_LIMITS` changes numerical Work limits from protected process settings; a Project config has no equivalent control.
 
 ## Commands and environment
 

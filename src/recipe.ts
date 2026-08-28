@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { MAX_PIXELS, ShotlistError, formatIssues, keysIn } from './config.js'
 import { FORMATS } from './image.js'
+import { authoredWork, validateMatchingIn } from './work-limit.js'
+import type { WorkLimits } from './work-limit.js'
 import { QUERY_KEYS, makeQuery } from './query.js'
 import {
   ENV,
@@ -246,27 +248,49 @@ function checkKind(raw: unknown, kind: 'recipe' | 'macro', file?: string): void 
 /** Validate one macro document, checking its verbs the way a recipe's setup is checked. */
 export function parseMacro(
   raw: unknown,
-  options: { finders?: Readonly<Record<string, unknown>>; file?: string } = {},
+  options: {
+    finders?: Readonly<Record<string, unknown>>
+    file?: string
+    workLimits?: Pick<WorkLimits, 'authoredSteps' | 'stepDepth' | 'matchingCharacters'>
+  } = {},
 ): Macro {
   checkKind(raw, 'macro', options.file)
+  authoredWork(raw, ['steps'], options.workLimits, options.file)
   if (typeof raw === 'object' && raw !== null && 'steps' in raw) {
     checkStepVerbs((raw as { steps: unknown }).steps, 'steps')
   }
-  return validate(makeMacro(options.finders ?? {}), raw, 'macro', options.file)
+  const macro = validate(makeMacro(options.finders ?? {}), raw, 'macro', options.file)
+  try {
+    validateMatchingIn(macro, options.workLimits?.matchingCharacters)
+  } catch (error) {
+    throw new ShotlistError((error as Error).message, options.file)
+  }
+  return macro
 }
 
 /** Validate one recipe document against this project's aliases. */
 export function parseRecipe(
   raw: unknown,
-  options: { finders?: Readonly<Record<string, unknown>>; file?: string; name?: string } = {},
+  options: {
+    finders?: Readonly<Record<string, unknown>>
+    file?: string
+    name?: string
+    workLimits?: Pick<WorkLimits, 'authoredSteps' | 'stepDepth' | 'matchingCharacters'>
+  } = {},
 ): Recipe {
   checkKind(raw, 'recipe', options.file)
+  authoredWork(raw, ['setup', 'teardown'], options.workLimits, options.file)
   for (const key of ['setup', 'teardown'] as const) {
     if (typeof raw === 'object' && raw !== null && key in raw) {
       checkStepVerbs((raw as Record<string, unknown>)[key], key)
     }
   }
   const recipe = validate(makeRecipe(options.finders ?? {}), raw, 'recipe', options.file)
+  try {
+    validateMatchingIn(recipe, options.workLimits?.matchingCharacters)
+  } catch (error) {
+    throw new ShotlistError((error as Error).message, options.file)
+  }
   const name = recipe.name ?? options.name
   if (!name)
     throw new ShotlistError(

@@ -59,3 +59,12 @@ export type { Server } from './serve.js'
 export { countDocuments, formatProblems, lint } from './lint.js'
 export type { LintOptions, Problem } from './lint.js'
 export { SCHEMA_FILES } from './schemas.js'
+export {
+  DEFAULT_WORK_LIMITS,
+  MAX_MATCHING_CHARACTERS,
+  MAX_STEP_DEPTH,
+  WorkLimitError,
+  resolveWorkLimits,
+  validateMatching,
+} from './work-limit.js'
+export type { WorkLimitName, WorkLimitOverrides, WorkLimits } from './work-limit.js'

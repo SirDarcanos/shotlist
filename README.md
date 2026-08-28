@@ -113,6 +113,8 @@ npx shotlist --check              # compare against committed images
 npx shotlist --check --diff       # …and write a before/after/changed image
 npx shotlist --check --json       # …and report it as JSON on stdout
 npx shotlist --lint               # check every YAML; no browser, no site needed
+npx shotlist --work-limit executedSteps=20000 <name>
+                                  # let this Run execute more Steps
 npx shotlist --login admin        # sign in by hand, and save the session
 npx shotlist --help               # the full list, from the tool
 ```
@@ -132,12 +134,19 @@ await shoot(run, recipe, { install: true })
 
 Pass the Run to capture, checking, Session, server, step, and Baseline functions. shotlist
 rejects a hand-built Run or a copied Recipe before it touches the browser, filesystem,
-network, or a process. The caller grants Operator authority; the Project config does not.
+network, or a process. The caller grants Operator authority, including any numerical Work
+limit changes; the Project config does not.
 
 Pass authority to lint because a malformed Project cannot open a complete Run:
 `lint({ untrusted: false }, 'shotlist.config.yaml')`. Use `parseConfig`, `parseRecipe`,
 `parseMacro`, `parseLibrary`, and `parseQuery` to parse in-memory values without Operator
 authority.
+
+Every Run applies Work limits to Library document size, authored structure, Macro
+expansion, actual Steps, and elapsed Recipe work. A Project cannot raise them. An Operator
+may change a numerical limit for one command with `--work-limit name=value`, through
+protected `SHOTLIST_WORK_LIMITS`, or through `OperatorAuthority.workLimits` in TypeScript.
+`shotlist --lint` rejects predictable excess before shotlist starts a site or browser.
 
 ## A recipe is data
 

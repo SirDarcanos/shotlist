@@ -6,6 +6,8 @@ import { makeQuery, resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
 import type { ElementHandle, Frame, Page, QueryTarget } from './playwright.js'
 import type { Run } from './run.js'
+import { WorkLimitError, matchingMeasurementsIn } from './work-limit.js'
+import type { StepWork } from './work-limit.js'
 
 /** A value a Step can hold literally or reference with `$name`. */
 const Ref = z.union([z.string(), z.number(), z.boolean()])
@@ -36,7 +38,11 @@ export interface RunContext {
   viewport: { width: number; height: number }
   timeout: number
   network: NetworkAccess
+  /** Work allowance shared by direct Query work in this phase. */
+  work?: StepWork
   newPage(): Promise<Page>
+  /** Stop the attempt when browser work exceeds a Work limit. */
+  stop?(): Promise<void>
   /** Set by `dialog:`. Unset, nothing is listening and the browser's default holds. */
   dialog?: DialogPolicy
 }
@@ -63,6 +69,7 @@ type StepExecution = {
   outer: Readonly<Record<string, unknown>>
   page: Page
   options: { timeout: number }
+  work: StepWork
   query(key: string): QueryInput
   text(key: string): string
   element(key: string, verb: string): Promise<ElementHandle>
@@ -281,11 +288,12 @@ const DEFINITIONS = [
         fields: { as: z.string().default('item'), steps: z.array(Step) },
       },
     ],
-    async ({ step, text, outer, nested }) => {
+    async ({ step, text, outer, nested, work }) => {
       const items = step['each']
       if (!Array.isArray(items)) {
         throw new ShotlistError(`\`each\` needs a list, and ${JSON.stringify(items)} is not one`)
       }
+      work.each(items.length)
       const name = text('as')
       for (const item of items) await nested({ ...outer, [name]: item })
     },
@@ -298,7 +306,7 @@ const DEFINITIONS = [
       try {
         await nested()
       } catch (error) {
-        if (error instanceof NetworkPolicyError) throw error
+        if (error instanceof NetworkPolicyError || error instanceof WorkLimitError) throw error
         // `optional` exists for the dialog that is sometimes already closed.
       }
     },
@@ -629,7 +637,12 @@ async function intoFrame(
 export async function resolve(
   page: QueryTarget,
   query: QueryInput,
-  ctx: Pick<RunContext, 'rects' | 'viewport'> & { timeout?: number; all?: boolean },
+  ctx: Pick<RunContext, 'rects' | 'viewport'> & {
+    timeout?: number
+    all?: boolean
+    stop?: () => Promise<void>
+    work?: StepWork
+  },
 ): Promise<{ rect: Rect; element: ElementHandle | null; rects?: Rect[] }> {
   if (query !== null && typeof query === 'object' && 'frame' in query) {
     const { frame, rest, origin } = await intoFrame(page, query, ctx)
@@ -648,30 +661,58 @@ export async function resolve(
     }
   }
   const budget = ctx.timeout ?? 15000
+  const hasMatching = matchingMeasurementsIn(query).length > 0
+  if (hasMatching && !ctx.stop) {
+    throw new ShotlistError('`matching` requires a browser context that shotlist can stop safely')
+  }
   let timer: ReturnType<typeof setTimeout> | undefined
+  let queryTimedOut = false
   try {
     const seeds = await seedsFor(page, query)
     const overran = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        reject(
-          new ShotlistError(
-            `gave up after ${budget}ms resolving ${JSON.stringify(query)} — a \`matching\` ` +
-              'pattern that has to backtrack can take effectively forever on the wrong text. ' +
-              '`site.timeout` is the limit.',
-          ),
-        )
+        queryTimedOut = true
+        void (async () => {
+          try {
+            await ctx.stop?.()
+          } finally {
+            const message =
+              `gave up after ${budget}ms resolving ${JSON.stringify(query)} — the browser work was stopped. ` +
+              '`site.timeout` is the limit.'
+            reject(
+              hasMatching
+                ? new WorkLimitError(
+                    message,
+                    'recipeMilliseconds',
+                    budget + 1,
+                    budget,
+                    undefined,
+                    false,
+                  )
+                : new ShotlistError(message),
+            )
+          }
+        })()
       }, budget)
     })
-    const handle = await Promise.race([
-      page.evaluateHandle(resolveQuery, {
+    const evaluating = () => {
+      const evaluated = page.evaluateHandle(resolveQuery, {
         spec: query,
         viewport: ctx.viewport,
         rects: ctx.rects,
         ...(ctx.all ? { all: true } : {}),
         ...(seeds ? { seeds: seeds as unknown as Element[] } : {}),
-      }),
-      overran,
-    ])
+      })
+      const afterStop = () => new Promise<never>(() => {})
+      return Promise.race([
+        evaluated.then(
+          (value) => (queryTimedOut ? afterStop() : value),
+          (error: unknown) => (queryTimedOut ? afterStop() : Promise.reject(error)),
+        ),
+        overran,
+      ])
+    }
+    const handle = ctx.work ? await ctx.work.run(evaluating, ctx.stop) : await evaluating()
     const rect = await handle.evaluate((result) => result.rect)
     const rects = await handle.evaluate((result) => result.rects)
     const element = (await handle.getProperty('element')).asElement()
@@ -695,6 +736,7 @@ async function elementFor(
   try {
     found = await resolve(page, query, ctx)
   } catch (error) {
+    if (error instanceof WorkLimitError || error instanceof NetworkPolicyError) throw error
     throw new ShotlistError(`\`${verb}\`: ${(error as Error).message}`)
   }
   if (!found.element) {
@@ -708,9 +750,10 @@ export async function executeSteps(
   run: Run,
   steps: readonly ResolvedStep[],
   ctx: RunContext,
-  outer: Readonly<Record<string, unknown>> = {},
+  outer: Readonly<Record<string, unknown>>,
+  work: StepWork,
 ): Promise<void> {
-  for (const resolved of steps) await executeStep(run, resolved, ctx, outer)
+  for (const resolved of steps) await executeStep(run, resolved, ctx, outer, work)
 }
 
 /** Interpolate and execute one expanded Step through its declaration. */
@@ -719,7 +762,9 @@ async function executeStep(
   resolved: ResolvedStep,
   ctx: RunContext,
   outer: Readonly<Record<string, unknown>>,
+  work: StepWork,
 ): Promise<void> {
+  work.step()
   const environment = { [ENV]: run.env }
   const enclosing = { ...ctx.vars, ...outer, ...environment }
   const args = interpolate(resolved.vars, enclosing, 'keep') as Record<string, unknown>
@@ -731,6 +776,7 @@ async function executeStep(
       NESTED_KEYS.has(key as BlockDefinition['nested']) && Array.isArray(value) ? [] : value
   }
   const step = interpolate(own, scope) as StepInput
+  work.matching(step)
   const page = ctx.page
   if (ctx.dialog) answerDialogs(page, ctx)
   if (!definition || definition.kind === 'macro') {
@@ -738,19 +784,25 @@ async function executeStep(
   }
   const query = (key: string) => step[key] as QueryInput
   const text = (key: string) => String(step[key])
-  await definition.execute({
-    run,
-    resolved,
-    step,
-    ctx,
-    outer,
-    page,
-    options: { timeout: ctx.timeout },
-    query,
-    text,
-    element: (key, verb) => elementFor(page, query(key), ctx, verb),
-    nested: (nestedScope = outer) => executeSteps(run, resolved.nested ?? [], ctx, nestedScope),
-  })
+  await work.run(
+    () =>
+      definition.execute({
+        run,
+        resolved,
+        step,
+        ctx,
+        outer,
+        page,
+        options: { timeout: ctx.timeout },
+        work,
+        query,
+        text,
+        element: (key, verb) => elementFor(page, query(key), ctx, verb),
+        nested: (nestedScope = outer) =>
+          executeSteps(run, resolved.nested ?? [], ctx, nestedScope, work),
+      }),
+    ctx.stop,
+  )
 }
 
 /** Poll until a Query resolves, preserving the last failure on timeout. */
@@ -762,6 +814,7 @@ async function waitFor(page: Page, query: QueryInput, ctx: RunContext): Promise<
       await resolve(page, query, ctx)
       return
     } catch (error) {
+      if (error instanceof WorkLimitError || error instanceof NetworkPolicyError) throw error
       last = error
       if (Date.now() > deadline) {
         throw new ShotlistError(

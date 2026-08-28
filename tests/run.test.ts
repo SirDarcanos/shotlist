@@ -44,6 +44,23 @@ describe('openRun', () => {
     expect(() => call({}, 'shotlist.config.yaml')).toThrow(/untrusted.*boolean/)
   })
 
+  it('stops actual Step execution at the Run-owned Work limit', async () => {
+    const root = project(config())
+    const run = openRun(
+      { untrusted: false, workLimits: { executedSteps: 1 } },
+      join(root, 'shotlist.config.json'),
+    )
+    const context = { page: {}, vars: {}, rects: {} } as unknown as RunContext
+    const steps = [
+      { step: { optional: [] }, vars: {}, nested: [] },
+      { step: { optional: [] }, vars: {}, nested: [] },
+    ]
+
+    await expect(runSteps(run, steps, context)).rejects.toThrow(
+      /ran more than 1 Step; the Work limit is 1/,
+    )
+  })
+
   it('rejects forged Runs before touching their browser context', async () => {
     const root = project(config())
     const authentic = openRun({ untrusted: false }, join(root, 'shotlist.config.json'))
@@ -62,6 +79,106 @@ describe('openRun', () => {
       )
     }
     expect(touched).toBe(false)
+  })
+
+  it('applies Operator-owned Work limits while opening the Library', () => {
+    const root = project(config(), {
+      'screenshots/recipes/long.yaml': `setup:
+  - click: { css: .first }
+  - click: { css: .second }
+`,
+    })
+
+    expect(() =>
+      openRun(
+        { untrusted: false, workLimits: { authoredSteps: 1 } },
+        join(root, 'shotlist.config.json'),
+      ),
+    ).toThrow(/2 authored Steps; the Work limit is 1/)
+  })
+
+  it('rejects predictable loop work before a Run can start browser work', () => {
+    const root = project(config(), {
+      'screenshots/recipes/loop.yaml': `setup:
+  - repeat: 2
+    steps:
+      - click: { css: .first }
+      - click: { css: .second }
+`,
+    })
+
+    expect(() =>
+      openRun(
+        { untrusted: false, workLimits: { executedSteps: 4 } },
+        join(root, 'shotlist.config.json'),
+      ),
+    ).toThrow(/would run 5 Steps; the Work limit is 4/)
+  })
+
+  it('counts deliberate waits before running a Recipe', () => {
+    const root = project(config(), {
+      'screenshots/recipes/wait.yaml': 'setup:\n  - wait: 5\n',
+    })
+
+    expect(() =>
+      openRun(
+        { untrusted: false, workLimits: { recipeMilliseconds: 4 } },
+        join(root, 'shotlist.config.json'),
+      ),
+    ).toThrow(/would deliberately wait 5ms; the Work limit is 4ms/)
+  })
+
+  it('rejects predictable teardown waits before browser work', () => {
+    const root = project(config(), {
+      'screenshots/recipes/slow-cleanup.yaml': 'teardown:\n  - wait: 2\n',
+    })
+
+    expect(() =>
+      openRun(
+        { untrusted: false, workLimits: { teardownMilliseconds: 1 } },
+        join(root, 'shotlist.config.json'),
+      ),
+    ).toThrow(/teardown would deliberately wait 2ms/)
+  })
+
+  it('preflights a Macro before scripted sign-in can open a browser', () => {
+    const root = project(config(), {
+      'screenshots/macros/long.yaml': `steps:
+  - repeat: 2
+    steps:
+      - click: { css: .first }
+      - click: { css: .second }
+`,
+    })
+
+    expect(() =>
+      openRun(
+        { untrusted: false, workLimits: { executedSteps: 4 } },
+        join(root, 'shotlist.config.json'),
+      ),
+    ).toThrow(/macro "long" would run 5 Steps/)
+  })
+
+  it('lets only Operator authority raise the numerical matching length', () => {
+    const root = project(config(), {
+      'screenshots/recipes/pattern.yaml': JSON.stringify({
+        marks: { long: { matching: 'a'.repeat(300) } },
+      }),
+    })
+    const file = join(root, 'shotlist.config.json')
+
+    expect(() => openRun({ untrusted: false }, file)).toThrow(/more than 256 characters/)
+    expect(() =>
+      openRun({ untrusted: false, workLimits: { matchingCharacters: 400 } }, file),
+    ).not.toThrow()
+  })
+
+  it('checks matching patterns in Project Finders before browser work', () => {
+    const root = project(config({ finders: { danger: { matching: '(a+)+$' } } }))
+
+    expect(() => openRun({ untrusted: false }, join(root, 'shotlist.config.json'))).toThrow(
+      /cannot run safely/,
+    )
   })
 
   it('opens a complete Project in trusted mode', () => {
@@ -156,6 +273,22 @@ describe('openRun', () => {
     expect(() => trusted.forOperation('test').check('https://a.static.example.com/')).not.toThrow()
     expect(() => trusted.forOperation('test').check('https://static.example.com/')).toThrow()
     expect(() => untrusted.forOperation('test').check('http://example.com:8080/')).toThrow()
+  })
+
+  it('applies protected SHOTLIST_WORK_LIMITS settings', () => {
+    const previous = process.env['SHOTLIST_WORK_LIMITS']
+    process.env['SHOTLIST_WORK_LIMITS'] = 'authoredSteps=1'
+    try {
+      const root = project(config(), {
+        'screenshots/recipes/long.yaml': `setup:\n  - click: { css: .first }\n  - click: { css: .second }\n`,
+      })
+      expect(() => openRun({ untrusted: false }, join(root, 'shotlist.config.json'))).toThrow(
+        /2 authored Steps; the Work limit is 1/,
+      )
+    } finally {
+      if (previous === undefined) delete process.env['SHOTLIST_WORK_LIMITS']
+      else process.env['SHOTLIST_WORK_LIMITS'] = previous
+    }
   })
 
   it('merges protected SHOTLIST_ALLOW approvals into Operator authority', () => {

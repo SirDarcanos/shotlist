@@ -46,8 +46,18 @@ export function reviewProject(
       checked: 1,
     })
   }
-  const trust = projectPolicy(authority, loaded).trust
-  const review = reviewLibrary(loaded, trust, options)
+  let policy
+  try {
+    policy = projectPolicy(authority, loaded)
+  } catch (error) {
+    return Object.freeze({
+      problems: Object.freeze([
+        { file: loaded.file, message: said(error, loaded.file), level: 'error' as const },
+      ]),
+      checked: 1,
+    })
+  }
+  const review = reviewLibrary(loaded, policy.trust, options, policy.workLimits)
   return Object.freeze({ problems: review.problems, checked: 1 + review.documents })
 }
 

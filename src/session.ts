@@ -14,8 +14,9 @@ import { runSteps } from './steps.js'
 import type { RunContext } from './steps.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
-import { assertRun, networkPolicyFor } from './run.js'
+import { assertRun, networkPolicyFor, workLimitsFor } from './run.js'
 import type { Run } from './run.js'
+import { createRecipeWork } from './work-limit.js'
 
 /** A Session as this module needs it: where it lives, and what proves it still works. */
 interface Session {
@@ -325,6 +326,8 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
     }
 
     if (options.using !== undefined) {
+      const scriptedWork = createRecipeWork(workLimitsFor(run), `--login ${session.name}`)
+      const work = scriptedWork.attempt()
       const ctx: RunContext = {
         pages: new Map<string, Page>([['main', page]]),
         page,
@@ -333,17 +336,21 @@ export async function signIn(run: Run, name: string, options: SignInOptions): Pr
         viewport: site.viewport,
         timeout: site.timeout,
         network: access,
+        work,
         newPage: () => context.newPage(),
+        stop: () => context.close(),
       }
       try {
         const steps = expandSteps([{ use: options.using }], library.macros)
-        await runSteps(run, steps, ctx)
+        await runSteps(run, steps, ctx, {}, work)
       } catch (error) {
         if (error instanceof NetworkPolicyError) throw error
         access.throwIfBlocked()
         throw new ShotlistError(
           `--login ${session.name}: \`${options.using}\` — ${pageMessage(error)}`,
         )
+      } finally {
+        scriptedWork.dispose()
       }
     } else {
       options.say(`A browser is open at ${site.url}. Sign in there, then press Enter here.`)

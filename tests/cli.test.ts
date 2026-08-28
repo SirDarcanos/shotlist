@@ -86,6 +86,12 @@ describe('shotlist', () => {
     ])
   })
 
+  it('accepts one-run Operator Work limit changes', async () => {
+    const { code, err } = await cli(project(), ['--work-limit', 'authoredSteps=1'])
+    expect(code).toBe(1)
+    expect(err).toMatch(/authored Steps; the Work limit is 1/)
+  })
+
   it('prints usage on --help without touching the project', async () => {
     const { code, out } = await cli(project(), ['--help'])
     expect(code).toBe(0)

@@ -39,15 +39,20 @@ An application recipe performs one complete attempt in a fresh browser context:
 6. Annotate and encode in separate pages, then write output and optional install copies.
 
 A retry repeats the whole attempt in a fresh context rather than inheriting cookies, pages,
-or failed UI state. Teardown runs after success and failure. If capture already failed, a
-teardown failure does not replace the error that explains the missing screenshot.
+or failed UI state. Every retry gets a fresh actual-Step Work limit, while the Recipe and
+all retries share one elapsed Work limit. A Work-limit failure is deterministic and is not
+retried. Teardown runs after success and failure under its reserved Step count and cleanup
+minute. If capture already failed, a teardown failure does not replace the error that
+explains the missing screenshot.
 
 A file recipe validates and reads its image before browser work. It has no application page,
 so setup and teardown are invalid and every mark or mask must resolve without a DOM.
 
 ## Steps and pages
 
-`runSteps` awaits every `runStep` in source order. Keep every Playwright call awaited,
+`runSteps` awaits every `runStep` in source order and charges each actual Step to the
+current attempt or teardown meter. `each` checks its interpolated list before the first item
+runs. Keep every Playwright call awaited,
 because unfinished interaction produces a wrong screenshot rather than an exception; the
 promise-only ESLint rules exist for this failure mode.
 

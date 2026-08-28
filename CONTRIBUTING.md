@@ -102,8 +102,9 @@ Meet each criterion before you submit a pull request.
    fix. Use `unknown step "clik" — did you mean "click"?` rather than a Zod dump.
 5. **Guard each path and Network destination.** Route each path through `authorizePath` and perform the filesystem effect on the canonical target it returns. Create browser contexts through `guardedContext` and send shotlist-owned readiness traffic through the Node network adapter, because checking only authored URLs misses redirects and page-created requests.
 6. **Keep controls under Operator authority.** The Operator owns `--untrusted`, `--allow`,
-   `--allow-path`, and `SHOTLIST_*`. A config can narrow authority through `deny:` in any
-   mode. It can widen authority in trusted mode.
+   `--allow-path`, `--work-limit`, and `SHOTLIST_*`. A config can narrow authority through
+   `deny:` in any mode. It can widen Network and environment authority in trusted mode, but
+   it cannot raise a Work limit.
 7. **Await each Playwright call and resolve Playwright at run time.** If you miss an await,
    shotlist captures the page before the step finishes and writes the wrong image without
    an error. Keep Playwright optional so consuming projects avoid a browser download during

@@ -401,7 +401,7 @@ export function pageMessage(error: unknown): string {
 }
 
 /** Parse YAML or JSON text against the filename an author knows. */
-function parseDocumentText(text: string, file: string): unknown {
+export function parseDocumentText(text: string, file: string): unknown {
   try {
     return file.endsWith('.json') ? JSON.parse(text) : parseYaml(text)
   } catch (error) {
