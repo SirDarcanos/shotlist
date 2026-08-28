@@ -59,8 +59,16 @@ export type {
   CaptureResourceFailure,
   CaptureSelection,
   CapturedRecipeResult,
+  CheckFindingResult,
+  CheckRecipeResult,
+  CheckReport,
+  CheckRequest,
+  CheckResourceFailure,
+  CheckSelection,
   FailedCaptureResult,
+  FailedCheckResult,
   UnattemptedCaptureResult,
+  UnattemptedCheckResult,
 } from './execute.js'
 export { readSession, signIn } from './session.js'
 export type { SignInOptions } from './session.js'

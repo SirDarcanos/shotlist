@@ -121,22 +121,26 @@ npx shotlist --help               # the full list, from the tool
 
 ## Library API
 
-Your caller grants Operator authority. Pass it to `openRun`, then Capture named Recipes or
-all Recipes through the Run:
+Your caller grants Operator authority. Pass it to `openRun`, then Capture or perform
+Checking for named Recipes or all Recipes through the Run:
 
 ```ts
 import { openRun } from 'shotlist'
 
 const run = openRun({ untrusted: false }, 'shotlist.config.yaml')
-const report = await run.capture({
+const captured = await run.capture({
   recipes: ['order-row', 'account-menu'],
 })
+const checked = await run.check({ all: true, diff: true })
 ```
 
-Named Recipes keep caller order; `{ all: true }` uses recipe-name order. The immutable
-report gives every selected Recipe a `captured`, `failed`, or `not-attempted` result.
-`keepGoing: true` attempts later Recipes after a failure. The Run remains reusable after a
-request settles and rejects overlapping requests.
+Named Recipes keep caller order; `{ all: true }` uses recipe-name order. Capture results
+are `captured`, `failed`, or `not-attempted`. Checking retains `same`, `changed`, `new`,
+and `skipped` findings beside operational failures and unattempted Recipes. Both immutable
+reports retain request-level resource failures; Checking also includes environment drift,
+Ignore-region counts, and optional diff-image paths. `keepGoing: true` attempts later
+Recipes after a failure. The Run remains reusable after a request settles and rejects
+overlapping requests.
 
 shotlist rejects a hand-built Run before it touches the browser, filesystem, network, or a
 process. The caller grants Operator authority, including any numerical Work limit changes;

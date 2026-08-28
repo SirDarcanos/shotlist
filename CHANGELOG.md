@@ -13,6 +13,12 @@ recipe authors what to edit. See
 
 ### Added
 
+- **Run-level Checking requests** through `run.check({ recipes: [...] })` or
+  `run.check({ all: true })`. Checking shares Capture's validation, ordering, resource
+  ownership, overlap, complete-report, and Run-reuse guarantees. Reports retain `same`,
+  `changed`, `new`, and `skipped` findings, Recipe and request failures, unattempted
+  Recipes, environment drift, Ignore-region counts, and optional diff-image paths.
+
 - **Run-level Capture requests** through `run.capture({ recipes: [...] })` or
   `run.capture({ all: true })`. shotlist validates complete selections before effects,
   preserves explicit or deterministic name order, processes Recipes sequentially through

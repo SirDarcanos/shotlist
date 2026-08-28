@@ -324,6 +324,7 @@ export async function check(
           reason: `size changed, ${compared.sizes[0]} to ${compared.sizes[1]}`,
           shot: shotResult.file,
           against: committed.authored,
+          ...(ignore.length ? { ignored: ignore.length } : {}),
           diff: await drawDiff(),
         })
         continue
