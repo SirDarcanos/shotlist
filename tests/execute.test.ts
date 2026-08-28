@@ -9,7 +9,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { openRun, shoot, writeBaseline } from '../src/index.js'
+import { openRun, writeBaseline } from '../src/index.js'
 import type { RunProgress } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
@@ -470,8 +470,7 @@ describe('Run execution', () => {
       `${readFileSync(recipeFile, 'utf8')}\ncheck:\n  ignore: [{ within: clip, text: '$42.00' }]\n`,
     )
     const run = openRun({ untrusted: false }, join(root, 'shotlist.config.yaml'))
-    const recipe = run.project.library.recipes.get('order-row')!
-    await shoot(run, recipe, { install: true })
+    await run.capture({ recipes: ['order-row'], install: true })
     writeBaseline(run, { platform: 'a-different-platform' })
 
     const same = await run.check({ recipes: ['order-row'] })

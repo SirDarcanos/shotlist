@@ -83,6 +83,12 @@ recipe authors what to edit. See
 
 ### Changed
 
+- **TypeScript Capture and Checking now use Run requests and reports.** Replace direct
+  `shoot` and `check` calls with `run.capture({ recipes: names })` and
+  `run.check({ recipes: names })`. The Run owns browser startup and cleanup; callers handle
+  complete reports rather than direct one-Recipe results. Recipe and config files plus CLI
+  commands and flags do not change.
+
 - **The CLI now consumes Run execution reports.** Capture and Checking commands translate
   selection and flags into Run requests, render ordered progress and complete report
   outcomes, and derive human and JSON output plus exit codes from the same reports used by
@@ -93,11 +99,11 @@ recipe authors what to edit. See
 - **Operator authority names Network destinations rather than hosts.** TypeScript callers pass `destinations`; a bare value means HTTPS port 443, wildcard values cover proper subdomains only, and HTTP or unusual ports require a full destination. Untrusted Projects contribute no approvals, including for `site.url`. Application Recipes can no longer navigate to local files; use a File Recipe for a controlled local image.
 
 - **Effectful library calls require an authentic Run.** Callers open a Run with explicit
-  Operator authority, then pass the Run and its Recipes to capture, checking, Session,
-  server, step, and Baseline interfaces. shotlist rejects missing or forged Runs and copied
-  or foreign Recipes before an effect. Pass Operator authority to lint because malformed
-  Projects cannot open a complete Run. Parse Config, Recipe, Macro, Library-document, and
-  Query values in memory without Operator authority.
+  Operator authority, then use its name-based Capture and Checking methods or pass it to
+  Session, server, and Baseline interfaces. shotlist rejects missing or forged Runs before
+  an effect. Pass Operator authority to lint because malformed Projects cannot open a
+  complete Run. Parse Config, Recipe, Macro, Library-document, and Query values in memory
+  without Operator authority.
 
 - **Session reads take a configured name.** Call `readSession(run, name)` rather than
   resolving and passing a Session object. The Session module owns path resolution, host
@@ -124,6 +130,11 @@ recipe authors what to edit. See
   causes no browser effect rather than leaving an unnamed page behind.
 
 ### Removed
+
+- **Direct one-Recipe Capture and Checking package interfaces.** The package root no longer
+  exports `shoot`, `check`, `ShootOptions`, `CheckOptions`, `ShotResult`, `CheckResult`, or
+  `Retry`. Use `run.capture(request)` and `run.check(request)`; these methods select Recipe
+  names and do not accept caller-owned browsers.
 
 - **Low-level Step execution at the package root.** Use Capture, Checking, or Session operations through an authentic Run so browser contexts cannot bypass Network destination enforcement.
 

@@ -12,15 +12,8 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import {
-  Recipe,
-  interpolate,
-  openRun,
-  parseConfig,
-  readSession,
-  shoot,
-  signIn,
-} from '../src/index.js'
+import { Recipe, interpolate, openRun, parseConfig, readSession, signIn } from '../src/index.js'
+import { shoot } from '../src/capture.js'
 import type { OperatorAuthority, Run } from '../src/index.js'
 import { envFor, trustFrom } from '../src/trust.js'
 import { removeProjects, tempProject } from './tempProject.js'

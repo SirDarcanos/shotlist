@@ -121,38 +121,68 @@ npx shotlist --help               # the full list, from the tool
 
 ## Library API
 
-Your caller grants Operator authority. Pass it to `openRun`, then Capture or perform
-Checking for named Recipes or all Recipes through the Run:
+Your caller grants Operator authority to `openRun`, then makes every Capture and Checking
+request through that Run:
 
 ```ts
-import { openRun } from 'shotlist'
+import { openRun, type CaptureReport, type CheckReport, type RunProgress } from 'shotlist'
 
 const run = openRun({ untrusted: false }, 'shotlist.config.yaml')
-const captured = await run.capture({
+
+const one: CaptureReport = await run.capture({ recipes: ['order-row'] })
+const group: CaptureReport = await run.capture({
   recipes: ['order-row', 'account-menu'],
+  install: true,
 })
+const all: CaptureReport = await run.capture({ all: true })
+
 const controller = new AbortController()
-const checked = await run.check({
+process.once('SIGINT', () => controller.abort('SIGINT'))
+const checked: CheckReport = await run.check({
   all: true,
   diff: true,
   signal: controller.signal,
-  onProgress: async (progress) => console.log(progress.type),
+  onProgress: async (progress: RunProgress) => console.log(progress.type),
 })
+
+for (const result of checked.results) {
+  if (result.status === 'changed') console.log(result.name, result.diff)
+  if (result.status === 'failed') console.error(result.name, result.error)
+}
+for (const failure of checked.failures) console.error(failure.resource, failure.error)
+for (const warning of checked.warnings ?? []) console.warn(warning)
 ```
 
-Named Recipes keep caller order; `{ all: true }` uses recipe-name order. Capture results
-are `captured`, `failed`, `cancelled`, or `not-attempted`. Checking retains `same`,
-`changed`, `new`, and `skipped` findings beside operational failures, cancellation, and
-unattempted Recipes. Both immutable reports retain request-level resource failures;
-Checking also includes environment drift, Ignore-region counts, and optional diff-image
-paths. `keepGoing: true` attempts later Recipes after a failure. Pass an `AbortSignal` to
-cancel one request. An awaited `onProgress` observer receives request, Recipe, and retry
-facts in order; its first failure disables later progress and becomes one report warning.
-The Run remains reusable after a request settles and rejects overlapping requests.
+A one-Recipe request uses the same interface and report as a group. Named Recipes keep
+caller order; `{ all: true }` selects every Recipe in recipe-name order. Capture results
+are `captured`, `failed`, `cancelled`, or `not-attempted`; `group.installation` accounts for
+Committed images only after every selected Capture and required cleanup finishes. Checking
+retains `same`, `changed`, `new`, and `skipped` findings beside operational failures,
+cancellation, and unattempted Recipes. Its report also includes environment drift,
+Ignore-region counts, and optional diff-image paths.
 
-shotlist rejects a hand-built Run before it touches the browser, filesystem, network, or a
-process. The caller grants Operator authority, including any numerical Work limit changes;
-the Project config does not.
+Both reports are immutable. Request-level site, browser, and Baseline failures live in
+`failures`; progress-observer failures live in `warnings`; cancellation details live in
+`cancellation`. `keepGoing: true` attempts later Recipes after a Recipe failure. An awaited
+`onProgress` observer receives request, Recipe, retry, and installation facts in order. The
+Run remains reusable after a request settles and rejects overlapping requests.
+
+shotlist rejects invalid requests with `ShotlistError`. It also rejects a hand-built Run
+before it touches the browser, filesystem, network, or a process. The caller grants
+Operator authority, including any numerical Work limit changes; the Project config does
+not.
+
+### Migrating pre-1.0 TypeScript callers
+
+Replace `shoot(run, recipe, options)` with a name-based request such as
+`run.capture({ recipes: [recipe.name] })`. Replace `check(run, recipes, options)` with
+`run.check({ recipes: names })`, where `names` is a string array. Handle the returned report
+rather than a direct `ShotResult` or `CheckResult[]`, and remove caller-owned browser setup.
+Use `install: true` on the Capture request; the Run defers Installation until Capture and
+cleanup finish.
+
+This package-interface change does not change Recipe or config files, and it does not
+change CLI commands or flags.
 
 Pass authority to lint because a malformed Project cannot open a complete Run:
 `lint({ untrusted: false }, 'shotlist.config.yaml')`. Use `parseConfig`, `parseRecipe`,

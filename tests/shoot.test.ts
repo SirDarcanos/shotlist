@@ -12,7 +12,8 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
-import { drawAnnotations, loadPlaywright, openRun, parseConfig, shoot } from '../src/index.js'
+import { drawAnnotations, loadPlaywright, openRun, parseConfig } from '../src/index.js'
+import { shoot } from '../src/capture.js'
 import type { Run } from '../src/index.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
