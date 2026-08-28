@@ -122,13 +122,14 @@ async function run(
   url = VERBS,
   macros = new Map<string, Macro>(),
   domainRun = fixtureRun(),
+  vars: Record<string, unknown> = {},
 ) {
   const page: Page = await context.newPage()
   await page.goto(url, { waitUntil: 'load' })
   const ctx: RunContext = {
     pages: new Map<string, Page>([['main', page]]),
     page,
-    vars: {},
+    vars,
     rects: {},
     viewport: VIEWPORT,
     timeout: 10_000,
@@ -250,6 +251,29 @@ describe('control-flow verbs', () => {
       undefined,
     )
     expect(typed).toBe('two')
+    await page.close()
+  })
+
+  it('executes an each list resolved during Step interpolation', async () => {
+    const { page } = await run(
+      [
+        {
+          each: '$rows',
+          as: 'row',
+          steps: [{ fill: { css: '#inpTyped' }, value: '$row' }],
+        },
+      ],
+      VERBS,
+      new Map(),
+      fixtureRun(),
+      { rows: ['first', 'second'] },
+    )
+    expect(
+      await page.evaluate(
+        () => (document.getElementById('inpTyped') as HTMLInputElement).value,
+        undefined,
+      ),
+    ).toBe('second')
     await page.close()
   })
 

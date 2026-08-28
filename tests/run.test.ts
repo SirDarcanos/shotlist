@@ -115,6 +115,24 @@ describe('openRun', () => {
     ).toThrow(/would run 5 Steps; the Work limit is 4/)
   })
 
+  it('rejects unresolved loop structure before a Run can start browser work', () => {
+    const root = project(config(), {
+      'screenshots/recipes/loop.yaml': `setup:
+  - each: $rows
+    steps:
+      - click: { css: .first }
+      - click: { css: .second }
+`,
+    })
+
+    expect(() =>
+      openRun(
+        { untrusted: false, workLimits: { expandedSteps: 2 } },
+        join(root, 'shotlist.config.json'),
+      ),
+    ).toThrow(/expands to more than 2 Steps/)
+  })
+
   it('counts deliberate waits before running a Recipe', () => {
     const root = project(config(), {
       'screenshots/recipes/wait.yaml': 'setup:\n  - wait: 5\n',

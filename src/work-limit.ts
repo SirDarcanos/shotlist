@@ -320,10 +320,10 @@ function planningFold(
     eachItems: 0,
     macroDepth: 0,
   })
+  let structuralDepth = 0
   const exceeded = (work: PlannedWork) =>
     work.expanded > limits.expandedSteps ||
-    work.executed > executionLimit ||
-    work.milliseconds > timeLimit
+    (structuralDepth === 0 && (work.executed > executionLimit || work.milliseconds > timeLimit))
   const add = (left: PlannedWork, right: PlannedWork): PlannedWork => ({
     expanded: boundedArithmetic(left.expanded + right.expanded),
     executed: boundedArithmetic(left.executed + right.executed),
@@ -331,6 +331,15 @@ function planningFold(
     eachItems: Math.max(left.eachItems, right.eachItems),
     macroDepth: Math.max(left.macroDepth, right.macroDepth),
   })
+  const retainStructure = (body: () => PlannedWork): PlannedWork => {
+    structuralDepth++
+    try {
+      const nested = body()
+      return { ...nested, executed: 0, milliseconds: 0 }
+    } finally {
+      structuralDepth--
+    }
+  }
 
   return {
     sequence(parts) {
@@ -343,6 +352,9 @@ function planningFold(
     },
     one(milliseconds = 0) {
       return { ...none(), expanded: 1, executed: 1, milliseconds }
+    },
+    structural(body) {
+      return retainStructure(body)
     },
     repetition(times, body) {
       const nested = body()
@@ -361,15 +373,7 @@ function planningFold(
           limits.eachItems,
         )
       }
-      if (!items.length) {
-        const nested = empty()
-        return {
-          ...nested,
-          executed: 0,
-          milliseconds: 0,
-          eachItems: Math.max(nested.eachItems, items.length),
-        }
-      }
+      if (!items.length) return retainStructure(empty)
 
       let measured = none()
       for (const item of items) {

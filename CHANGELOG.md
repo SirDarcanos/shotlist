@@ -131,6 +131,10 @@ recipe authors what to edit. See
 
 ### Fixed
 
+- **Unresolved `each` Steps retain their nested structure during Predictable Work preflight.**
+  shotlist now counts nested Expanded Steps and Macro depth before site or browser startup
+  without predicting nested executions or deliberate waits from an unknown list length.
+
 - **`openPage` authorizes its interpolated URL before opening a page.** A refused URL now
   causes no browser effect rather than leaving an unnamed page behind.
 

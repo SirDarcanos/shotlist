@@ -224,16 +224,84 @@ describe('Recipe Work limits', () => {
     })
   })
 
-  it('keeps unresolved each at its current structural count', () => {
+  it('projects unresolved each structure without predicting nested execution or waits', () => {
     const recipe = parseRecipe(
-      { setup: [{ each: '$missing', steps: [{ click: { css: '.row' } }] }] },
+      {
+        setup: [
+          {
+            each: '$missing',
+            steps: [{ click: { css: '.row' } }, { wait: 5 }],
+          },
+        ],
+      },
       { name: 'unknown-list' },
     )
 
-    expect(preflightRecipe('unknown-list', recipe, libraryFor(recipe)).setup).toMatchObject({
-      expanded: 1,
+    expect(preflightRecipe('unknown-list', recipe, libraryFor(recipe)).setup).toEqual({
+      expanded: 3,
       executed: 1,
+      milliseconds: 0,
+      eachItems: 0,
+      macroDepth: 0,
     })
+  })
+
+  it('projects Macros and Macro depth inside an unresolved each', () => {
+    const inner = parseMacro({ steps: [{ click: { css: '.row' } }] })
+    const outer = parseMacro({ steps: [{ use: 'inner' }] })
+    const macros = new Map([
+      ['outer', outer],
+      ['inner', inner],
+    ])
+    const recipe = parseRecipe(
+      { setup: [{ each: '$missing', steps: [{ use: 'outer' }] }] },
+      { name: 'unknown-macro' },
+    )
+
+    expect(preflightRecipe('unknown-macro', recipe, libraryFor(recipe, macros)).setup).toEqual({
+      expanded: 2,
+      executed: 1,
+      milliseconds: 0,
+      eachItems: 0,
+      macroDepth: 2,
+    })
+    expect(() =>
+      preflightRecipe(
+        'unknown-macro',
+        recipe,
+        libraryFor(recipe, macros),
+        resolveWorkLimits({ macroDepth: 1 }),
+      ),
+    ).toThrow(/Macro expansion is more than 1 deep/)
+  })
+
+  it('keeps projecting unresolved structure after discarded work exceeds a limit', () => {
+    const inner = parseMacro({ steps: [{ click: { css: '.row' } }] })
+    const outer = parseMacro({ steps: [{ use: 'inner' }] })
+    const macros = new Map([
+      ['outer', outer],
+      ['inner', inner],
+    ])
+    const recipe = parseRecipe(
+      {
+        setup: [
+          {
+            each: '$missing',
+            steps: [{ wait: 5 }, { use: 'outer' }],
+          },
+        ],
+      },
+      { name: 'unknown-macro-after-wait' },
+    )
+
+    expect(() =>
+      preflightRecipe(
+        'unknown-macro-after-wait',
+        recipe,
+        libraryFor(recipe, macros),
+        resolveWorkLimits({ macroDepth: 1, recipeMilliseconds: 1 }),
+      ),
+    ).toThrow(/Macro expansion is more than 1 deep/)
   })
 
   it('leaves cyclic known references unresolved without recursive failure', () => {
@@ -248,7 +316,7 @@ describe('Recipe Work limits', () => {
         recipe,
         libraryFor(recipe, new Map(), { first: '$second', second: '$first' }),
       ).setup,
-    ).toMatchObject({ expanded: 1, executed: 1 })
+    ).toMatchObject({ expanded: 2, executed: 1 })
   })
 
   it('applies Macro defaults and lets with arguments take precedence', () => {

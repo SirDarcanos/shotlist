@@ -82,6 +82,8 @@ export interface PredictableFold<Result> {
   sequence(parts: Iterable<() => Result>): Result
   /** Contribute one Expanded Step and one predictable Executed Step. */
   one(milliseconds?: number): Result
+  /** Expand a body once and retain no predictable execution or waits. */
+  structural(body: () => Result): Result
   /** Expand a body once and execute it a known number of times. */
   repetition(times: number, body: () => Result): Result
   /** Project a body under every known item scope, retaining empty-list structure. */
@@ -105,6 +107,7 @@ interface PredictableFrame<Result> {
   one(milliseconds?: number): Result
   sequence(parts: Iterable<() => Result>): Result
   nested(scope?: Readonly<Record<string, unknown>>): Result
+  structural(body: () => Result): Result
   repetition(times: number, body: () => Result): Result
   knownIteration(
     items: readonly unknown[],
@@ -356,9 +359,11 @@ const DEFINITIONS = [
       const name = text('as')
       for (const item of items) await nested({ ...outer, [name]: item })
     },
-    ({ step, scope, one, sequence, nested, known, knownIteration }) => {
+    ({ step, scope, one, sequence, nested, structural, known, knownIteration }) => {
       const items = known(step['each'])
-      if (!Array.isArray(items)) return one()
+      if (!Array.isArray(items)) {
+        return sequence([() => one(), () => structural(() => nested(scope))])
+      }
       const name = typeof step['as'] === 'string' ? step['as'] : 'item'
       return sequence([
         () => one(),
@@ -569,6 +574,7 @@ export function foldPredictableSteps<Result>(
           one: (milliseconds) => fold.one(milliseconds),
           sequence: (parts) => fold.sequence(parts),
           nested,
+          structural: (body) => fold.structural(body),
           repetition: (times, body) => fold.repetition(times, body),
           knownIteration: (items, body, empty) => fold.knownIteration(items, body, empty),
           known: (value) => knownValue(value, currentScope),
