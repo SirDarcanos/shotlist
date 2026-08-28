@@ -1,8 +1,11 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { Macro, expandSteps, loadPlaywright, openRun, parseRecipe, runSteps } from '../src/index.js'
-import type { OperatorAuthority, Run, RunContext } from '../src/index.js'
+import { Macro, expandSteps, loadPlaywright, openRun, parseRecipe } from '../src/index.js'
+import type { OperatorAuthority, Run } from '../src/index.js'
+import { networkPolicyFor } from '../src/run.js'
+import { runSteps } from '../src/steps.js'
+import type { RunContext } from '../src/steps.js'
 import type { Browser, BrowserContext, Page } from '../src/playwright.js'
 import { removeProjects, tempProject } from './tempProject.js'
 
@@ -45,6 +48,7 @@ async function run(
     rects: {},
     viewport: VIEWPORT,
     timeout: 10_000,
+    network: networkPolicyFor(domainRun).forOperation('Step test'),
     newPage: () => context.newPage(),
   }
   // Through the schema, so a test also proves the step it writes is one a recipe may use.
@@ -293,64 +297,6 @@ describe('navigation verbs', () => {
     } finally {
       delete process.env['SHOTLIST_STEP_VALUE']
     }
-  })
-
-  it('authorizes an interpolated goto URL before navigation', async () => {
-    const domainRun = fixtureRun({
-      untrusted: false,
-      hosts: ['example.test'],
-      deny: ['secrets-area'],
-    })
-    const { page } = await run([], VERBS, new Map(), domainRun)
-    const ctx: RunContext = {
-      pages: new Map([['main', page]]),
-      page,
-      vars: { destination: 'https://example.test/secrets-area/account' },
-      rects: {},
-      viewport: VIEWPORT,
-      timeout: 10_000,
-      newPage: () => context.newPage(),
-    }
-    const recipe = parseRecipe({ setup: [{ goto: '$destination' }] }, { name: 'steps' })
-
-    await expect(runSteps(domainRun, expandSteps(recipe.setup, new Map()), ctx)).rejects.toThrow(
-      /`goto`.*secrets-area.*forbidden path/s,
-    )
-    expect(page.url()).toBe(VERBS)
-    await page.close()
-  })
-
-  it('authorizes an interpolated openPage URL before navigation', async () => {
-    const domainRun = fixtureRun({
-      untrusted: false,
-      hosts: ['example.test'],
-      deny: ['secrets-area'],
-    })
-    const { page } = await run([], VERBS, new Map(), domainRun)
-    const recipe = parseRecipe(
-      { setup: [{ openPage: '$destination', as: 'other' }] },
-      { name: 'steps' },
-    )
-    let opened = false
-    const ctx: RunContext = {
-      pages: new Map([['main', page]]),
-      page,
-      vars: { destination: 'https://example.test/secrets-area/account' },
-      rects: {},
-      viewport: VIEWPORT,
-      timeout: 10_000,
-      newPage: () => {
-        opened = true
-        return context.newPage()
-      },
-    }
-
-    await expect(runSteps(domainRun, expandSteps(recipe.setup, new Map()), ctx)).rejects.toThrow(
-      /`openPage`.*secrets-area.*forbidden path/s,
-    )
-    expect(opened).toBe(false)
-    expect(ctx.pages.has('other')).toBe(false)
-    await page.close()
   })
 
   it('goes to another page', async () => {

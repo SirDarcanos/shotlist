@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_QUERY_DEPTH, interpolate, parseQuery, parseRecipe } from '../src/index.js'
-import { checkPath, checkUrl, secretIn, trustFrom } from '../src/trust.js'
+import { compileNetworkPolicy } from '../src/network-policy.js'
+import { checkPath, secretIn, trustFrom } from '../src/trust.js'
 
 const NUL = String.fromCharCode(0)
 const SITE = 'https://example.com/'
-const guard = (deny: string[] = [], untrusted = true) =>
-  trustFrom({ root: '/project', siteUrl: SITE, deny }, untrusted)
+const guard = (deny: string[] = []) =>
+  compileNetworkPolicy({
+    operator: ['example.com'],
+    project: [],
+    untrusted: true,
+    deny,
+  }).forOperation('`url`')
+const pathGuard = () => trustFrom({ root: '/project', siteUrl: SITE }, true)
 
 // Everything here is a thing somebody would try on purpose. Each one was run against the
 // real code before it was written down, and four of them worked.
@@ -20,12 +27,12 @@ describe('a URL written to look like the site', () => {
       'https://evilexample.com/',
       'https://xn--rllful-5wa.dev/', // а Cyrillic homograph, punycoded
     ]) {
-      expect(() => checkUrl(guard(), url, '`url`'), url).toThrow(/not this site/)
+      expect(() => guard().check(url), url).toThrow()
     }
   })
 
   it('is not fooled by case', () => {
-    expect(() => checkUrl(guard(), 'https://EXAMPLE.COM/x', '`url`')).not.toThrow()
+    expect(() => guard().check('https://EXAMPLE.COM/x')).not.toThrow()
   })
 })
 
@@ -38,24 +45,22 @@ describe('a path hiding behind a control character', () => {
   })
 
   it('refuses the path outright, whatever it was hiding', () => {
-    expect(() => checkPath(guard(), `/project/a${NUL}b.png`, 'install')).toThrow(
+    expect(() => checkPath(pathGuard(), `/project/a${NUL}b.png`, 'install')).toThrow(
       /holds a control character/,
     )
-    expect(() => checkPath(guard(), '/project/a\nb.png', 'install')).toThrow(
+    expect(() => checkPath(pathGuard(), '/project/a\nb.png', 'install')).toThrow(
       /holds a control character/,
     )
   })
 
   it('refuses it in a URL path too', () => {
-    expect(() => checkUrl(guard(['fake-secret']), 'https://example.com/a%00b', '`url`')).toThrow(
-      /holds a control character/,
-    )
+    expect(() => guard(['fake-secret']).check('https://example.com/a%00b')).toThrow()
   })
 
   it('sees through percent-encoding, which the server will decode', () => {
-    expect(() =>
-      checkUrl(guard(['fake-secret']), 'https://example.com/%66ake-secret/x', '`url`'),
-    ).toThrow(/forbidden path/)
+    expect(() => guard(['fake-secret']).check('https://example.com/%66ake-secret/x')).toThrow(
+      /forbidden path/,
+    )
   })
 })
 

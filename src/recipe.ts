@@ -64,7 +64,7 @@ const Numbered = z.union([
 
 const StylePatch = z.record(z.string(), z.unknown())
 
-/** The recipe schema, bound to a project's query aliases. */
+/** The Recipe schema, bound to a Project's Finders. */
 export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
   const Query = makeQuery(aliases)
   return z
@@ -80,7 +80,7 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
         })
         .optional(),
       source: z.enum(['app', 'file']).default('app'),
-      /** With `source: file`, the PNG to annotate instead of driving the site. */
+      /** With `source: file`, the image to annotate instead of driving the site. */
       file: z.string().optional(),
       install: z.string().optional(),
       /** Which of `site.sessions` to shoot this as. Unset, the browser is a stranger. */
@@ -160,7 +160,7 @@ export function makeRecipe(aliases: Readonly<Record<string, unknown>> = {}) {
     .strict()
 }
 
-/** The macro schema, bound to a project's query aliases. */
+/** The Macro schema, bound to a Project's Finders. */
 export function makeMacro(aliases: Readonly<Record<string, unknown>> = {}) {
   return z
     .object({
@@ -296,7 +296,7 @@ export function parseRecipe(
     }
   }
   if (recipe.source === 'file' && !recipe.file) {
-    throw new ShotlistError('`source: file` needs a `file:` pointing at the PNG', options.file)
+    throw new ShotlistError('`source: file` needs a `file:` pointing at an image', options.file)
   }
   // Refused rather than ignored: there is no page for them to run against, so a recipe
   // carrying them is one whose author believes something is happening that is not.

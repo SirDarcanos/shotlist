@@ -30,6 +30,7 @@ describe('Run execution', () => {
 
     expect(result).toEqual({
       drift: [],
+      operatorDestinations: [],
       results: [
         {
           name: 'volatile',

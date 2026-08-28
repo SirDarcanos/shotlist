@@ -149,9 +149,7 @@ not support `eval:` or other executable recipe fields. See
 ## Running a config you did not write
 
 Automation may run a config from a fork or another contributor. In every mode, shotlist
-blocks secret-looking paths such as `.env`, `.git`, and `.ssh`. In `--untrusted` mode,
-shotlist starts no configured process, loads no stored session, accepts approved HTTP(S)
-hosts, and confines paths to approved roots.
+blocks secret-looking paths such as `.env`, `.git`, and `.ssh`. It checks browser requests, redirects, WebSockets, and readiness probes against approved protocol, host, and port values. In `--untrusted` mode, shotlist starts no configured process, loads no stored Session, accepts no Project-provided Network destination approvals, and confines paths to approved roots. Use `--allow` or protected `SHOTLIST_ALLOW` settings to grant exact destinations, and keep hostile Projects inside an isolated runner.
 
 Read the full policy and its limits in the
 **[security model](https://shotlist.dev/docs/explanation/security-model)**.

@@ -11,8 +11,10 @@ export interface PlaywrightModule {
   }
 }
 
+export type BrowserContextOptions = Record<string, unknown>
+
 export interface Browser {
-  newContext(options?: Record<string, unknown>): Promise<BrowserContext>
+  newContext(options?: BrowserContextOptions): Promise<BrowserContext>
   close(): Promise<void>
   /** Optional: a fake in a test has no version, and neither has a run with no browser. */
   version?(): string
@@ -21,8 +23,42 @@ export interface Browser {
 export interface BrowserContext {
   newPage(): Promise<Page>
   close(): Promise<void>
+  /** Intercept every HTTP(S) request in this context. */
+  route(pattern: string | RegExp, handler: (route: Route) => Promise<void>): Promise<void>
+  /** Intercept live WebSocket connections separately from ordinary requests. */
+  routeWebSocket(
+    pattern: string | RegExp,
+    handler: (route: WebSocketRoute) => Promise<void>,
+  ): Promise<void>
   /** Cookies and local storage as they stand. Narrowed and written by `session.ts`. */
   storageState(): Promise<unknown>
+}
+
+export interface Request {
+  url(): string
+  method(): string
+  headers(): Record<string, string>
+  postDataBuffer(): Buffer | null
+  redirectedFrom(): Request | null
+}
+
+export interface APIResponse {
+  status(): number
+  headers(): Record<string, string>
+}
+
+export interface Route {
+  request(): Request
+  fetch(options?: Record<string, unknown>): Promise<APIResponse>
+  fulfill(options: { response: APIResponse }): Promise<void>
+  continue(): Promise<void>
+  abort(errorCode?: string): Promise<void>
+}
+
+export interface WebSocketRoute {
+  url(): string
+  connectToServer(): unknown
+  close(options?: { code?: number; reason?: string }): Promise<void>
 }
 
 /**

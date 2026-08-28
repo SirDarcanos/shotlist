@@ -2,7 +2,10 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MAX_PIXELS, ShotlistError, fromRoot, mergeStyle, pageMessage } from './config.js'
-import { authorizePath, checkUrl } from './trust.js'
+import { authorizePath } from './trust.js'
+import { NetworkPolicyError } from './network-policy.js'
+import type { NetworkAccess } from './network-policy.js'
+import { guardedContext } from './network-playwright.js'
 import { readCaptureSession } from './session.js'
 import { MEDIA, extensionOf, formatOf, isLossless, sizeOf } from './image.js'
 import type { Format } from './image.js'
@@ -16,7 +19,7 @@ import type { DrawStyle, Mark } from './annotate.js'
 import { loadPlaywright } from './playwright.js'
 import type { Browser, Page } from './playwright.js'
 import type { QueryInput, Rect } from './query.js'
-import { assertRecipe, assertRun } from './run.js'
+import { assertRecipe, assertRun, networkPolicyFor } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
 
 /** Optional behavior for capturing a Recipe through its Run. */
@@ -192,10 +195,7 @@ function fontSheet(run: Run, style: Style, loaded: LoadedConfig): FontSheet {
   let path = named
   try {
     const url = new URL(named)
-    if (url.protocol === 'http:' || url.protocol === 'https:') {
-      checkUrl(run.trust, named, 'style.label.fontUrl')
-      return { href: named }
-    }
+    if (url.protocol === 'http:' || url.protocol === 'https:') return { href: named }
     if (url.protocol === 'data:') return { href: named }
     if (url.protocol !== 'file:') {
       throw new ShotlistError(
@@ -241,10 +241,7 @@ function fontSheet(run: Run, style: Style, loaded: LoadedConfig): FontSheet {
   const css = readFileSync(file, 'utf8').replace(
     /url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
     (whole, _quote: string, target: string) => {
-      if (/^https?:/i.test(target)) {
-        checkUrl(run.trust, target, 'style.label.fontUrl')
-        return whole
-      }
+      if (/^https?:/i.test(target)) return whole
       if (/^data:/i.test(target)) return whole
       const authoredAsset = fromRoot({ root: dirname(authoredFile) }, target.split(/[?#]/)[0]!)
       const asset = capturePath(run, authoredAsset, 'style.label.fontUrl')
@@ -271,13 +268,14 @@ async function annotate(
   font: FontSheet,
   sourceMedia: string,
   timeout: number,
+  access: NetworkAccess,
 ): Promise<{
   png: Buffer
   size: { width: number; height: number }
   margin: { left: number; top: number }
   warnings: string[]
 }> {
-  const context = await browser.newContext({
+  const context = await guardedContext(browser, access, {
     viewport: { width: Math.ceil(size.width), height: Math.ceil(size.height) },
     deviceScaleFactor: scale,
   })
@@ -323,6 +321,7 @@ async function annotate(
           ]),
         { spec: wanted, ms: timeout },
       )
+      access.throwIfBlocked()
       if (!arrived) {
         slow = `style.label.fontUrl did not load within ${timeout}ms — labels are drawn in whatever the browser had`
       }
@@ -375,8 +374,9 @@ async function reEncode(
   png: Buffer,
   format: Format,
   quality: number,
+  access: NetworkAccess,
 ): Promise<Buffer> {
-  const context = await browser.newContext()
+  const context = await guardedContext(browser, access)
   try {
     const page = await context.newPage()
     await page.setContent('<body></body>')
@@ -490,7 +490,7 @@ export async function shoot(
   const ours = options.browser === undefined
 
   /** One attempt at the whole shot: a fresh context, through to the written file. */
-  const attempt = async (): Promise<ShotResult> => {
+  const attempt = async (access: NetworkAccess): Promise<ShotResult> => {
     let image: Buffer
     let size: { width: number; height: number }
     let marks: Mark[]
@@ -536,7 +536,7 @@ export async function shoot(
         }
       })
     } else {
-      const context = await browser.newContext({
+      const context = await guardedContext(browser, access, {
         viewport: settings.viewport,
         deviceScaleFactor: settings.scale,
         colorScheme: settings.theme,
@@ -552,6 +552,7 @@ export async function shoot(
           rects: {},
           viewport: settings.viewport,
           timeout: config.site.timeout,
+          network: access,
           newPage: () => context.newPage(),
         }
         // Held rather than thrown from the `finally`, because a shot that already failed
@@ -561,14 +562,11 @@ export async function shoot(
         try {
           // The site not being up is the first thing a new project gets wrong, and
           // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
-          checkUrl(
-            run.trust,
-            settings.url,
-            `recipe "${recipe.name}": ${recipe.url ? '`url`' : '`site.url`'}`,
-          )
+          access.check(settings.url)
           try {
             await page.goto(settings.url, { waitUntil: 'load' })
           } catch (error) {
+            access.throwIfBlocked()
             throw inRecipe(
               recipe,
               recipe.url ? '`url`' : '`site.url`',
@@ -595,6 +593,8 @@ export async function shoot(
             const steps = expandSteps(recipe.setup, library.macros)
             await runSteps(run, steps, ctx)
           } catch (error) {
+            if (error instanceof NetworkPolicyError) throw error
+            access.throwIfBlocked()
             throw inRecipe(recipe, 'setup', pageMessage(error))
           }
 
@@ -645,6 +645,7 @@ export async function shoot(
           // viewport: the tall half of the page was never in the picture.
           const below = clip.y + clip.height > settings.viewport.height
           const scrolled = below ? await ctx.page.evaluate(() => window.scrollY, undefined) : 0
+          access.throwIfBlocked()
           image = await ctx.page.screenshot({
             clip: below ? { ...clip, y: clip.y + scrolled } : clip,
             ...(below ? { fullPage: true } : {}),
@@ -660,6 +661,8 @@ export async function shoot(
               const steps = expandSteps(recipe.teardown, library.macros)
               await runSteps(run, steps, ctx)
             } catch (error) {
+              if (error instanceof NetworkPolicyError) throw error
+              access.throwIfBlocked()
               tidying = inRecipe(recipe, 'teardown', pageMessage(error))
             }
           }
@@ -685,6 +688,7 @@ export async function shoot(
             fontSheet(run, style, loaded),
             source ? MEDIA[source.format] : MEDIA.png,
             config.site.timeout,
+            access,
           )
         : {
             png: image,
@@ -706,8 +710,9 @@ export async function shoot(
     // hand back losslessly. The format the project asked for is applied once, at the end.
     const written = isLossless(settings.format)
       ? drawn.png
-      : await reEncode(browser, drawn.png, settings.format, settings.quality)
+      : await reEncode(browser, drawn.png, settings.format, settings.quality, access)
 
+    access.throwIfBlocked()
     writeFileSync(outputTarget, written)
     const destination = destinationFor(run, recipe, loaded)
     if (options.install && destination) {
@@ -729,9 +734,12 @@ export async function shoot(
     // itself, and shooting it again would only report them again, more slowly.
     const attempts = source ? 1 : 1 + recipe.retries
     for (let n = 1; ; n++) {
+      const access = networkPolicyFor(run).forRecipe(recipe.name!)
       try {
-        return await attempt()
+        return await attempt(access)
       } catch (error) {
+        if (error instanceof NetworkPolicyError) throw error
+        access.throwIfBlocked()
         if (n >= attempts) throw error
         const why = error instanceof ShotlistError ? error.message : pageMessage(error)
         options.onRetry?.({ name: recipe.name!, attempt: n, of: attempts, why })

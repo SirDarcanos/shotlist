@@ -32,9 +32,9 @@ browser download on every consumer.
 An application recipe performs one complete attempt in a fresh browser context:
 
 1. Resolve recipe settings and enforce pixel, trust, and session bounds.
-2. Navigate the main page and wait for readiness, session verification, and settling.
-3. Expand and run setup steps serially.
-4. Resolve clip, marks, masks, and ignore regions, then capture a lossless PNG.
+2. Attach Network destination enforcement before creating the page, then navigate and wait for readiness, Session verification, and settling.
+3. Expand and run setup Steps serially.
+4. Resolve Clip, Marks, Masks, and Ignore regions, fail on blocked requests, then capture a lossless PNG.
 5. Run teardown in `finally` and close the attempt's context.
 6. Annotate and encode in separate pages, then write output and optional install copies.
 
@@ -59,8 +59,7 @@ distinguishable from malformed or impossible geometry.
 standing state: each page gets one listener that reads the current policy when a dialog
 arrives. Every step ensures newly opened or selected pages have that listener.
 
-`optional` deliberately swallows any nested failure. Keep it broad only for transient UI
-whose absence is acceptable, because it trades diagnosis for optionality.
+`optional` swallows ordinary nested failures for transient UI whose absence is acceptable. It rethrows Network policy failures because Operator authority cannot become optional Recipe behavior.
 
 ## Site ownership
 
@@ -72,16 +71,11 @@ A server shotlist starts runs in its own process group and is stopped by `withSe
 existing server is never stopped. Shutdown is idempotent, sends `SIGTERM`, and escalates to
 `SIGKILL` after five seconds so child processes cannot outlive the command.
 
-Readiness may be an HTTP(S) URL, a TCP port, or an output pattern. Retain the last 40 output
-lines and race readiness against child exit, because an early crash or missing executable
-is the useful error rather than a generic timeout.
+Readiness may be an HTTP(S) URL, a TCP port, or an output pattern. Authorize the command before probing, check every HTTP redirect manually, and check a numeric port as exact TCP access to `127.0.0.1`. Retain the last 40 output lines and race readiness against child exit, because an early crash or missing executable is the useful error rather than a generic timeout.
 
 ## Session ownership
 
-A recipe names a configured session; `src/session.ts` resolves it relative to the config
-root, narrows it to approved hosts, and loads it into the attempt context. A configured
-verification selector distinguishes an authenticated page from a silent redirect to sign
-in.
+A Recipe names a configured Session; `src/session.ts` resolves it relative to the config root, narrows it to the site host and explicit `keep` hosts, and loads it into the attempt context. Network destination approvals do not retain credentials, and `keep` does not grant network access. A configured verification Query distinguishes an authenticated page from a silent redirect to sign in.
 
 Login writes narrowed storage state only after optional verification in a fresh context.
 Session files use mode `0600`, including files that already existed, because they contain

@@ -10,9 +10,11 @@ from them, so a shape has one source of truth.
 the parsed value. Resolve project paths from that root rather than the shell's current
 directory.
 
-`loadLibrary` reads direct YAML, YML, and JSON children from the configured recipe, macro,
-and data directories. It loads macros before recipes, keys documents by explicit name or
-filename stem, and applies numbered-callout normalization after parsing.
+`openLibrary` authorizes and reads direct YAML, YML, and JSON children from the configured
+Recipe, Macro, and data directories. It parses Macros before Recipes, keys documents by
+explicit name or filename stem, applies numbered-callout normalization after parsing, and
+publishes one complete immutable Library or none of it. `parseLibrary` assembles documents
+that a caller has already read without requiring Operator authority.
 
 Most authored mappings are strict. Preserve addressed validation errors and typo
 suggestions when extending a union, because raw Zod branches turn one misspelled key into a
@@ -61,6 +63,10 @@ misspelled environment name. Property lookup follows own properties and blocks
 
 Data documents deliberately have no schema. They extend values available to loops and
 interpolation rather than the executable vocabulary.
+
+## Network destinations
+
+`site.url` and `site.allow` contribute Network destination approvals only for a trusted Project. A bare `site.allow` host means HTTPS port 443. Use a full HTTP(S) destination for HTTP or an unusual port, and `*.example.com` for proper HTTPS subdomains without the apex. Application Recipes may use browser-contained `data:` and `blob:` content but may not navigate to `file:` URLs; File Recipes remain the controlled local-image path.
 
 ## Completion
 

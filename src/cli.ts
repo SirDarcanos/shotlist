@@ -13,6 +13,7 @@ import { formatProblems, reviewProject } from './lint.js'
 import { signIn } from './session.js'
 import { openRun } from './run.js'
 import type { DeepReadonly, OperatorAuthority, ProjectLibrary } from './run.js'
+import type { NetworkDestination } from './network-policy.js'
 import { BASELINE_FILE } from './baseline.js'
 
 const USAGE = `shotlist — annotated UI screenshots from YAML recipes
@@ -38,7 +39,7 @@ const USAGE = `shotlist — annotated UI screenshots from YAML recipes
   --keep-going      carry on past a recipe that fails, and report them at the end
   --untrusted       the config is not yours: no processes, no leaving the project,
                     and nothing opened on the network this machine sits in
-  --allow <host>    also open this host and anything under it; repeatable
+  --allow <dest>    approve one Network destination; repeatable
   --allow-path <p>  also read and write under this directory; repeatable
   --deny <name>     never read or write this file or folder name; repeatable
   --help            this
@@ -83,6 +84,20 @@ function pick(
     }
     return recipe
   })
+}
+
+/** Render canonical Operator approvals without URL paths or other request data. */
+function destinationList(destinations: readonly NetworkDestination[]): string {
+  if (!destinations.length) return 'none'
+  return destinations
+    .map((destination) => {
+      const standard =
+        (destination.protocol === 'https:' && destination.port === 443) ||
+        (destination.protocol === 'http:' && destination.port === 80)
+      const host = `${destination.subdomains ? '*.' : ''}${destination.host}`
+      return `${destination.protocol}//${host}${standard ? '' : `:${destination.port}`}`
+    })
+    .join(', ')
 }
 
 /** Run the command line, returning the exit code rather than exiting. */
@@ -155,7 +170,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
 
   const authority: OperatorAuthority = {
     untrusted: values.untrusted,
-    hosts: values.allow ?? [],
+    destinations: values.allow ?? [],
     paths: values['allow-path'] ?? [],
     deny: values.deny ?? [],
     env: values['allow-env'] ?? [],
@@ -175,6 +190,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
     const { library } = project
 
     if (values.login !== undefined) {
+      io.out(`Operator Network destinations: ${destinationList(shotRun.operatorDestinations)}`)
       await signIn(shotRun, values.login, {
         ...(values.using !== undefined ? { using: values.using } : {}),
         ...(io.pause ? { pause: io.pause.bind(io) } : {}),
@@ -214,6 +230,7 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
       // With `--json` the report is stdout, so everything written for a person moves
       // aside — `shotlist --check --json > report.json` has to leave a usable file.
       const say = values.json ? io.err : io.out
+      say(`Operator Network destinations: ${destinationList(shotRun.operatorDestinations)}`)
       const { results, drift } = await executeCheckRun(shotRun, recipes, {
         keepGoing,
         onRetry,
@@ -251,11 +268,24 @@ export async function run(argv: readonly string[], io: Io = CONSOLE): Promise<nu
         changed ? `${changed} of ${results.length} need attention` : 'every screenshot is current',
       )
       if (values.json) {
-        io.out(JSON.stringify({ changed, total: results.length, drift, results }, null, 2))
+        io.out(
+          JSON.stringify(
+            {
+              changed,
+              total: results.length,
+              operatorDestinations: shotRun.operatorDestinations,
+              drift,
+              results,
+            },
+            null,
+            2,
+          ),
+        )
       }
       return changed ? 1 : 0
     }
 
+    io.out(`Operator Network destinations: ${destinationList(shotRun.operatorDestinations)}`)
     const captured = await executeCaptureRun(shotRun, recipes, {
       install: values.install,
       keepGoing,

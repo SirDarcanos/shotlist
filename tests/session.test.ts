@@ -431,11 +431,11 @@ describe('what a Session keeps', () => {
     ).toEqual([])
   })
 
-  it('keeps a host the config named in site.allow', () => {
+  it('does not treat a Network destination approval as credential retention', () => {
     const read = readState(state([{ domain: 'auth.partner.test' }]), {
       allow: ['auth.partner.test'],
     })
-    expect(domainsIn(read)).toEqual(['auth.partner.test'])
+    expect(domainsIn(read)).toEqual([])
   })
 
   it('keeps local storage for the site and its subdomains, and no other origin', () => {
@@ -497,8 +497,11 @@ describe('--login', () => {
   }
 
   /** A Project whose sign-in macro is on disk before the Run opens. */
-  function withSignIn(options: Parameters<typeof project>[0], steps: string) {
-    const made = project(options)
+  function withSignIn(options: NonNullable<Parameters<typeof project>[0]>, steps: string) {
+    const made = project({
+      ...options,
+      allow: [...(options.allow ?? []), origin, provider.origin],
+    })
     writeFileSync(join(made.root, 'macros', 'via-provider.yaml'), `steps:\n${steps}`)
     const run = openRun({ untrusted: false }, join(made.root, 'shotlist.config.yaml'))
     return { ...made, run, loaded: run.project, library: run.project.library }
@@ -684,7 +687,7 @@ describe('--login', () => {
       signInAt(provider.origin, 'Provider') + signInAt(origin, 'Ada'),
     )
     const run = openRun(
-      { untrusted: false, hosts: ['localhost'] },
+      { untrusted: false, destinations: ['http://localhost:8000'] },
       join(made.root, 'shotlist.config.yaml'),
     )
     const said: string[] = []

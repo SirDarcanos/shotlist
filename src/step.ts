@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ShotlistError, distance, pageMessage } from './config.js'
-import { checkUrl } from './trust.js'
+import { NetworkPolicyError } from './network-policy.js'
+import type { NetworkAccess } from './network-policy.js'
 import { makeQuery, resolveQuery } from './query.js'
 import type { QueryInput, Rect } from './query.js'
 import type { ElementHandle, Frame, Page, QueryTarget } from './playwright.js'
@@ -34,6 +35,7 @@ export interface RunContext {
   rects: Record<string, Rect>
   viewport: { width: number; height: number }
   timeout: number
+  network: NetworkAccess
   newPage(): Promise<Page>
   /** Set by `dialog:`. Unset, nothing is listening and the browser's default holds. */
   dialog?: DialogPolicy
@@ -121,9 +123,9 @@ const DEFINITIONS = [
   runtimeStep(
     'goto',
     () => [{ value: z.string() }],
-    async ({ run, page, text }) => {
+    async ({ page, text, ctx }) => {
       const to = text('goto')
-      checkUrl(run.trust, to, '`goto`')
+      ctx.network.check(to)
       await page.goto(to, { waitUntil: 'load' })
     },
   ),
@@ -295,7 +297,8 @@ const DEFINITIONS = [
     async ({ nested }) => {
       try {
         await nested()
-      } catch {
+      } catch (error) {
+        if (error instanceof NetworkPolicyError) throw error
         // `optional` exists for the dialog that is sometimes already closed.
       }
     },
@@ -311,9 +314,9 @@ const DEFINITIONS = [
         },
       },
     ],
-    async ({ run, step, text, ctx }) => {
+    async ({ step, text, ctx }) => {
       const to = text('openPage')
-      checkUrl(run.trust, to, '`openPage`')
+      ctx.network.check(to)
       const opened = await ctx.newPage()
       const viewport = step['viewport'] as { width: number; height: number } | undefined
       if (viewport) await opened.setViewportSize(viewport)

@@ -3,6 +3,8 @@ import type { Config, LoadedConfig } from './config.js'
 import { openLibrary } from './library.js'
 import type { DeepReadonly, ProjectLibrary } from './library.js'
 import type { Recipe } from './recipe.js'
+import { compileNetworkPolicy } from './network-policy.js'
+import type { NetworkDestination, NetworkPolicy } from './network-policy.js'
 import { trustFromEnvironment } from './trust.js'
 import type { Trust } from './trust.js'
 
@@ -12,8 +14,8 @@ export type { DeepReadonly, ProjectLibrary } from './library.js'
 export interface OperatorAuthority {
   /** Apply the restrictions for a Project the operator does not trust. */
   readonly untrusted: boolean
-  /** Hosts the operator grants in addition to the Project's site. */
-  readonly hosts?: readonly string[]
+  /** Network destinations the operator grants. */
+  readonly destinations?: readonly string[]
   /** Filesystem roots the operator grants in addition to the Project root. */
   readonly paths?: readonly string[]
   /** Path names the operator forbids. */
@@ -35,6 +37,8 @@ export interface Run {
   readonly project: Project
   readonly authority: DeepReadonly<OperatorAuthority>
   readonly trust: DeepReadonly<Trust>
+  /** Canonical Operator approvals suitable for human and JSON reports. */
+  readonly operatorDestinations: readonly NetworkDestination[]
   /** Allowed environment values captured while the Run opened. */
   readonly env: Readonly<Record<string, string>>
 }
@@ -48,6 +52,7 @@ export interface ProjectPolicy {
 
 /** Full process environment snapshots retained without exposing ungranted values to recipes. */
 const ENVIRONMENTS = new WeakMap<Run, Readonly<Record<string, string | undefined>>>()
+const NETWORK_POLICIES = new WeakMap<Run, NetworkPolicy>()
 
 /** Refuse a value not created by shotlist's Run opener. */
 export function assertRun(value: unknown): asserts value is Run {
@@ -81,7 +86,7 @@ function snapshotAuthority(value: unknown): Readonly<OperatorAuthority> {
   }
 
   /** Copy one optional list without retaining the caller's array. */
-  const copy = (key: 'hosts' | 'paths' | 'deny' | 'env'): readonly string[] | undefined => {
+  const copy = (key: 'destinations' | 'paths' | 'deny' | 'env'): readonly string[] | undefined => {
     const names = source[key]
     if (names === undefined) return undefined
     if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) {
@@ -90,13 +95,13 @@ function snapshotAuthority(value: unknown): Readonly<OperatorAuthority> {
     return Object.freeze([...names])
   }
 
-  const hosts = copy('hosts')
+  const destinations = copy('destinations')
   const paths = copy('paths')
   const deny = copy('deny')
   const env = copy('env')
   const authority: OperatorAuthority = {
     untrusted: source['untrusted'],
-    ...(hosts !== undefined ? { hosts } : {}),
+    ...(destinations !== undefined ? { destinations } : {}),
     ...(paths !== undefined ? { paths } : {}),
     ...(deny !== undefined ? { deny } : {}),
     ...(env !== undefined ? { env } : {}),
@@ -134,7 +139,6 @@ function policyFrom(
         deny: config.deny,
         allowEnv: config.allowEnv,
         granted: {
-          hosts: authority.hosts ?? [],
           paths: authority.paths ?? [],
           deny: authority.deny ?? [],
           env: authority.env ?? [],
@@ -155,6 +159,58 @@ export function projectPolicy(
   return policyFrom(operatorAuthority(authorityValue), loaded, Object.freeze({ ...process.env }))
 }
 
+/** Return the private Network destination policy owned by an authentic Run. */
+export function networkPolicyFor(run: Run): NetworkPolicy {
+  assertRun(run)
+  return NETWORK_POLICIES.get(run)!
+}
+
+/** Turn a Project site URL into the destination approval it names. */
+function siteDestination(siteUrl: string): string | undefined {
+  let parsed: URL
+  try {
+    parsed = new URL(siteUrl)
+  } catch {
+    throw new ShotlistError('site.url must name an http(s) Network destination')
+  }
+  if (parsed.username || parsed.password) {
+    throw new ShotlistError('site.url must not contain a username or password')
+  }
+  if (parsed.protocol === 'data:' || parsed.protocol === 'blob:' || parsed.port === '0') {
+    return undefined
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new ShotlistError(
+      'site.url must use http, https, data, or blob for an Application Recipe',
+    )
+  }
+  return parsed.origin
+}
+
+/** Network destinations a trusted Project declares through its site settings. */
+function projectDestinations(config: Config): string[] {
+  const ready = config.site.serve?.ready
+  return [
+    siteDestination(config.site.url),
+    ...config.site.allow,
+    ...(typeof ready === 'string' && /^https?:\/\//.test(ready)
+      ? [siteDestination(ready)]
+      : typeof ready === 'number'
+        ? [`tcp://127.0.0.1:${ready}`]
+        : []),
+  ].filter((destination): destination is string => destination !== undefined)
+}
+
+/** Operator destinations granted by protected process settings. */
+function destinationsFromEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): string[] {
+  return (environment['SHOTLIST_ALLOW'] ?? '')
+    .split(/[,\s]+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+}
+
 /** Open a complete immutable Run after authorizing its config-directed Library reads. */
 export function openRun(authorityValue: OperatorAuthority, configFile?: string): Run {
   const authority = operatorAuthority(authorityValue)
@@ -163,6 +219,12 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
   const config = loaded.config
   const { trust } = policyFrom(authority, loaded, environment)
 
+  const network = compileNetworkPolicy({
+    operator: [...(authority.destinations ?? []), ...destinationsFromEnvironment(environment)],
+    project: authority.untrusted ? [] : projectDestinations(config),
+    untrusted: authority.untrusted,
+    deny: trust.deny,
+  })
   const library = openLibrary(loaded, trust)
   const project = Object.freeze({
     config: deepFreeze(config),
@@ -178,7 +240,14 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
       }),
     ),
   )
-  const run = Object.freeze({ project, authority, trust, env })
+  const run = Object.freeze({
+    project,
+    authority,
+    trust,
+    operatorDestinations: network.operatorDestinations,
+    env,
+  })
   ENVIRONMENTS.set(run, environment)
+  NETWORK_POLICIES.set(run, network)
   return run
 }

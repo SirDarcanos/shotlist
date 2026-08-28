@@ -7,8 +7,7 @@ description.
 ## Project
 
 **Project**:
-A configuration and its library of recipes, macros, finders, and data documents, rooted at
-the configuration file.
+A configuration, including its Finders, and the Library rooted at that configuration file.
 _Avoid_: Workspace
 
 **Library**:
@@ -20,7 +19,8 @@ The declarative definition of one screenshot: its source, state, captured region
 annotations, output, and comparison policy.
 
 **Application recipe**:
-A recipe that drives a running site before capturing it.
+A Recipe that captures a running site and may use Steps to establish or clean up application
+state.
 _Avoid_: Browser recipe, live recipe
 
 **File recipe**:
@@ -30,8 +30,8 @@ _Avoid_: Static recipe, image recipe
 ## Recipe language
 
 **Step**:
-One operation in the ordered setup or teardown that brings an application to or from the
-state a recipe needs.
+One instruction in an ordered sequence that establishes, observes, or restores application
+state, or composes other Steps.
 _Avoid_: Action, command
 
 **Query**:
@@ -44,7 +44,7 @@ A project-defined query template that gives recurring application structure a lo
 _Avoid_: Alias, custom selector
 
 **Macro**:
-A named, parameterized sequence of steps reused by recipes or other macros.
+A named, parameterized sequence of Steps for reuse.
 _Avoid_: Function, script
 
 **Data document**:
@@ -78,20 +78,35 @@ A region retained in the finished image but blanked in both images during compar
 its content may vary while its position and size remain significant.
 _Avoid_: Mask
 
-## Outputs and state
+## Runs and outputs
+
+**Network destination**:
+A protocol, host, and port that a Run may contact. Each external request must use an approved
+Network destination.
+_Avoid_: Allowed host
 
 **Operator authority**:
-The declaration of whether the Project is trusted and which hosts, paths, and environment
-names the operator grants or denies. It comes from the caller rather than the Project.
+The caller-owned declaration of whether a Project is treated as untrusted, which additional
+Network destinations, filesystem roots, and environment names the operator grants, and which
+path names the operator forbids.
 _Avoid_: Config trust, permissions
 
 **Run**:
-One invocation of shotlist against a Project under explicit Operator authority. Every
-Recipe selected by the invocation belongs to the same Run.
+One invocation of shotlist under explicit Operator authority, with a fixed view of the
+Project and granted environment values. Every Recipe used by the invocation belongs to that
+view.
 _Avoid_: Executable Project, Recipe run
 
+**Capture**:
+The production of one Recipe's Output image within a Run, using its source, Clip, and
+Annotation.
+
+**Checking**:
+A new Capture of a Recipe and the evaluation of its Output image against its Committed image
+under the applicable comparison policy.
+
 **Output image**:
-The image written to the project's output directory by a capture.
+The image written to the Project's output directory by a Capture.
 _Avoid_: Installed image, committed image
 
 **Install destination**:

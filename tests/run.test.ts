@@ -2,8 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { openRun, runSteps } from '../src/index.js'
-import type { Run, RunContext } from '../src/index.js'
+import { openRun } from '../src/index.js'
+import { networkPolicyFor } from '../src/run.js'
+import type { Run } from '../src/index.js'
+import { runSteps } from '../src/steps.js'
+import type { RunContext } from '../src/steps.js'
 
 if (false) {
   // @ts-expect-error Operator authority is a required part of the Run interface.
@@ -122,11 +125,53 @@ describe('openRun', () => {
     )
     const file = join(root, 'shotlist.config.json')
 
-    expect(openRun({ untrusted: false }, file).trust.hosts).toContain('accounts.example.test')
-    expect(openRun({ untrusted: true }, file).trust.hosts).not.toContain('accounts.example.test')
+    expect(openRun({ untrusted: false }, file).operatorDestinations).toEqual([])
+    expect(openRun({ untrusted: true }, file).operatorDestinations).toEqual([])
     expect(
-      openRun({ untrusted: true, hosts: ['operator.example.test'] }, file).trust.hosts,
-    ).toContain('operator.example.test')
+      openRun({ untrusted: true, destinations: ['operator.example.test'] }, file)
+        .operatorDestinations,
+    ).toContainEqual({
+      protocol: 'https:',
+      host: 'operator.example.test',
+      port: 443,
+      subdomains: false,
+    })
+  })
+
+  it('uses trusted Project approvals and gives an untrusted Project none', () => {
+    const root = project(
+      config({
+        site: {
+          url: 'http://example.com:8080/app',
+          allow: ['assets.example.com', '*.static.example.com'],
+        },
+      }),
+    )
+    const file = join(root, 'shotlist.config.json')
+    const trusted = networkPolicyFor(openRun({ untrusted: false }, file))
+    const untrusted = networkPolicyFor(openRun({ untrusted: true }, file))
+
+    expect(() => trusted.forOperation('test').check('http://example.com:8080/next')).not.toThrow()
+    expect(() => trusted.forOperation('test').check('https://assets.example.com/')).not.toThrow()
+    expect(() => trusted.forOperation('test').check('https://a.static.example.com/')).not.toThrow()
+    expect(() => trusted.forOperation('test').check('https://static.example.com/')).toThrow()
+    expect(() => untrusted.forOperation('test').check('http://example.com:8080/')).toThrow()
+  })
+
+  it('merges protected SHOTLIST_ALLOW approvals into Operator authority', () => {
+    const previous = process.env['SHOTLIST_ALLOW']
+    process.env['SHOTLIST_ALLOW'] = 'ci.example.com, https://staging.example.com:8443'
+    try {
+      const root = project(config())
+      const run = openRun({ untrusted: true }, join(root, 'shotlist.config.json'))
+      expect(run.operatorDestinations).toEqual([
+        { protocol: 'https:', host: 'ci.example.com', port: 443, subdomains: false },
+        { protocol: 'https:', host: 'staging.example.com', port: 8443, subdomains: false },
+      ])
+    } finally {
+      if (previous === undefined) delete process.env['SHOTLIST_ALLOW']
+      else process.env['SHOTLIST_ALLOW'] = previous
+    }
   })
 
   it('publishes snapshots that stay stable for the Run lifetime', () => {
@@ -139,15 +184,17 @@ describe('openRun', () => {
         'screenshots/recipes/home.yaml': 'clip: viewport',
       })
       const file = join(root, 'shotlist.config.json')
-      const run = openRun({ untrusted: false, hosts: grantedHosts }, file)
+      const run = openRun({ untrusted: false, destinations: grantedHosts }, file)
 
       grantedHosts.push('later.example.test')
       process.env['SHOTLIST_RUN_VALUE'] = 'after'
       writeFileSync(file, JSON.stringify(config({ site: { url: 'https://changed.example' } })))
       writeFileSync(join(root, 'screenshots/data/settings.json'), '{"nested":{"value":2}}')
 
-      expect(run.authority.hosts).toEqual(['first.example.test'])
-      expect(run.trust.hosts).not.toContain('later.example.test')
+      expect(run.authority.destinations).toEqual(['first.example.test'])
+      expect(run.operatorDestinations).not.toContainEqual(
+        expect.objectContaining({ host: 'later.example.test' }),
+      )
       expect(run.env).toEqual({ SHOTLIST_RUN_VALUE: 'before' })
       expect(run.project.config.site.url).toBe('https://example.com')
       expect(run.project.library.data).toEqual({ settings: { nested: { value: 1 } } })

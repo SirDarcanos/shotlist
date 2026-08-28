@@ -13,6 +13,8 @@ recipe authors what to edit. See
 
 ### Added
 
+- **Network destination enforcement** for every browser request, redirect, WebSocket, and shotlist-owned HTTP or TCP readiness probe. Approvals match protocol, host, and port; `--allow` and protected `SHOTLIST_ALLOW` settings grant Operator destinations. Browser-contained `data:` and `blob:` content remains available, while blocked requests fail the Recipe before shotlist writes an Output image.
+
 - **Explicit Run opening** through `openRun(authority, configFile)`. shotlist authorizes
   each configured Library directory before it lists the directory and each document before
   it reads the document. The Run holds frozen authority, environment, config, and Library
@@ -47,6 +49,10 @@ recipe authors what to edit. See
 
 ### Changed
 
+- **Playwright 1.48 or newer is required for browser runs.** Network destination enforcement uses context-level WebSocket routing in addition to ordinary request routing.
+
+- **Operator authority names Network destinations rather than hosts.** TypeScript callers pass `destinations`; a bare value means HTTPS port 443, wildcard values cover proper subdomains only, and HTTP or unusual ports require a full destination. Untrusted Projects contribute no approvals, including for `site.url`. Application Recipes can no longer navigate to local files; use a File Recipe for a controlled local image.
+
 - **Effectful library calls require an authentic Run.** Callers open a Run with explicit
   Operator authority, then pass the Run and its Recipes to capture, checking, Session,
   server, step, and Baseline interfaces. shotlist rejects missing or forged Runs and copied
@@ -79,6 +85,8 @@ recipe authors what to edit. See
   causes no browser effect rather than leaving an unnamed page behind.
 
 ### Removed
+
+- **Low-level Step execution at the package root.** Use Capture, Checking, or Session operations through an authentic Run so browser contexts cannot bypass Network destination enforcement.
 
 - **Session implementation interfaces at the package root.** `sessionFor`, `sessionHosts`,
   and `narrowSession`, along with their internal data types, no longer expose paths or host

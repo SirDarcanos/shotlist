@@ -11,6 +11,7 @@ import type { Browser } from './playwright.js'
 import type { Recipe } from './recipe.js'
 import { assertRecipe, assertRun } from './run.js'
 import type { DeepReadonly, Run } from './run.js'
+import type { NetworkDestination } from './network-policy.js'
 import { withServer } from './serve.js'
 
 /** Optional behavior shared by capture and checking in one Run. */
@@ -28,6 +29,7 @@ export interface CheckRunOptions extends RunExecutionOptions {
 export interface CheckRunResult {
   results: readonly CheckResult[]
   drift: readonly Drift[]
+  operatorDestinations: readonly NetworkDestination[]
 }
 
 /** One Recipe that capture could not finish. */
@@ -48,6 +50,7 @@ export interface CaptureRunResult {
   shots: readonly ShotResult[]
   failures: readonly CaptureFailure[]
   baselineRecorded: boolean
+  operatorDestinations: readonly NetworkDestination[]
 }
 
 /** Add a cleanup failure without replacing the failure that interrupted the Run. */
@@ -94,6 +97,7 @@ export async function executeCheckRun(
     return {
       results: candidates.map((recipe) => skippedCheckResult(run, recipe)!),
       drift: [],
+      operatorDestinations: run.operatorDestinations,
     }
   }
 
@@ -109,7 +113,7 @@ export async function executeCheckRun(
           ? { diffDir: join(fromRoot(run.project, run.project.config.paths.out), 'diff') }
           : {}),
       })
-      return { results, drift }
+      return { results, drift, operatorDestinations: run.operatorDestinations }
     })
 
   return actionable.some((recipe) => recipe.source === 'app')
@@ -129,33 +133,37 @@ export async function executeCaptureRun(
   let environment: Environment | undefined
   /** Capture sequentially through one browser while Application Recipes can reach the site. */
   const work = () =>
-    withBrowser(async (browser): Promise<Omit<CaptureRunResult, 'baselineRecorded'>> => {
-      environment = describeEnvironment(browser)
-      const shots: ShotResult[] = []
-      const failures: CaptureFailure[] = []
-      for (const recipe of candidates) {
-        try {
-          const shot = await shoot(run, recipe, {
-            install: options.install,
-            browser,
-            onRetry: options.onRetry,
-          })
-          shots.push(shot)
-          options.onShot?.(shot)
-        } catch (error) {
-          if (!options.keepGoing) throw error
-          const failure = { name: recipe.name!, error }
-          failures.push(failure)
-          options.onFailure?.(failure)
+    withBrowser(
+      async (
+        browser,
+      ): Promise<Omit<CaptureRunResult, 'baselineRecorded' | 'operatorDestinations'>> => {
+        environment = describeEnvironment(browser)
+        const shots: ShotResult[] = []
+        const failures: CaptureFailure[] = []
+        for (const recipe of candidates) {
+          try {
+            const shot = await shoot(run, recipe, {
+              install: options.install,
+              browser,
+              onRetry: options.onRetry,
+            })
+            shots.push(shot)
+            options.onShot?.(shot)
+          } catch (error) {
+            if (!options.keepGoing) throw error
+            const failure = { name: recipe.name!, error }
+            failures.push(failure)
+            options.onFailure?.(failure)
+          }
         }
-      }
-      return { shots, failures }
-    })
+        return { shots, failures }
+      },
+    )
 
   const captured = candidates.some((recipe) => recipe.source === 'app')
     ? await withServer(run, work)
     : await work()
   const baselineRecorded = Boolean(options.install && !captured.failures.length)
   if (baselineRecorded) writeBaseline(run, environment!)
-  return { ...captured, baselineRecorded }
+  return { ...captured, baselineRecorded, operatorDestinations: run.operatorDestinations }
 }

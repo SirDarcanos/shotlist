@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { createConnection } from 'node:net'
 import { ShotlistError, fromRoot } from './config.js'
 import { ENV, interpolate } from './recipe.js'
-import { assertRun, environmentSnapshot } from './run.js'
+import { assertRun, environmentSnapshot, networkPolicyFor } from './run.js'
 import type { Run } from './run.js'
-import { authorizePath, checkCommand, checkUrl } from './trust.js'
+import { authorizePath, checkCommand } from './trust.js'
+import { accepts, answers } from './network-node.js'
+import type { NetworkAccess } from './network-policy.js'
 import type { Serve } from './config.js'
 
 /** A server shotlist started, and is therefore responsible for stopping. */
@@ -80,31 +81,6 @@ function refuseShellSyntax(bare: string, tokens: readonly string[]): void {
   }
 }
 
-/** Whether an HTTP server answers at all: a 404 still proves something is listening. */
-async function answers(url: string): Promise<boolean> {
-  try {
-    await fetch(url, { signal: AbortSignal.timeout(2000) })
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Whether anything accepts a TCP connection on a port. */
-function accepts(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ port, host: '127.0.0.1' })
-    const settle = (answer: boolean) => {
-      socket.destroy()
-      resolve(answer)
-    }
-    socket.setTimeout(2000)
-    socket.once('connect', () => settle(true))
-    socket.once('timeout', () => settle(false))
-    socket.once('error', () => settle(false))
-  })
-}
-
 /** Whether a URL is one `fetch` can probe. */
 function isHttp(url: string): boolean {
   return /^https?:\/\//.test(url)
@@ -112,10 +88,11 @@ function isHttp(url: string): boolean {
 
 /** The test that decides the server is up, from whatever `ready` was written as. */
 function readinessProbe(
+  access: NetworkAccess,
   ready: NonNullable<Serve['ready']> | string,
   output: readonly string[],
 ): () => Promise<boolean> {
-  if (typeof ready === 'number') return () => accepts(ready)
+  if (typeof ready === 'number') return () => accepts(access, '127.0.0.1', ready)
   if (typeof ready === 'string') {
     if (!isHttp(ready)) {
       throw new ShotlistError(
@@ -123,7 +100,7 @@ function readinessProbe(
           'give it a URL, a port number, or `{ log: <pattern> }`',
       )
     }
-    return () => answers(ready)
+    return () => answers(access, ready)
   }
   const pattern = new RegExp(ready.log)
   return () => Promise.resolve(pattern.test(output.join('\n')))
@@ -149,16 +126,13 @@ export async function startServer(run: Run): Promise<Server | null> {
   const loaded = run.project
   const { serve, url } = loaded.config.site
   if (!serve) return null
-  if (isHttp(url)) checkUrl(run.trust, url, 'site.url')
-  if (isHttp(url) && (await answers(url))) return null
   checkCommand(run.trust, 'site.serve')
+  const access = networkPolicyFor(run).forOperation('site.serve readiness')
+  if (isHttp(url) && (await answers(access, url))) return null
 
   const cwd = serve.cwd ? fromRoot(loaded, serve.cwd) : loaded.root
   const authorizedCwd = authorizePath(run.trust, cwd, 'site.serve.cwd')
   const ready = serve.ready ?? url
-  if (typeof ready === 'string' && isHttp(ready)) {
-    checkUrl(run.trust, ready, 'site.serve.ready')
-  }
   const configuredEnvironment = interpolate(serve.env, { [ENV]: run.env }) as Record<string, string>
 
   const { tokens, bare } = parseCommand(serve.command)
@@ -184,7 +158,7 @@ export async function startServer(run: Run): Promise<Server | null> {
 
   const server = manage(child, serve.command)
   try {
-    await waitUntilReady(child, serve, readinessProbe(ready, output), output)
+    await waitUntilReady(child, serve, readinessProbe(access, ready, output), output)
   } catch (error) {
     await server.stop()
     throw error
