@@ -160,7 +160,11 @@ export async function startServer(run: Run): Promise<Server | null> {
   try {
     await waitUntilReady(child, serve, readinessProbe(access, ready, output), output)
   } catch (error) {
-    await server.stop()
+    try {
+      await server.stop()
+    } catch (cleanup) {
+      throw withStopFailure(error, cleanup)
+    }
     throw error
   }
   return server

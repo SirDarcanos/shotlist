@@ -10,11 +10,16 @@ library callers.
 ## Project run
 
 The CLI loads the config and Library, then Run execution coordinates the selected Recipes.
-Capture starts the configured site only when at least one selected Recipe has `source: app`.
+TypeScript callers use `Run.capture` with either a non-empty ordered Recipe-name list or
+`all: true`; selection is complete before effects, and one Run refuses overlap until its
+request and resource cleanup settle. Capture starts the configured site only when at least
+one selected Recipe has `source: app`.
 Checking first removes Recipes that opt out or install nowhere, then starts the site only
 when an actionable Application Recipe remains. A Run of only skipped Recipes starts neither
 the site nor Chromium. Run execution launches one Chromium browser for the remaining
-capture or check work, closes it before returning, and keeps Recipes sequential.
+capture or check work, closes it before returning, and keeps Recipes sequential. Capture
+reports one ordered result for every selected Recipe and retains request-level startup and
+cleanup failures separately from Recipe results.
 
 `src/library.ts` owns policy-aware Library discovery, reading, parsing, and publication.
 Run opening asks it for one complete immutable Library; lint asks it for one review that

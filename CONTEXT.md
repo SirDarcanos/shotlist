@@ -93,8 +93,8 @@ _Avoid_: Config trust, permissions
 
 **Run**:
 One invocation of shotlist under explicit Operator authority, with a fixed view of the
-Project and granted environment values. Every Recipe used by the invocation belongs to that
-view.
+Project and granted environment values. A Run may produce more than one Capture or perform
+Checking more than once, and every Recipe it uses belongs to that view.
 _Avoid_: Executable Project, Recipe run
 
 **Work limit**:

@@ -72,6 +72,24 @@ function inRecipe(recipe: Recipe, path: string, cause: string): ShotlistError {
   return new ShotlistError(`recipe "${recipe.name}": ${path} — ${cause}`)
 }
 
+const CLEANUP_FAILURES = Symbol('Capture cleanup failures')
+
+/** Retain the primary failure's identity while attaching one Capture cleanup failure. */
+function withCaptureCleanupFailure(primary: unknown, cleanup: unknown): unknown {
+  const failure = primary instanceof Error ? primary : new ShotlistError(String(primary))
+  Object.defineProperty(failure, CLEANUP_FAILURES, {
+    value: Object.freeze([cleanup]),
+    enumerable: false,
+  })
+  return failure
+}
+
+/** Return teardown failures attached to a failed Capture attempt. */
+export function captureCleanupFailures(error: unknown): readonly unknown[] {
+  if (typeof error !== 'object' || error === null) return []
+  return (error as { [CLEANUP_FAILURES]?: readonly unknown[] })[CLEANUP_FAILURES] ?? []
+}
+
 /** Retain Work-limit identity while adding the Recipe location that exceeded it. */
 function inRecipeWork(recipe: Recipe, path: string, error: WorkLimitError): WorkLimitError {
   return new WorkLimitError(
@@ -536,10 +554,10 @@ export async function shoot(
     work: StepWork,
     teardownWork: () => StepWork,
   ): Promise<ShotResult> => {
-    let image: Buffer
-    let size: { width: number; height: number }
-    let marks: Mark[]
-    let masks: Rect[]
+    let image!: Buffer
+    let size!: { width: number; height: number }
+    let marks!: Mark[]
+    let masks!: Rect[]
     let ignore: Rect[] = []
 
     if (source) {
@@ -588,6 +606,8 @@ export async function shoot(
         reducedMotion: config.site.reducedMotion ? 'reduce' : 'no-preference',
         ...(storageState ? { storageState } : {}),
       })
+      let contextFailure: unknown
+      let contextCompleted = false
       try {
         const page = await context.newPage()
         const ctx: RunContext = {
@@ -606,6 +626,8 @@ export async function shoot(
         // is the more useful thing to report: an error about tidying up a page that never
         // loaded would bury the reason it never loaded.
         let tidying: unknown
+        let primary: unknown
+        let completed = false
         try {
           // The site not being up is the first thing a new project gets wrong, and
           // `net::ERR_CONNECTION_REFUSED` on its own does not say which key to look at.
@@ -742,6 +764,9 @@ export async function shoot(
           )
           size = { width: clip.width, height: clip.height }
           marks = marksFor(recipe, ctx.rects, clip)
+          completed = true
+        } catch (error) {
+          primary = error
         } finally {
           // Whichever way the shot went: closing the context throws away the browser,
           // and leaves everything `setup` asked the application itself to do.
@@ -752,8 +777,9 @@ export async function shoot(
               const steps = expandSteps(recipe.teardown, library.macros)
               await runSteps(run, steps, ctx, {}, cleanupWork)
             } catch (error) {
-              if (error instanceof NetworkPolicyError) throw error
-              if (error instanceof WorkLimitError) {
+              if (error instanceof NetworkPolicyError) {
+                tidying = error
+              } else if (error instanceof WorkLimitError) {
                 tidying = inRecipeWork(recipe, 'teardown', error)
               } else {
                 access.throwIfBlocked()
@@ -762,10 +788,22 @@ export async function shoot(
             }
           }
         }
+        if (!completed) {
+          if (tidying) throw withCaptureCleanupFailure(primary, tidying)
+          throw primary
+        }
         if (tidying) throw tidying
-      } finally {
-        await context.close()
+        contextCompleted = true
+      } catch (error) {
+        contextFailure = error
       }
+      try {
+        await context.close()
+      } catch (cleanup) {
+        if (!contextCompleted) throw withCaptureCleanupFailure(contextFailure, cleanup)
+        throw cleanup
+      }
+      if (!contextCompleted) throw contextFailure
     }
 
     // A mask is drawn in the same pass as the callouts, so a shot with nothing to point

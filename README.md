@@ -121,21 +121,26 @@ npx shotlist --help               # the full list, from the tool
 
 ## Library API
 
-Your caller grants Operator authority. Pass it to `openRun`, then select a Recipe from the
-Run's Library:
+Your caller grants Operator authority. Pass it to `openRun`, then Capture named Recipes or
+all Recipes through the Run:
 
 ```ts
-import { openRun, shoot } from 'shotlist'
+import { openRun } from 'shotlist'
 
 const run = openRun({ untrusted: false }, 'shotlist.config.yaml')
-const recipe = run.project.library.recipes.get('order-row')!
-await shoot(run, recipe, { install: true })
+const report = await run.capture({
+  recipes: ['order-row', 'account-menu'],
+})
 ```
 
-Pass the Run to capture, checking, Session, server, step, and Baseline functions. shotlist
-rejects a hand-built Run or a copied Recipe before it touches the browser, filesystem,
-network, or a process. The caller grants Operator authority, including any numerical Work
-limit changes; the Project config does not.
+Named Recipes keep caller order; `{ all: true }` uses recipe-name order. The immutable
+report gives every selected Recipe a `captured`, `failed`, or `not-attempted` result.
+`keepGoing: true` attempts later Recipes after a failure. The Run remains reusable after a
+request settles and rejects overlapping requests.
+
+shotlist rejects a hand-built Run before it touches the browser, filesystem, network, or a
+process. The caller grants Operator authority, including any numerical Work limit changes;
+the Project config does not.
 
 Pass authority to lint because a malformed Project cannot open a complete Run:
 `lint({ untrusted: false }, 'shotlist.config.yaml')`. Use `parseConfig`, `parseRecipe`,

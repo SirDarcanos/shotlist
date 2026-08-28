@@ -1,4 +1,6 @@
 import { ShotlistError, loadConfig } from './config.js'
+import { captureRun } from './execute.js'
+import type { CaptureReport, CaptureRequest } from './execute.js'
 import type { Config, LoadedConfig } from './config.js'
 import { openLibrary } from './library.js'
 import type { DeepReadonly, ProjectLibrary } from './library.js'
@@ -45,6 +47,8 @@ export interface Run {
   readonly operatorDestinations: readonly NetworkDestination[]
   /** Allowed environment values captured while the Run opened. */
   readonly env: Readonly<Record<string, string>>
+  /** Capture one ordered Recipe selection through Run-owned resources. */
+  capture(request: CaptureRequest): Promise<CaptureReport>
 }
 
 /** Policy state shared by Run opening and incomplete Project discovery. */
@@ -258,12 +262,14 @@ export function openRun(authorityValue: OperatorAuthority, configFile?: string):
       }),
     ),
   )
-  const run = Object.freeze({
+  let run!: Run
+  run = Object.freeze({
     project,
     authority,
     trust,
     operatorDestinations: network.operatorDestinations,
     env,
+    capture: (request: CaptureRequest) => captureRun(run, request),
   })
   ENVIRONMENTS.set(run, environment)
   NETWORK_POLICIES.set(run, network)

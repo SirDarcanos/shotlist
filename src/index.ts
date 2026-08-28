@@ -52,6 +52,16 @@ export {
 export type { Drift, Environment } from './baseline.js'
 export { openRun } from './run.js'
 export type { DeepReadonly, OperatorAuthority, Project, ProjectLibrary, Run } from './run.js'
+export type {
+  CaptureRecipeResult,
+  CaptureReport,
+  CaptureRequest,
+  CaptureResourceFailure,
+  CaptureSelection,
+  CapturedRecipeResult,
+  FailedCaptureResult,
+  UnattemptedCaptureResult,
+} from './execute.js'
 export { readSession, signIn } from './session.js'
 export type { SignInOptions } from './session.js'
 export { startServer, tokenize, withServer } from './serve.js'

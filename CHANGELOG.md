@@ -13,6 +13,14 @@ recipe authors what to edit. See
 
 ### Added
 
+- **Run-level Capture requests** through `run.capture({ recipes: [...] })` or
+  `run.capture({ all: true })`. shotlist validates complete selections before effects,
+  preserves explicit or deterministic name order, processes Recipes sequentially through
+  one site and browser lifetime, and returns an immutable report for every selection.
+  Reports retain completed Output images, Recipe failures, unattempted Recipes, and
+  resource failures; `keepGoing` continues after Recipe failures. A settled Run remains
+  reusable and refuses overlapping Capture requests.
+
 - **Network destination enforcement** for every browser request, redirect, WebSocket, and shotlist-owned HTTP or TCP readiness probe. Approvals match protocol, host, and port; `--allow` and protected `SHOTLIST_ALLOW` settings grant Operator destinations. Browser-contained `data:` and `blob:` content remains available, while blocked requests fail the Recipe before shotlist writes an Output image.
 
 - **Run-owned Work limits** for Library document bytes, authored Step count and nesting,
