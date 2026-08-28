@@ -83,6 +83,11 @@ recipe authors what to edit. See
 
 ### Changed
 
+- **The CLI now consumes Run execution reports.** Capture and Checking commands translate
+  selection and flags into Run requests, render ordered progress and complete report
+  outcomes, and derive human and JSON output plus exit codes from the same reports used by
+  TypeScript callers.
+
 - **Playwright 1.48 or newer is required for browser runs.** Network destination enforcement uses context-level WebSocket routing in addition to ordinary request routing.
 
 - **Operator authority names Network destinations rather than hosts.** TypeScript callers pass `destinations`; a bare value means HTTPS port 443, wildcard values cover proper subdomains only, and HTTP or unusual ports require a full destination. Untrusted Projects contribute no approvals, including for `site.url`. Application Recipes can no longer navigate to local files; use a File Recipe for a controlled local image.

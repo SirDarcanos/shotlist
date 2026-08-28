@@ -37,10 +37,14 @@ describe('shotlist', () => {
     expect(out.split('\n')).toEqual(['annotated', 'modal', 'order-row', 'volatile'])
   })
 
-  it('names the recipes a project has when one is misspelled', async () => {
-    const { code, err } = await cli(project(), ['order-rows'])
-    expect(code).toBe(1)
-    expect(err).toMatch(/unknown recipe "order-rows".*annotated, modal, order-row, volatile/s)
+  it('passes named selection validation to the Run', async () => {
+    const unknown = await cli(project(), ['order-rows'])
+    expect(unknown.code).toBe(1)
+    expect(unknown.err).toBe('Invalid Capture request — unknown Recipe names: order-rows')
+
+    const duplicate = await cli(project(), ['modal', 'modal'])
+    expect(duplicate.code).toBe(1)
+    expect(duplicate.err).toBe('Invalid Capture request — duplicate Recipe names: modal')
   })
 
   it('shoots a named recipe and installs it', { timeout: 120_000 }, async () => {
@@ -400,13 +404,34 @@ describe('--check --json', () => {
     expect(code).toBe(0)
     // stdout has to be a usable file on its own: `--check --json > report.json`.
     const report = JSON.parse(out)
-    expect(report).toMatchObject({ changed: 0, total: 1 })
+    expect(report).toMatchObject({
+      changed: 0,
+      total: 1,
+      failures: [],
+      drift: [],
+      operatorDestinations: [],
+    })
     expect(report.results[0]).toMatchObject({ name: 'order-row', status: 'same' })
     expect(typeof report.results[0].ratio).toBe('number')
 
     // The human report moved aside rather than being dropped.
     expect(err).toContain('same     order-row')
     expect(out).not.toContain('same     order-row')
+  }, 120_000)
+
+  it('keeps retry progress off stdout when it is redirected as JSON', async () => {
+    const root = project()
+    writeFileSync(
+      join(root, 'recipes/retrying.yaml'),
+      'name: retrying\ninstall: guide\nretries: 1\nmarks:\n  nowhere: { css: .no-such-element }\n',
+    )
+
+    const { code, out, err } = await cli(root, ['--check', 'retrying', '--keep-going', '--json'])
+
+    expect(code).toBe(1)
+    expect(JSON.parse(out).results[0]).toMatchObject({ name: 'retrying', status: 'failed' })
+    expect(err).toContain('↻ retrying — attempt 1 of 2 failed')
+    expect(out).not.toContain('↻')
   }, 120_000)
 
   it('carries the drift and the diff a run found', async () => {
@@ -432,6 +457,13 @@ describe('--check --json', () => {
     const { code, err } = await cli(project(), ['order-row', '--json'])
     expect(code).toBe(1)
     expect(err).toContain('--json reports a --check run')
+  })
+
+  it('refuses another command mode instead of writing non-JSON stdout', async () => {
+    const { code, out, err } = await cli(project(), ['--check', '--json', '--lint'])
+    expect(code).toBe(1)
+    expect(out).toBe('')
+    expect(err).toBe('--json cannot report --init, --lint, or --login')
   })
 })
 
