@@ -11,150 +11,89 @@ recipe authors what to edit. See
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-28
+
 ### Added
 
-- **Deferred Installation for Run-level Capture.** `run.capture({ install: true })` writes
-  every selected Output image and completes required cleanup before replacing any Committed
-  image. Replacements use complete temporary siblings, stop after the first failure, and
-  report installed, withheld, failed, and unattempted destinations without implying
-  rollback. The Baseline is recorded only after every requested replacement succeeds.
-
 - **Request cancellation and ordered progress** for Run-level Capture and Checking.
-  TypeScript callers pass an `AbortSignal` to stop active browser work while retaining
-  teardown and resource-cleanup outcomes, or an awaited `onProgress` observer for request,
-  Recipe, and retry events. A broken observer becomes one report warning rather than
-  changing execution results.
+  TypeScript callers may pass an `AbortSignal` or an awaited `onProgress` observer for
+  request, Recipe, and retry events. Reports retain teardown and resource-cleanup outcomes
+  after cancellation. A broken observer adds one warning without changing execution
+  results.
 
-- **Run-level Checking requests** through `run.check({ recipes: [...] })` or
-  `run.check({ all: true })`. Checking shares Capture's validation, ordering, resource
-  ownership, overlap, complete-report, and Run-reuse guarantees. Reports retain `same`,
-  `changed`, `new`, and `skipped` findings, Recipe and request failures, unattempted
-  Recipes, environment drift, Ignore-region counts, and optional diff-image paths.
+- **Network destination enforcement** for browser requests, redirects, WebSockets, and
+  shotlist-owned HTTP or TCP readiness probes. Approvals match protocol, host, and port.
+  Operators grant destinations through `--allow`, protected `SHOTLIST_ALLOW`, or
+  `OperatorAuthority.destinations`. A blocked request fails the Recipe before shotlist
+  writes an Output image.
 
-- **Run-level Capture requests** through `run.capture({ recipes: [...] })` or
-  `run.capture({ all: true })`. shotlist validates complete selections before effects,
-  preserves explicit or deterministic name order, processes Recipes sequentially through
-  one site and browser lifetime, and returns an immutable report for every selection.
-  Reports retain completed Output images, Recipe failures, unattempted Recipes, and
-  resource failures; `keepGoing` continues after Recipe failures. A settled Run remains
-  reusable and refuses overlapping Capture requests.
+- **Operator-owned Work limits** for Library document bytes, Authored Step structure, Macro
+  expansion, Predictable Work, Executed Steps, `each` list length, matching patterns, and
+  elapsed Recipe work. Lint rejects excess and warns at 80%. Operators may change numerical
+  limits through `--work-limit`, protected `SHOTLIST_WORK_LIMITS`, or
+  `OperatorAuthority.workLimits`; Project configuration cannot.
 
-- **Network destination enforcement** for every browser request, redirect, WebSocket, and shotlist-owned HTTP or TCP readiness probe. Approvals match protocol, host, and port; `--allow` and protected `SHOTLIST_ALLOW` settings grant Operator destinations. Browser-contained `data:` and `blob:` content remains available, while blocked requests fail the Recipe before shotlist writes an Output image.
-
-- **Run-owned Work limits** for Library document bytes, Authored Step count and nesting,
-  Macro depth and expansion, Predictable Work and Executed Step counts, `each` list length,
-  matching-pattern safety, and elapsed Recipe work. Lint rejects Predictable Work excess and
-  warns at 80%. Operators may change numerical values through `--work-limit`, protected
-  `SHOTLIST_WORK_LIMITS`, or `OperatorAuthority.workLimits`; Project configuration cannot.
-  A Work-limit failure does not retry, and teardown retains 1,000 Steps and one cleanup
-  minute. Query timeouts close the attempt context so in-page work stops.
-
-- **Explicit Run opening** through `openRun(authority, configFile)`. shotlist authorizes
-  each configured Library directory before it lists the directory and each document before
-  it reads the document. The Run holds frozen authority, environment, config, and Library
-  snapshots.
-
-- **Run-based browser and server interfaces.** Pass the Run to browser steps and managed
-  site startup. shotlist checks interpolated navigation URLs, server commands, working
-  directories, and readiness URLs against the Run. Both interfaces read interpolated
-  environment values from the Run snapshot.
-
-- **Run-owned Session access** for login and authenticated capture. shotlist checks the
-  canonical path for each Session read or write against the Run. Scripted login uses the
-  environment snapshot that `openRun` captured.
-
-- **Run-based capture** for Application and File Recipes. shotlist checks navigation URLs,
-  source images, output and install destinations, and local font files against the Run.
-  Each retry uses the same Run with a fresh browser context.
-
-- **Run-policy linting** under explicit Operator authority. Lint reports malformed or
-  unauthorized Library documents without stopping at the first one. shotlist checks each
-  configured directory before listing it and each document before reading it. The operator
-  can select `--untrusted`; lint otherwise uses the trusted default.
-
-- **Run-based checking and Baseline access.** Checking compares Output images with
-  Committed images, checks canonical image and diff paths, and re-shoots each Recipe through
-  the same Run. Baseline reads and writes follow the Run's path policy.
-
-- **Repository-local agent context**, with a canonical glossary and branch-specific guides
-  for language, runtime, imaging, security, tests, tracker use, and writing. Agents start at
-  `AGENTS.md` and load the guide for their task instead of reconstructing project rules from
-  imports.
+- **Repository-local agent context**, with a canonical glossary and guides for language,
+  runtime, imaging, security, testing, issue tracking, and writing. Agents start at
+  `AGENTS.md` and load the guide for their task.
 
 ### Changed
 
-- **Step declarations now own Predictable Work composition.** Authored Step traversal and
-  preflight projection derive recursive fields, waits, blocks, iteration, and Macro
-  semantics from the same private declarations as validation and execution. Recipe, CLI,
-  and package-root interfaces do not change.
+- **The Run is the package seam for Capture and Checking.** Open one with
+  `openRun(authority, configFile)`, then call `run.capture({ recipes: names })` or
+  `run.check({ recipes: names })`. shotlist validates the complete selection before
+  effects, processes one Recipe at a time through one site and browser lifetime, and
+  returns an immutable report covering results, failures, skipped or unattempted Recipes,
+  and cleanup. A settled Run remains reusable and refuses overlapping requests.
 
-- **TypeScript Capture and Checking now use Run requests and reports.** Replace direct
-  `shoot` and `check` calls with `run.capture({ recipes: names })` and
-  `run.check({ recipes: names })`. The Run owns browser startup and cleanup; callers handle
-  complete reports rather than direct one-Recipe results. Recipe and config files plus CLI
-  commands and flags do not change.
+- **Run-level Capture defers Installation until browser and site cleanup finishes.** If any
+  selected Capture or required cleanup fails, shotlist withholds every requested
+  Installation. Successful replacements use complete temporary siblings and stop after the
+  first replacement failure. shotlist records the Baseline after every destination is
+  installed.
 
-- **The CLI now consumes Run execution reports.** Capture and Checking commands translate
-  selection and flags into Run requests, render ordered progress and complete report
-  outcomes, and derive human and JSON output plus exit codes from the same reports used by
-  TypeScript callers.
+- **The CLI consumes the same Run reports as TypeScript callers.** Capture and Checking
+  commands render ordered progress, human or JSON results, and exit codes from complete
+  request reports.
 
-- **Playwright 1.48 or newer is required for browser runs.** Network destination enforcement uses context-level WebSocket routing in addition to ordinary request routing.
+- **Library discovery uses one policy-aware module.** Run opening requests one complete
+  immutable Library. Lint accepts Operator authority and returns every reachable problem
+  with the document count. The module owns directory traversal, entry authorization,
+  authored-path diagnostics, parsing, and failure order; in-memory parsers remain
+  authority-free.
 
-- **Operator authority names Network destinations rather than hosts.** TypeScript callers pass `destinations`; a bare value means HTTPS port 443, wildcard values cover proper subdomains only, and HTTP or unusual ports require a full destination. Untrusted Projects contribute no approvals, including for `site.url`. Application Recipes can no longer navigate to local files; use a File Recipe for a controlled local image.
+- **Step declarations own the built-in vocabulary from authored shape through execution and
+  Predictable Work.** Recipe and Macro schemas, `VERBS`, typo suggestions, recursive
+  traversal, Macro expansion, Run dispatch, and preflight composition derive from the same
+  private declarations.
 
-- **Effectful library calls require an authentic Run.** Callers open a Run with explicit
-  Operator authority, then use its name-based Capture and Checking methods or pass it to
-  Session, server, and Baseline interfaces. shotlist rejects missing or forged Runs before
-  an effect. Pass Operator authority to lint because malformed Projects cannot open a
-  complete Run. Parse Config, Recipe, Macro, Library-document, and Query values in memory
-  without Operator authority.
+- **Session reads take a configured name.** Call `readSession(run, name)`; the Session module
+  owns path resolution, host narrowing, and capture verification.
 
-- **Session reads take a configured name.** Call `readSession(run, name)` rather than
-  resolving and passing a Session object. The Session module owns path resolution, host
-  narrowing, and capture verification details.
+- **Operator authority names Network destinations rather than hosts.** A bare value means
+  HTTPS port 443, `*.example.com` covers proper HTTPS subdomains, and HTTP or unusual ports
+  require a full destination. Untrusted Projects contribute no approvals, including for
+  `site.url`. Application Recipes cannot navigate to local files; use a File Recipe.
 
-- **Library discovery uses one deep policy-aware module.** Run opening asks for a complete
-  immutable Library, while linting asks for one review containing both problems and the
-  document count. Directory traversal, entry authorization, authored-path diagnostics,
-  parsing, and failure order remain inside the Library module.
-
-- **Run execution owns shared site and browser lifetimes.** The CLI retains argument parsing
-  and human or JSON rendering. Checking starts neither the configured site nor Chromium
-  when every selected Recipe opts out or installs nowhere, and a skipped Application Recipe
-  does not start the site when the remaining work contains only File Recipes.
-
-- **One Step declaration owns authored and runtime behavior.** The built-in vocabulary now
-  derives Recipe and Macro schemas, `VERBS`, typo suggestions, nested traversal, Macro
-  expansion, and Run dispatch from the same declarations. Existing Recipes, diagnostics,
-  and package interfaces remain unchanged.
+- **Playwright 1.48 or newer is required for browser runs** because Network destination
+  enforcement uses context-level WebSocket routing.
 
 ### Fixed
 
-- **Unresolved `each` Steps retain their nested structure during Predictable Work preflight.**
-  shotlist now counts nested Expanded Steps and Macro depth before site or browser startup
+- **Unresolved `each` Steps retain nested structure during Predictable Work preflight.**
+  shotlist counts nested Expanded Steps and Macro depth before site or browser startup
   without predicting nested executions or deliberate waits from an unknown list length.
 
-- **`openPage` authorizes its interpolated URL before opening a page.** A refused URL now
-  causes no browser effect rather than leaving an unnamed page behind.
+- **`openPage` authorizes its interpolated URL before opening a page.** shotlist refuses a
+  blocked URL before it creates the page.
 
 ### Removed
 
-- **Direct one-Recipe Capture and Checking package interfaces.** The package root no longer
-  exports `shoot`, `check`, `ShootOptions`, `CheckOptions`, `ShotResult`, `CheckResult`, or
-  `Retry`. Use `run.capture(request)` and `run.check(request)`; these methods select Recipe
-  names and do not accept caller-owned browsers.
-
-- **Low-level Step execution at the package root.** Use Capture, Checking, or Session operations through an authentic Run so browser contexts cannot bypass Network destination enforcement.
-
-- **Session implementation interfaces at the package root.** `sessionFor`, `sessionHosts`,
-  and `narrowSession`, along with their internal data types, no longer expose paths or host
-  derivation to callers. Use `readSession` to read and `signIn` to write a named Session.
-
-- **Config-plus-Library compatibility interfaces and mutable config trust.** shotlist
-  removed optional trust from `LoadedConfig`. The package root no longer exports
-  unrestricted config or Library loaders, raw trust checks, or the CLI runner. Use
-  `openRun` for Project effects and the parse functions for values already in memory.
+- **Package interfaces that bypassed the Run.** The package root stopped exporting direct
+  one-Recipe `shoot` and `check` calls, low-level Step execution, unrestricted config or
+  Library loaders, mutable config trust, Session path and host helpers, raw trust checks, or
+  the CLI runner. Use Run requests for Capture and Checking, `readSession` and `signIn` for
+  named Sessions, and in-memory parse functions for values a caller has already read.
 
 ## [0.5.0] — 2026-08-24
 
